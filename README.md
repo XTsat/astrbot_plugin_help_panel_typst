@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.0.1-orange?style=flat-square)]()
 
-** 让闲置的状态显示发挥它应有的作用 **
+** 以优雅的方式组织你的插件菜单 **
 <br>
 *轻量  丰富  更多🗃*
 
