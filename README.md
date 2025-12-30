@@ -1,4 +1,4 @@
-# 🟢 Astrbot Plugin Help Typst | 插件菜单(typst实现)
+# 📂︎ Astrbot Plugin Help Typst | 插件菜单(typst实现)
 
 <div align="center">
 
