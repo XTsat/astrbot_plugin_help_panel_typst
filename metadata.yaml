@@ -1,6 +1,6 @@
-name: helloworld # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
-display_name: helloworld # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
-desc: AstrBot 插件示例。 # 插件简短描述
-version: v1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Soulter # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+name: astrbot_plugin_help_typst
+display_name: 插件菜单(指令+事件+过滤器)
+desc: 基于typst实现的插件菜单渲染，支持可视化交互编辑
+version: v0.0.1
+author: bylkuse
+repo: https://github.com/bylkuse/astrbot_plugin_help_typst
