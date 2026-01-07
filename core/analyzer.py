@@ -1,5 +1,4 @@
 import json
-import time
 import math
 from pathlib import Path
 from collections import defaultdict
@@ -17,24 +16,12 @@ from astrbot.core.star.filter.event_message_type import EventMessageTypeFilter, 
 from astrbot.core.agent.mcp_client import MCPTool
 
 from ..domain import PluginMetadata, RenderNode
+from ..utils import TypstPluginConfig
 
 class BaseAnalyzer:
-    """分析器基类：处理通用的数据排版、分流与 JSON 生成"""
-    IGNORED_PLUGINS = {
-        "astrbot", 
-        "astrbot-web-searcher", 
-        "astrbot-python-interpreter",
-        "session_controller",
-        "builtin_commands",
-        "astrbot-reminder", 
-        "astrbot_plugin_help_typst"
-    }
-
-    # event巨型块阈值 (单位: pt)
-    GIANT_THRESHOLD = 1500 # 已知悉魔术数字问题，日后会把此类提取到专门的 constants.py
-
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: TypstPluginConfig):
         self.context = context
+        self.cfg = config
 
     def generate_render_data(self, save_path: Path, title: str = "AstrBot 功能菜单", mode: str = "command", query: str = None) -> int:
         """
@@ -169,7 +156,7 @@ class BaseAnalyzer:
 
             # --- C: 巨型块判定 (仅 Event、Filter 模式) ---
             h_val = estimate_height(nodes)
-            if mode in ("event", "filter") and h_val > self.GIANT_THRESHOLD:
+            if mode in ("event", "filter") and h_val > self.cfg.rendering.giant_threshold:
                 giants.append(p.model_dump())
                 continue
 
@@ -194,7 +181,6 @@ class BaseAnalyzer:
         # 5. 生成 JSON
         final_render_data = {
             "title": title,
-            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "plugin_count": len(structured_plugins),
             "giants": giants,
             "columns": cols_data, 
@@ -225,7 +211,7 @@ class CommandAnalyzer(BaseAnalyzer):
         for star_meta in all_stars:
             if not star_meta.activated: continue
             plugin_name = getattr(star_meta, "name", "unknown")
-            if plugin_name in self.IGNORED_PLUGINS: continue
+            if plugin_name in self.cfg.filtering.ignored_plugins: continue
             module_path = getattr(star_meta, "module_path", None)
             if not module_path: continue
 
@@ -407,7 +393,7 @@ class EventAnalyzer(BaseAnalyzer):
                     # >>> 来源: 插件 <<<
                     plugin = module_to_plugin.get(tool.handler_module_path)
                     if plugin:
-                        if plugin.name in self.IGNORED_PLUGINS: continue
+                        if plugin.name in self.cfg.filtering.ignored_plugins: continue
                         source_name = plugin.name
                         source_display = getattr(plugin, "display_name", None)
                         source_version = getattr(plugin, "version", "") 
@@ -444,7 +430,7 @@ class EventAnalyzer(BaseAnalyzer):
 
             if handler.handler_module_path in module_to_plugin:
                 plugin = module_to_plugin[handler.handler_module_path]
-                if plugin.name in self.IGNORED_PLUGINS: continue
+                if plugin.name in self.cfg.filtering.ignored_plugins: continue
                 if not plugin.activated: continue
             else:
                 continue
@@ -525,7 +511,7 @@ class FilterAnalyzer(BaseAnalyzer):
 
             if handler.handler_module_path in module_to_plugin:
                 plugin = module_to_plugin[handler.handler_module_path]
-                if plugin.name in self.IGNORED_PLUGINS: continue
+                if plugin.name in self.cfg.filtering.ignored_plugins: continue
                 if not plugin.activated: continue
             else:
                 continue

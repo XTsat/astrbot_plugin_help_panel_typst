@@ -3,8 +3,8 @@
 #set text(font: ("Maple Mono NF"), size: 12pt)
 
 #let data = json.decode(sys.inputs.json_string)
-
 #let query_regex_str = sys.inputs.at("query_regex", default: none)
+#let generated_time = sys.inputs.at("timestamp", default: "Unknown Time")
 
 // --- 🎨 调色板 ---
 #let c_text_primary = rgb("#1a1a1a")
@@ -497,7 +497,7 @@
     #text(size: 36pt, weight: "black", fill: c_text_primary)[#data.title] \
     #v(10pt)
     #text(size: 11pt, fill: c_text_tertiary)[
-      已加载 #data.plugin_count 个插件/监听组  ·  #data.generated_at
+      已加载 #data.plugin_count 个插件/监听组  ·  #generated_time
     ]
   ]
 ]

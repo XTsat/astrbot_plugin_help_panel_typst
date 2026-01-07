@@ -1,0 +1,46 @@
+{
+  "rendering": {
+    "description": "渲染引擎设置",
+    "type": "object",
+    "items": {
+      "timeout_analysis": {
+        "description": "数据分析超时 (秒)",
+        "type": "float",
+        "default": 10.0,
+        "hint": "生成数据结构的超时时间，插件多时可适当调大"
+      },
+      "timeout_compile": {
+        "description": "Typst 编译超时 (秒)",
+        "type": "float",
+        "default": 30.0,
+        "hint": "调用 Typst 编译图片的超时时间"
+      },
+      "giant_threshold": {
+        "description": "巨型块阈值 (pt)",
+        "type": "int",
+        "default": 1500,
+        "hint": "超过此高度的插件将独占一行显示 (仅 Event/Filter 模式有效)"
+      }
+    }
+  },
+  "filtering": {
+    "description": "内容过滤设置",
+    "type": "object",
+    "items": {
+      "ignored_plugins": {
+        "description": "黑名单插件 ID",
+        "type": "list",
+        "default": [
+          "astrbot", 
+          "astrbot-web-searcher", 
+          "astrbot-python-interpreter",
+          "session_controller",
+          "builtin_commands",
+          "astrbot-reminder", 
+          "astrbot_plugin_help_typst"
+        ],
+        "hint": "这些插件将不会出现在生成的菜单中"
+      }
+    }
+  }
+}
