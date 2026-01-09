@@ -19,29 +19,27 @@ class AsyncNullContext: # 异步空上下文
 class HelpTypst(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        
-        # 1. 配置加载
-        # 将原始字典配置转换为强类型的 Dataclass 配置对象
+
+        # 1. 配置 (字典 → 强类型的 Dataclass)
         self.plugin_config = TypstPluginConfig.load(config)
 
-        # 2. 基础路径初始化
+        # 2. 路径
         self.plugin_dir = Path(__file__).parent
         self.data_dir = StarTools.get_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        
+
         template_path = self.plugin_dir / "templates" / InternalCFG.TEMPLATE_NAME
         font_dir = self.plugin_dir / "resources" / InternalCFG.FONT_DIR_NAME
 
-        # 3. 初始化渲染引擎 (Renderer)
-        # 将路径资源和渲染相关的配置 (RenderingConfig) 注入
+        # 3. 渲染引擎配置注入
         self.renderer = TypstRenderer(
             data_dir=self.data_dir,
             template_path=template_path,
             font_dir=font_dir,
             config=self.plugin_config.rendering
         )
-        
-        # 4. 初始化分析器 (Analyzer)
+
+        # 4. 分析器
         self.cmd_analyzer = CommandAnalyzer(context, self.plugin_config)
         self.evt_analyzer = EventAnalyzer(context, self.plugin_config)
         self.flt_analyzer = FilterAnalyzer(context, self.plugin_config)
@@ -57,7 +55,6 @@ class HelpTypst(Star):
         def data_provider(save_path: Path) -> int:
             return analyzer.generate_render_data(save_path, title=title, mode=mode, query=query)
 
-        # 调用渲染引擎
         result, error = await self.renderer.render(data_provider, mode, query)
 
         # 处理结果
@@ -67,10 +64,8 @@ class HelpTypst(Star):
                 comps = [Comp.Image.fromFileSystem(p) for p in result.images]
                 yield event.chain_result(comps)
             finally:
-                # 只有临时文件需要在此处清理
-                # Renderer 返回的 result.temp_files 包含了需要清理的文件列表
+                # 后台任务清理文件列表
                 if result.temp_files:
-                    # 启动后台任务清理，不阻塞发送
                     asyncio.create_task(self._cleanup_task(result.temp_files))
         else:
             # 错误处理

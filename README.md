@@ -5,7 +5,7 @@
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-purple?style=flat-square)](https://github.com/Soulter/AstrBot)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.0.2-orange?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-0.0.3-orange?style=flat-square)]()
 
 ** 以优雅的方式组织你的插件菜单 **
 <br>
@@ -27,8 +27,8 @@
 * 配置-自定义项目
 * 配置-背景
 * 配置-模板
-* ~~功能-黑白名单~~
-* 指令-黑白名单管理
+* ~~功能-黑名单~~
+* 指令-黑名单管理
 * 正式的说明文档
 
 ## 🖼️ 功能预览

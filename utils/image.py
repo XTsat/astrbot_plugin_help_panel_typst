@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import List
 from PIL import Image
 
-from ..domain import DefaultCFG
-
 def verify_image_header(path: Path) -> bool:
     """简单的图片完整性校验"""
     try:

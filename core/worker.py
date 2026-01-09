@@ -35,7 +35,7 @@ class RenderTask:
     req_id: str
     webp_limit: int = 16383
     split_height: int = 16000
-    ppi: float = 144.0
+    ppi: float = 144.0 # 留待迁移进constants.py
 
 def execute_render_task(task: RenderTask) -> List[str]:
     """渲染子进程"""
