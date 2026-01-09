@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Set
 
 from astrbot.api import AstrBotConfig, logger
+
 from ..domain import DefaultCFG
 
 @dataclass

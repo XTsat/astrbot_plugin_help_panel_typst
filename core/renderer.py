@@ -11,7 +11,7 @@ from ..domain import InternalCFG
 from ..utils import calculate_hash, verify_image_header, RenderingConfig
 from . import execute_render_task, RenderTask
 
-class AsyncNullContext:
+class AsyncNullContext: # 异步空上下文
     async def __aenter__(self): return None
     async def __aexit__(self, exc_type, exc_value, traceback): return None
 
@@ -46,26 +46,26 @@ class TypstRenderer:
         json_path, img_path, hash_path = paths["json"], paths["img"], paths["hash"]
         is_temp, req_id = paths["is_temp"], paths["req_id"]
 
-        # 待清理的中间文件 (JSON 和 原始 PNG)
-        files_to_clean = []
-        if is_temp: files_to_clean.extend([json_path, img_path])
-
         # 2. 获取锁 (仅静态模式需要)
         lock = self._cache_locks.get(mode) if not is_temp else None
 
         try:
             async with (lock or AsyncNullContext()):
-                # --- Step A: 数据生成 ---
+                # --- 1. 数据生成 ---
                 try:
                     count = await asyncio.wait_for(
                         asyncio.to_thread(data_provider, json_path),
                         timeout=self.cfg.timeout_analysis
                     )
                 except asyncio.TimeoutError:
+                    if is_temp and json_path.exists(): json_path.unlink(missing_ok=True)
                     return None, "数据分析超时，请检查插件列表是否过长"
-                if count == 0: return None, "empty" # 特殊标记，由上层处理文案
 
-                # --- Step B: 缓存校验 (仅静态) ---
+                if count == 0:
+                    if is_temp and json_path.exists(): json_path.unlink(missing_ok=True) 
+                    return None, "empty"
+
+                # --- 2. 缓存校验 (仅静态) ---
                 need_compile = True
                 if not is_temp and json_path.exists():
                     need_compile = await self._check_cache(json_path, hash_path, img_path)
@@ -78,7 +78,7 @@ class TypstRenderer:
                     else:
                         need_compile = True
 
-                # --- Step C: Typst 编译 (进程池) ---
+                # --- 3. Typst 编译 (进程池) ---
                 if need_compile:
                     json_str = await asyncio.to_thread(json_path.read_text, encoding="utf-8")
 
@@ -112,19 +112,31 @@ class TypstRenderer:
                     if not final_images:
                         return None, "渲染未生成图片文件"
 
-                    # 成功收尾
                     if not is_temp and hash_path:
                         new_hash = calculate_hash(json_str)
                         await asyncio.to_thread(hash_path.write_text, new_hash, encoding="utf-8")
 
+                    # --- 4. 收尾清理 ---
+                    files_to_clean = []
                     if is_temp:
+                        files_to_clean.extend([json_path, img_path])
                         files_to_clean.extend([Path(p) for p in final_images])
-                    
+
                     return RenderResult(final_images, files_to_clean), ""
 
         except Exception as e:
             logger.error(f"[HelpTypst] Render Error: {e}", exc_info=True)
-            if not is_temp and hash_path and hash_path.exists(): hash_path.unlink()
+
+            if is_temp:
+                try:
+                    if json_path.exists(): json_path.unlink()
+                    if img_path.exists(): img_path.unlink()
+                except Exception:
+                    pass
+
+            if not is_temp and hash_path and hash_path.exists(): 
+                hash_path.unlink()
+
             return None, f"渲染过程出错: {str(e)}"
 
         return None, "未知错误"

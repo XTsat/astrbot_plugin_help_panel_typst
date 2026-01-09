@@ -5,7 +5,7 @@
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-purple?style=flat-square)](https://github.com/Soulter/AstrBot)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.0.3-orange?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-0.0.4-orange?style=flat-square)]()
 
 ** 以优雅的方式组织你的插件菜单 **
 <br>
@@ -59,9 +59,6 @@ astrbot_plugin_typst_menu/
 │    ├── hash.py               # hash
 │    ├── image.py              # 图片处理
 │    └── views.py              # [视图层] 处理通过指令组管理和调试插件时展示给用户的格式化文本
-├── adapters/              # [适配器] (具体的外部交互实现)
-│    ├── astr.py               # 读取astrbot的设置及各类api方法（如 请求插件信息、LLM 请求）
-│    └── napcat.py             # napcat的api功能（如获取 bot 自身信息）
 ├── core/                  # [核心业务层] (纯 Python 逻辑)
 │    ├── analyzer.py           # 获取、组织数据
 │    ├── renderer.py           # 渲染调度

@@ -7,14 +7,8 @@ from astrbot.api.star import Context, Star, StarTools
 import astrbot.api.message_components as Comp
 
 from .domain import InternalCFG
-from .utils import TypstPluginConfig
+from .utils import TypstPluginConfig, HelpHint, MsgRecall, TypstLayout
 from .core import CommandAnalyzer, EventAnalyzer, FilterAnalyzer, TypstRenderer
-
-class AsyncNullContext: # 异步空上下文
-    async def __aenter__(self):
-        return None
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        return None
 
 class HelpTypst(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -31,7 +25,12 @@ class HelpTypst(Star):
         template_path = self.plugin_dir / "templates" / InternalCFG.TEMPLATE_NAME
         font_dir = self.plugin_dir / "resources" / InternalCFG.FONT_DIR_NAME
 
-        # 3. 渲染引擎配置注入
+        # 3. 视图层
+        self.layout = TypstLayout(self.plugin_config)
+        self.hint = HelpHint()
+        self.msg = MsgRecall() 
+
+        # 4. 渲染引擎配置注入
         self.renderer = TypstRenderer(
             data_dir=self.data_dir,
             template_path=template_path,
@@ -39,25 +38,37 @@ class HelpTypst(Star):
             config=self.plugin_config.rendering
         )
 
-        # 4. 分析器
+        # 5. 分析器
         self.cmd_analyzer = CommandAnalyzer(context, self.plugin_config)
         self.evt_analyzer = EventAnalyzer(context, self.plugin_config)
         self.flt_analyzer = FilterAnalyzer(context, self.plugin_config)
 
     async def _handle_request(self, event: AstrMessageEvent, analyzer, title: str, mode: str, query: str | None):
         """通用请求处理逻辑"""
-        if query:
-            yield event.plain_result(f"正在搜索 '{query}'...")
-        else:
-            yield event.plain_result("正在渲染..." if mode == "command" else "正在获取列表...")
+        # 1. 发送提示
+        hint_text = self.hint.msg_searching(query) if query else self.hint.msg_rendering(mode)
+        wait_msg_id = await self.msg.send_wait(event, hint_text)
 
-        # 定义数据获取回调 (延迟执行)
-        def data_provider(save_path: Path) -> int:
-            return analyzer.generate_render_data(save_path, title=title, mode=mode, query=query)
+        def data_pipeline(save_path: Path) -> int:
+            """数据流转"""
+            # 数据层：获取对象
+            plugins = analyzer.get_plugins(query)
+            if not plugins: return 0
 
-        result, error = await self.renderer.render(data_provider, mode, query)
+            # 视图层：决定标题 & 计算布局 & 写入JSON
+            display_title = f"搜索结果: \"{query}\"" if query else title
+            self.layout.dump_layout_json(plugins, save_path, display_title, mode)
 
-        # 处理结果
+            return len(plugins)
+
+        # 2. 执行渲染
+        result, error = await self.renderer.render(data_pipeline, mode, query)
+
+        # 3. 结束撤回提示
+        if wait_msg_id:
+            await self.msg.recall(event, wait_msg_id)
+
+        # 4. 处理结果
         if result:
             try:
                 # 构建消息链
@@ -70,9 +81,7 @@ class HelpTypst(Star):
         else:
             # 错误处理
             if error == "empty":
-                target = "事件监听器" if mode == "event" else "插件或指令"
-                msg = f"未找到包含 '{query}' 的{target}。" if query else f"当前没有可显示的{target}。"
-                yield event.plain_result(msg)
+                yield event.plain_result(self.hint.msg_empty_result(mode, query))
             else:
                 yield event.plain_result(error)
 

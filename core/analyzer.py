@@ -1,6 +1,3 @@
-import json
-import math
-from pathlib import Path
 from collections import defaultdict
 from typing import List, Dict, Optional, Set, Any
 
@@ -23,52 +20,41 @@ class BaseAnalyzer:
         self.context = context
         self.cfg = config
 
-    def generate_render_data(self, save_path: Path, title: str = "AstrBot 功能菜单", mode: str = "command", query: str = None) -> int:
-        """
-        主入口
-        :param mode: "command" | "event"
-        :param query: 搜索关键词
-        :return: 匹配到的插件数量
-        """
+    def get_plugins(self, query: str | None = None) -> List[PluginMetadata]:
+        """获取（经过搜索过滤的）插件列表"""
         try:
-            logger.info(f"[HelpTypst] 开始分析: {title} (Mode: {mode}, Query: {query})")
+            # 1. 获取全量数据
             structured_plugins = self.analyze_hierarchy()
 
-            # === 搜索过滤逻辑 ===
-            if query:
-                q_lower = query.lower()
-                filtered_plugins = []
+            # 2. 非搜索 → 返回
+            if not query: return structured_plugins
 
-                for p in structured_plugins:
-                    # 检查插件(容器)本身是否匹配: 在Command模式下，p是插件；在Event/Filter模式下，p是分类组(如 OnMessage)
-                    is_container_match = self._is_match(p.name, p.display_name, p.desc, q_lower)
+            # 3. 搜索 → 过滤
+            q_lower = query.lower()
+            filtered_plugins = []
 
-                    if is_container_match:
-                        # 容器匹配 -> 保留整个容器及其所有内容
-                        filtered_plugins.append(p)
-                    else:
-                        # 容器不匹配 -> 深入内部进行剪枝(过滤 nodes 列表，只保留匹配的子节点)
-                        matched_nodes = self._filter_nodes_recursively(p.nodes, q_lower)
+            for p in structured_plugins:
+                p_copy = p.model_copy(deep=True)
+                # 检查插件(容器)本身是否匹配: 在Command模式下，p是插件；在Event/Filter模式下，p是分类组(如 OnMessage)
+                is_container_match = self._is_match(p_copy.name, p_copy.display_name, p_copy.desc, q_lower)
 
-                        if matched_nodes:
-                            # 保留有剩余节点的容器
-                            p.nodes = matched_nodes
-                            filtered_plugins.append(p)
+                if is_container_match:
+                    # 容器匹配 -> 保留整个容器及其所有内容
+                    filtered_plugins.append(p_copy)
+                else:
+                    # 容器不匹配 -> 深入内部进行剪枝(过滤 nodes 列表，只保留匹配的子节点)
+                    matched_nodes = self._filter_nodes_recursively(p_copy.nodes, q_lower)
 
-                structured_plugins = filtered_plugins
-                title = f"搜索结果: \"{query}\""
+                    if matched_nodes:
+                        # 保留有剩余节点的容器
+                        p_copy.nodes = matched_nodes
+                        filtered_plugins.append(p_copy)
 
-            # 列表为空
-            if not structured_plugins:
-                return 0
-
-            # 将 mode 传递给排版函数，决定分流策略
-            self._generate_balanced_render_json(structured_plugins, save_path, title, mode)
-            return len(structured_plugins)
+            return filtered_plugins
 
         except Exception as e:
             logger.error(f"[HelpTypst] 分析失败: {e}", exc_info=True)
-            return 0
+            return []
 
     def _is_match(self, name: str, display: Optional[str], desc: str, query: str) -> bool:
         """基础匹配检查"""
@@ -96,102 +82,10 @@ class BaseAnalyzer:
                         # 有子节点存活时，保留过滤后的当前节点
                         node.children = filtered_children
                         result.append(node)
-                else:
-                    # 没匹配 -> 丢弃
-                    pass
-                    
         return result
 
     def analyze_hierarchy(self) -> List[PluginMetadata]:
         raise NotImplementedError
-
-    def _generate_balanced_render_json(self, structured_plugins: List[PluginMetadata], save_path: Path, title: str, mode: str):
-        # 1. 辅助：获取节点列表
-        def get_nodes(plugin: PluginMetadata) -> List[RenderNode]:
-            if hasattr(plugin, "nodes") and plugin.nodes: return plugin.nodes
-            if hasattr(plugin, "command_nodes") and plugin.command_nodes: return plugin.command_nodes
-            return []
-
-        # 2. 辅助：标准视图下的高度估算
-        def estimate_height(nodes: List[RenderNode]) -> int:
-            total_h = 0
-            # 模拟 Typst 的分类逻辑
-            complex_nodes = [n for n in nodes if n.is_group or n.desc != ""]
-            simple_nodes = [n for n in nodes if not n.is_group and n.desc == ""]
-
-            # 复杂节点：垂直堆叠
-            for node in complex_nodes:
-                if node.is_group:
-                    total_h += 60 + estimate_height(node.children)
-                else:
-                    total_h += 60 
-
-            # 简单节点：3列网格
-            if simple_nodes:
-                rows = math.ceil(len(simple_nodes) / 3)
-                total_h += rows * 30 + 10
-
-            return total_h
-
-        # 3. 数据分流
-        giants = []
-        complex_plugins = []
-        single_node_plugins = []
-
-        extract_singles = (mode == "command")
-
-        for p in structured_plugins:
-            nodes = get_nodes(p)
-
-            # --- A: 工具调用 (Tool) 总是进入 Singles ---
-            is_tool = len(nodes) > 0 and (nodes[0].tag == "tool" or nodes[0].tag == "mcp")
-            if is_tool:
-                single_node_plugins.append(p.model_dump())
-                continue
-
-            # --- B: 单指令插件 (仅 Command 模式) ---
-            if extract_singles and len(nodes) == 1 and not nodes[0].is_group:
-                single_node_plugins.append(p.model_dump())
-                continue
-
-            # --- C: 巨型块判定 (仅 Event、Filter 模式) ---
-            h_val = estimate_height(nodes)
-            if mode in ("event", "filter") and h_val > self.cfg.rendering.giant_threshold:
-                giants.append(p.model_dump())
-                continue
-
-            # --- D: 默认瀑布流 ---
-            complex_plugins.append(p)
-
-        # 4. 瀑布流排版
-        plugins_with_height = [
-            (p, estimate_height(get_nodes(p)) + 80)
-            for p in complex_plugins
-        ]
-        sorted_plugins = sorted(plugins_with_height, key=lambda x: x[1], reverse=True)
-
-        cols_data = [[] for _ in range(3)]
-        col_heights = [0] * 3
-
-        for plugin, height in sorted_plugins:
-            idx = col_heights.index(min(col_heights))
-            cols_data[idx].append(plugin.model_dump())
-            col_heights[idx] += height
-
-        # 5. 生成 JSON
-        final_render_data = {
-            "title": title,
-            "plugin_count": len(structured_plugins),
-            "giants": giants,
-            "columns": cols_data, 
-            "singles": single_node_plugins 
-        }
-
-        save_path.write_text(
-            json.dumps(final_render_data, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-        logger.info(f"[HelpTypst] 数据生成完毕. Mode: {mode}, Giants: {len(giants)}, Singles: {len(single_node_plugins)}")
 
     def _group_handlers_by_module(self) -> Dict[str, List[StarHandlerMetadata]]:
         mapping = defaultdict(list)
