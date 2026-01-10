@@ -161,7 +161,7 @@
 // --- 语法指引 ---
 #let render_syntax_guide() = {
   let prefixes = data.at("prefixes", default: ("/"))
-  let prefix_str = if type(prefixes) == array { prefixes.join(" / ") } else { prefixes }
+  let prefix_str = if type(prefixes) == array { prefixes.join(" 或 ") } else { prefixes }
 
   // 样式胶囊
   let pill(content, bg, color) = box(
