@@ -118,16 +118,16 @@ class TypstLayout:
     def __init__(self, config: TypstPluginConfig):
         self.cfg = config
 
-    def dump_layout_json(self, plugins: List[PluginMetadata], save_path: Path, title: str, mode: str):
+    def dump_layout_json(self, plugins: List[PluginMetadata], save_path: Path, title: str, mode: str, prefixes: List[str]):
         """生成布局数据并写入文件"""
-        payload = self._generate_balanced_payload(plugins, title, mode)
+        payload = self._generate_balanced_payload(plugins, title, mode, prefixes)
 
         save_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
 
-    def _generate_balanced_payload(self, plugins: List[PluginMetadata], title: str, mode: str) -> Dict[str, Any]:
+    def _generate_balanced_payload(self, plugins: List[PluginMetadata], title: str, mode: str, prefixes: List[str]) -> Dict[str, Any]:
         """瀑布流分发逻辑"""
         giants = []
         complex_plugins = []
@@ -185,6 +185,8 @@ class TypstLayout:
 
         return {
             "title": title,
+            "mode": mode,
+            "prefixes": prefixes,
             "plugin_count": len(plugins),
             "giants": giants,
             "columns": cols_data, 

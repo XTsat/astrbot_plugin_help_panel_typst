@@ -5,7 +5,7 @@
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-purple?style=flat-square)](https://github.com/Soulter/AstrBot)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.0.5-orange?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-0.0.6-orange?style=flat-square)]()
 
 ** 以优雅的方式组织你的插件菜单 **
 <br>

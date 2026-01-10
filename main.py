@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from typing import List
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent
@@ -26,6 +27,9 @@ class HelpTypst(Star):
         font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR
 
         # 3. 视图层
+        self.prefixes: List[str] = []
+        self._init_prefixes(context)
+
         self.layout = TypstLayout(self.plugin_config)
         self.hint = HelpHint()
         self.msg = MsgRecall() 
@@ -43,6 +47,19 @@ class HelpTypst(Star):
         self.evt_analyzer = EventAnalyzer(context, self.plugin_config)
         self.flt_analyzer = FilterAnalyzer(context, self.plugin_config)
 
+    def _init_prefixes(self, context: Context):
+        """唤醒词"""
+        try:
+            global_config = context.get_config()
+            raw = global_config.get("wake_prefix", ["/"])
+            if isinstance(raw, str):
+                self.prefixes = [raw]
+            else:
+                self.prefixes = list(raw)
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 获取唤醒词失败，使用默认值 '/': {e}")
+            self.prefixes = ["/"]
+
     async def _handle_request(self, event: AstrMessageEvent, analyzer, title: str, mode: str, query: str | None):
         """通用请求处理逻辑"""
         # 1. 发送提示
@@ -57,7 +74,13 @@ class HelpTypst(Star):
 
             # 视图层：决定标题 & 计算布局 & 写入JSON
             display_title = f"搜索结果: \"{query}\"" if query else title
-            self.layout.dump_layout_json(plugins, save_path, display_title, mode)
+            self.layout.dump_layout_json(
+                plugins=plugins, 
+                save_path=save_path, 
+                title=display_title, 
+                mode=mode,
+                prefixes=self.prefixes
+            )
 
             return len(plugins)
 

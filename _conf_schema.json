@@ -7,25 +7,25 @@
         "description": "数据分析超时 (秒)",
         "type": "float",
         "default": 10.0,
-        "hint": "生成数据结构的超时时间，插件多时可适当调大"
+        "hint": "生成数据结构的超时时间，根据插件数量调整"
       },
       "timeout_compile": {
         "description": "Typst 编译超时 (秒)",
         "type": "float",
         "default": 30.0,
-        "hint": "调用 Typst 编译图片的超时时间"
+        "hint": "调用 Typst 编译图片的超时时间，根据其他项目调整"
       },
 	  "max_concurrent_tasks": {
         "description": "最大并发编译数",
         "type": "int",
         "default": 2,
-        "hint": "同时进行的 Typst 编译任务数量限制，建议根据 CPU 核心数调整"
+        "hint": "同时进行的 Typst 编译任务数量限制，根据 CPU 调整"
       },
 	  "ppi": {
         "description": "图片清晰度 (PPI)",
         "type": "float",
         "default": 144.0,
-        "hint": "PPI越高图片越清晰，但越慢&越大"
+        "hint": "越高图片越清晰，但越慢&大&高占用，根据内存 & 带宽调整"
       },
       "giant_threshold": {
         "description": "巨型块阈值 (pt)",
@@ -57,7 +57,7 @@
           "astrbot-reminder", 
           "astrbot_plugin_help_typst"
         ],
-        "hint": "这些插件将不会出现在生成的菜单中"
+        "hint": "屏蔽不想展示、导致问题的插件菜单"
       }
     }
   }

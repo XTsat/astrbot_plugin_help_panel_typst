@@ -22,6 +22,13 @@ class InternalCFG:
         EventType.OnAfterMessageSentEvent: "发送回执 (Sent)",
     }
 
+    # 会引起布局变动的配置项 → 缓存失效
+    CACHE_SENSITIVE_CONFIGS: list[str] = [
+        "giant_threshold",
+        "split_height",
+        "ppi"
+    ]
+
     # 文件/文件夹名
     NAME_TEMPLATE: str = "base.typ"
     NAME_FONT_DIR: str = "fonts"

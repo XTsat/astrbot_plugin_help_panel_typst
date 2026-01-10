@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+import json
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any, Tuple
 from concurrent.futures import ProcessPoolExecutor
@@ -28,19 +29,21 @@ class TypstRenderer:
         self.font_dir = font_dir
         self.cfg = config
         self._compile_semaphore = asyncio.Semaphore(self.cfg.max_concurrent_tasks)
+        self._cache_locks = { k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys() }
 
         # 静态资源锁
         self._cache_locks = { k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys() }
 
-    async def render(self, data_provider: Callable[[Path], int], mode: str, query: Optional[str] = None) -> Tuple[Optional[RenderResult], str]:
-        """
-        核心渲染流程
-        :param data_provider: 一个回调函数，接受 save_path, 返回 int (item_count)
-        :param mode: command | event | filter
-        :param query: 搜索关键词
-        :return: (RenderResult, error_message)
-        """
+    def _get_config_snapshot(self) -> Dict[str, Any]:
+        """渲染配置的快照字典"""
+        snapshot = {}
+        for key in InternalCFG.CACHE_SENSITIVE_CONFIGS:
+            if hasattr(self.cfg, key):
+                snapshot[key] = getattr(self.cfg, key)
+        return snapshot
 
+    async def render(self, data_provider: Callable[[Path], int], mode: str, query: Optional[str] = None) -> Tuple[Optional[RenderResult], str]:
+        """核心渲染流程"""
         # 1. 确定路径策略
         paths = self._resolve_paths(mode, query)
         json_path, img_path, hash_path = paths["json"], paths["img"], paths["hash"]
@@ -68,17 +71,17 @@ class TypstRenderer:
                 # --- 2. 缓存校验 (仅静态) ---
                 need_compile = True
                 if not is_temp and json_path.exists():
+                    # hash + config 双校验
                     need_compile = await self._check_cache(json_path, hash_path, img_path)
 
                 if not need_compile:
-                    # 直接用已有的 webp
                     cached_webps = self._find_cached_webps(img_path.stem)
                     if cached_webps:
                         return RenderResult(cached_webps, []), ""
                     else:
                         need_compile = True
 
-                # --- 3. Typst 编译 (进程池) ---
+                # --- 3. Typst 编译 ---
                 if need_compile:
                     json_str = await asyncio.to_thread(json_path.read_text, encoding="utf-8")
 
@@ -113,11 +116,23 @@ class TypstRenderer:
                     if not final_images:
                         return None, "渲染未生成图片文件"
 
+                    # --- 4. 缓存写入 ---
                     if not is_temp and hash_path:
-                        new_hash = calculate_hash(json_str)
-                        await asyncio.to_thread(hash_path.write_text, new_hash, encoding="utf-8")
+                        new_content_hash = calculate_hash(json_str)
+                        current_config_snapshot = self._get_config_snapshot()
 
-                    # --- 4. 收尾清理 ---
+                        meta_data = {
+                            "content_hash": new_content_hash,
+                            "config": current_config_snapshot
+                        }
+
+                        await asyncio.to_thread(
+                            hash_path.write_text, 
+                            json.dumps(meta_data, ensure_ascii=False), 
+                            encoding="utf-8"
+                        )
+
+                    # --- 5. 清理 ---
                     files_to_clean = []
                     if is_temp:
                         files_to_clean.extend([json_path, img_path])
@@ -171,22 +186,45 @@ class TypstRenderer:
         return [str(p) for p in parts] if parts else []
 
     async def _check_cache(self, json_path: Path, hash_path: Path, img_path: Path) -> bool:
-        """检查是否需要重新编译: True=需要, False=命中缓存"""
+        """检查是否需要重新编译"""
         try:
+            # 1. 计算当前 Hash
             json_content = await asyncio.to_thread(json_path.read_text, encoding="utf-8")
-            current_hash = calculate_hash(json_content)
-            
-            last_hash = None
-            if hash_path.exists():
-                last_hash = await asyncio.to_thread(hash_path.read_text, encoding="utf-8")
+            current_content_hash = calculate_hash(json_content)
 
+            # 2. 读缓存
+            if not hash_path.exists(): return True
+            cached_data_str = await asyncio.to_thread(hash_path.read_text, encoding="utf-8")
+
+            # 3. 解析缓存
+            try:
+                cached_meta = json.loads(cached_data_str)
+                cached_content_hash = cached_meta.get("content_hash")
+                cached_config = cached_meta.get("config", {})
+            except json.JSONDecodeError:
+                # 兼容性处理
+                cached_content_hash = cached_data_str.strip()
+                cached_config = {} 
+
+            # 4. 当前配置快照
+            current_config = self._get_config_snapshot()
+
+            # 5. 图片完整性校验
             is_img_valid = False
             if img_path.exists():
                 is_img_valid = await asyncio.to_thread(verify_image_header, img_path)
-            
-            if last_hash == current_hash and is_img_valid:
-                logger.debug("[HelpTypst] 缓存命中。")
+
+            # 6. 比对：内容一致 AND 配置一致 AND 图片有效
+            if (cached_content_hash == current_content_hash and 
+                cached_config == current_config and 
+                is_img_valid):
+
+                logger.debug("[HelpTypst] 缓存命中 (Content + Config)。")
                 return False # 不需要编译
+
+            logger.debug(f"[HelpTypst] 缓存失效。ConfigMatch={cached_config == current_config}")
             return True
-        except Exception:
+
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 缓存校验异常，强制重绘: {e}")
             return True
