@@ -12,7 +12,7 @@ from astrbot.core.star.filter.platform_adapter_type import PlatformAdapterTypeFi
 from astrbot.core.star.filter.event_message_type import EventMessageTypeFilter, EventMessageType
 from astrbot.core.agent.mcp_client import MCPTool
 
-from ..domain import PluginMetadata, RenderNode
+from ..domain import PluginMetadata, RenderNode, InternalCFG
 from ..utils import TypstPluginConfig
 
 class BaseAnalyzer:
@@ -318,16 +318,6 @@ class CommandAnalyzer(BaseAnalyzer):
 
 class EventAnalyzer(BaseAnalyzer):
     """事件分析器：处理所有 EventType，获取完整工具列表（含 MCP）"""
-    EVENT_TYPE_MAP = {
-        EventType.OnAstrBotLoadedEvent: "系统启动 (Loaded)",
-        EventType.OnPlatformLoadedEvent: "平台就绪 (Platform)",
-        EventType.AdapterMessageEvent: "消息监听 (Message)",
-        EventType.OnLLMRequestEvent: "LLM 请求前 (Pre-LLM)",
-        EventType.OnLLMResponseEvent: "LLM 响应后 (Post-LLM)",
-        EventType.OnDecoratingResultEvent: "消息修饰 (Decorate)",
-        EventType.OnAfterMessageSentEvent: "发送回执 (Sent)",
-    }
-
     def analyze_hierarchy(self) -> List[PluginMetadata]:
         results = []
 
@@ -338,13 +328,12 @@ class EventAnalyzer(BaseAnalyzer):
             if star.module_path:
                 module_to_plugin[star.module_path] = star
 
-
         # --- A.处理函数工具 (Plugin Tools + MCP Tools) --- 
         # 获取工具列表
         tool_manager = None
         if hasattr(self.context, "get_llm_tool_manager"):
             tool_manager = self.context.get_llm_tool_manager()
-        
+
         if tool_manager:
             for tool in tool_manager.func_list:
                 if not tool.active:
@@ -410,7 +399,7 @@ class EventAnalyzer(BaseAnalyzer):
             event_groups[handler.event_type].append(handler)
 
         for evt_type, handlers in event_groups.items():
-            card_title = self.EVENT_TYPE_MAP.get(evt_type, str(evt_type.name))
+            card_title = InternalCFG.EVENT_TYPE_MAP.get(evt_type, str(evt_type.name))
 
             nodes = []
             for h in handlers:
@@ -524,7 +513,7 @@ class FilterAnalyzer(BaseAnalyzer):
                     raw_desc = (h.desc or "").split('\n')[0].strip()
                     if not raw_desc and h.handler.__doc__:
                         raw_desc = h.handler.__doc__.split('\n')[0].strip()
-                    
+
                     # 正则的子项描述：#{函数名} · {描述}
                     full_desc = f"#{h.handler_name}"
                     if raw_desc:
@@ -547,9 +536,9 @@ class FilterAnalyzer(BaseAnalyzer):
                     tag="plugin_container",
                     children=children
                 ))
-            
+
             nodes.sort(key=lambda x: x.name)
-            
+
             results.append(PluginMetadata(
                 name="filter_regex", display_name="正则触发器 (Regex)",
                 version="", desc=f"共 {len(nodes)} 个插件使用了正则", nodes=nodes

@@ -27,8 +27,8 @@ class TypstRenderer:
         self.template_path = template_path
         self.font_dir = font_dir
         self.cfg = config
-        self._compile_semaphore = asyncio.Semaphore(2)
-        
+        self._compile_semaphore = asyncio.Semaphore(self.cfg.max_concurrent_tasks)
+
         # 静态资源锁
         self._cache_locks = { k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys() }
 
@@ -40,7 +40,7 @@ class TypstRenderer:
         :param query: 搜索关键词
         :return: (RenderResult, error_message)
         """
-        
+
         # 1. 确定路径策略
         paths = self._resolve_paths(mode, query)
         json_path, img_path, hash_path = paths["json"], paths["img"], paths["hash"]
@@ -94,7 +94,8 @@ class TypstRenderer:
                         is_temp=is_temp,
                         req_id=req_id,
                         webp_limit=self.cfg.webp_limit,
-                        split_height=self.cfg.split_height
+                        split_height=self.cfg.split_height,
+                        ppi=self.cfg.ppi
                     )
 
                     # 调度执行

@@ -8,13 +8,14 @@ import gc
 import platform
 import ctypes
 
+from ..domain import DefaultCFG
 from ..utils import process_image_to_webp
 
 def force_memory_release():
-    # 1. Python 层
+    # Python 层
     gc.collect()
 
-    # 2. glibc 层
+    # glibc 层
     if platform.system() == "Linux":
         try:
             libc = ctypes.CDLL("libc.so.6")
@@ -33,9 +34,9 @@ class RenderTask:
     query: Optional[str]
     is_temp: bool
     req_id: str
-    webp_limit: int = 16383
-    split_height: int = 16000
-    ppi: float = 144.0 # 留待迁移进constants.py
+    webp_limit: int = DefaultCFG.LIMIT_WEBP
+    split_height: int = DefaultCFG.LIMIT_SIDE
+    ppi: float = DefaultCFG.LIMIT_PPI
 
 def execute_render_task(task: RenderTask) -> List[str]:
     """渲染子进程"""
@@ -75,5 +76,5 @@ def execute_render_task(task: RenderTask) -> List[str]:
         return [f"ERROR: {traceback.format_exc()}"]
 
     finally:
-        # --- 4. 强制内存回收 ---
+        # 4. 强制内存回收
         force_memory_release()

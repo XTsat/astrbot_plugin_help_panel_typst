@@ -9,9 +9,11 @@ from ..domain import DefaultCFG
 class RenderingConfig:
     timeout_analysis: float
     timeout_compile: float
+    max_concurrent_tasks: int
     giant_threshold: int
     webp_limit: int
     split_height: int
+    ppi: float
 
 @dataclass
 class FilteringConfig:
@@ -34,14 +36,16 @@ class TypstPluginConfig:
         render_cfg = RenderingConfig(
             timeout_analysis=raw_render.get("timeout_analysis", DefaultCFG.TIMEOUT_ANALYSIS),
             timeout_compile=raw_render.get("timeout_compile", DefaultCFG.TIMEOUT_COMPILE),
-            giant_threshold=raw_render.get("giant_threshold", DefaultCFG.GIANT_THRESHOLD),
-            webp_limit=raw_render.get("webp_limit", DefaultCFG.WEBP_LIMIT),
-            split_height=raw_render.get("split_height", DefaultCFG.SPLIT_HEIGHT)
+            max_concurrent_tasks=int(raw_render.get("max_concurrent_tasks", DefaultCFG.LIMIT_TASK)),
+            giant_threshold=raw_render.get("giant_threshold", DefaultCFG.LIMIT_GIANT),
+            webp_limit=raw_render.get("webp_limit", DefaultCFG.LIMIT_WEBP),
+            split_height=raw_render.get("split_height", DefaultCFG.LIMIT_SIDE),
+            ppi=float(raw_render.get("ppi", DefaultCFG.LIMIT_PPI))
         )
 
         # 2. 解析 Filtering
         raw_filter = raw_config.get("filtering", {})
-        
+
         # List -> Set
         ignored_list = raw_filter.get("ignored_plugins", None)
         if ignored_list is None:
@@ -53,6 +57,6 @@ class TypstPluginConfig:
             ignored_plugins=ignored_set
         )
 
-        logger.debug(f"[HelpTypst] 配置加载完毕: {ignored_set}")
+        logger.debug(f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}")
         
         return cls(rendering=render_cfg, filtering=filter_cfg)

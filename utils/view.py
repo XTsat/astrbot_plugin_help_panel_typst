@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional, Union
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 
-from ..domain import PluginMetadata, RenderNode
+from ..domain import PluginMetadata, RenderNode, InternalCFG
 from . import TypstPluginConfig
 
 
@@ -75,7 +75,7 @@ class MsgRecall:
         bot = event.bot
 
         # 稍等避免闪撤
-        await asyncio.sleep(1) 
+        await asyncio.sleep(InternalCFG.DELAY_SEND) 
 
         try:
             # delete_msg
@@ -192,7 +192,7 @@ class TypstLayout:
         }
 
     def _estimate_height(self, nodes: List[RenderNode]) -> int:
-        """高度估算器(暂时硬编码)"""
+        """高度估算器(暂硬编码，等待完善模板逻辑)"""
         total_h = 0
         complex_nodes = [n for n in nodes if n.is_group or n.desc != ""]
         simple_nodes = [n for n in nodes if not n.is_group and n.desc == ""]

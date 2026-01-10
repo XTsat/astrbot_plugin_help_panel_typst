@@ -1,35 +1,51 @@
 from enum import Enum
 from typing import Set, Dict
 
-# --- A. 内部常量 (开发者专用，不暴露给用户) ---
+from astrbot.core.star.star_handler import EventType
+
 class InternalCFG:
-    """内部硬编码配置，用户无法修改"""
-    # 资源文件映射
+    """内部常量"""
+    # 映射
     CACHE_FILES: Dict[str, str] = {
         "command": "cache_menu_command",
         "event":   "cache_menu_event",
         "filter":  "cache_menu_filter"
     }
-    # 字体/模板相对路径
-    TEMPLATE_NAME: str = "base.typ"
-    FONT_DIR_NAME: str = "fonts"
 
-# --- B. 默认配置值 (作为 schema 的默认值兜底) ---
+    EVENT_TYPE_MAP: Dict[EventType, str] = {
+        EventType.OnAstrBotLoadedEvent: "系统启动 (Loaded)",
+        EventType.OnPlatformLoadedEvent: "平台就绪 (Platform)",
+        EventType.AdapterMessageEvent: "消息监听 (Message)",
+        EventType.OnLLMRequestEvent: "LLM 请求前 (Pre-LLM)",
+        EventType.OnLLMResponseEvent: "LLM 响应后 (Post-LLM)",
+        EventType.OnDecoratingResultEvent: "消息修饰 (Decorate)",
+        EventType.OnAfterMessageSentEvent: "发送回执 (Sent)",
+    }
+
+    # 文件/文件夹名
+    NAME_TEMPLATE: str = "base.typ"
+    NAME_FONT_DIR: str = "fonts"
+
+    # 时序
+    DELAY_SEND: float = 1
+
+
 class DefaultCFG:
-    """可配置项的默认值"""
-    
+    """兜底: 配置默认值"""
+
     # 1. 渲染限制
-    GIANT_THRESHOLD: int = 1500
-    WEBP_LIMIT: int = 16383
-    SPLIT_HEIGHT: int = 16000
-    
+    LIMIT_TASK: int = 2 # 最大并发编译数
+    LIMIT_GIANT: int = 1500
+    LIMIT_WEBP: int = 16383
+    LIMIT_SIDE: int = 16000
+    LIMIT_PPI: float = 144.0
+
     # 2. 超时设置 (秒)
     TIMEOUT_ANALYSIS: float = 10.0
     TIMEOUT_COMPILE: float = 30.0
-    
+
     # 3. 过滤设置
-    # 注意：JSON只支持 List，Python 逻辑里我们需要 Set，这里定义 Set 方便代码使用
-    # 在 config.py 加载时会将 JSON 的 list 转回 set
+    # config.py 负责 list → set
     IGNORED_PLUGINS: Set[str] = {
         "astrbot", 
         "astrbot-web-searcher", 
@@ -40,8 +56,9 @@ class DefaultCFG:
         "astrbot_plugin_help_typst"
     }
 
-# --- C. 枚举 ---
+
 class RenderMode(str, Enum):
+    """枚举"""
     COMMAND = "command"
     EVENT = "event"
     FILTER = "filter"

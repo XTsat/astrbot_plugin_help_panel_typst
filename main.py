@@ -22,8 +22,8 @@ class HelpTypst(Star):
         self.data_dir = StarTools.get_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        template_path = self.plugin_dir / "templates" / InternalCFG.TEMPLATE_NAME
-        font_dir = self.plugin_dir / "resources" / InternalCFG.FONT_DIR_NAME
+        template_path = self.plugin_dir / "templates" / InternalCFG.NAME_TEMPLATE
+        font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR
 
         # 3. 视图层
         self.layout = TypstLayout(self.plugin_config)
@@ -87,7 +87,7 @@ class HelpTypst(Star):
 
     async def _cleanup_task(self, files: list[Path]):
         """异步清理任务"""
-        await asyncio.sleep(1) # 稍作等待确保发送完成
+        await asyncio.sleep(InternalCFG.DELAY_SEND)
         for p in files:
             try:
                 if p.exists(): p.unlink()
