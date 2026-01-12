@@ -9,7 +9,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-from ..domain import InternalCFG, RenderingConfig
+from ..domain import InternalCFG, TypstPluginConfig
 from ..utils import calculate_hash, verify_image_header
 from . import execute_render_task, RenderTask
 
@@ -36,13 +36,13 @@ class TypstRenderer:
         data_dir: Path,
         template_path: Path,
         font_dir: Path,
-        config: RenderingConfig,
+        config: TypstPluginConfig,
     ):
         self.data_dir = data_dir
         self.template_path = template_path
         self.font_dir = font_dir
         self.cfg = config
-        self._compile_semaphore = asyncio.Semaphore(self.cfg.max_concurrent_tasks)
+        self._compile_semaphore = asyncio.Semaphore(self.cfg.rendering.max_concurrent_tasks)
         self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
 
         # 静态资源锁
@@ -52,8 +52,18 @@ class TypstRenderer:
         """渲染配置的快照字典"""
         snapshot = {}
         for key in InternalCFG.CACHE_SENSITIVE_CONFIGS:
-            if hasattr(self.cfg, key):
-                snapshot[key] = getattr(self.cfg, key)
+            # rendering 子配置
+            if hasattr(self.cfg.rendering, key):
+                val = getattr(self.cfg.rendering, key)
+                snapshot[key] = val
+            # 顶层 ignored_plugins
+            elif hasattr(self.cfg, key):
+                val = getattr(self.cfg, key)
+                # set → list 并排序
+                if isinstance(val, set):
+                    snapshot[key] = sorted(list(val))
+                else:
+                    snapshot[key] = val
 
         # 提取“生效中”的外观配置
         if hasattr(self.cfg, "appearance"):
@@ -82,7 +92,7 @@ class TypstRenderer:
                 try:
                     count = await asyncio.wait_for(
                         asyncio.to_thread(data_provider, json_path),
-                        timeout=self.cfg.timeout_analysis,
+                        timeout=self.cfg.rendering.timeout_analysis,
                     )
                 except asyncio.TimeoutError:
                     if is_temp and json_path.exists():
@@ -126,9 +136,9 @@ class TypstRenderer:
                         query=query,
                         is_temp=is_temp,
                         req_id=req_id,
-                        webp_limit=self.cfg.webp_limit,
-                        split_height=self.cfg.split_height,
-                        ppi=self.cfg.ppi,
+                        webp_limit=self.cfg.rendering.webp_limit,
+                        split_height=self.cfg.rendering.split_height,
+                        ppi=self.cfg.rendering.ppi,
                     )
 
                     # 调度执行

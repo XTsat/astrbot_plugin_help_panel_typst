@@ -6,7 +6,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.message_components import Image
 
-from .domain import InternalCFG, DefaultCFG, TypstPluginConfig
+from .domain import InternalCFG, TypstPluginConfig
 from .utils import FontManager, HelpHint, MsgRecall, TypstLayout
 from .core import CommandAnalyzer, EventAnalyzer, FilterAnalyzer, TypstRenderer
 
@@ -38,7 +38,7 @@ class HelpTypst(Star):
             data_dir=self.data_dir,
             template_path=self.template_path,
             font_dir=self.font_dir,
-            config=self.plugin_config.rendering,
+            config=self.plugin_config,
         )
 
         # 5. 分析器
@@ -52,7 +52,7 @@ class HelpTypst(Star):
         """异步初始化"""
         self._init_prefixes(self.context)
         await asyncio.to_thread(self._refresh_resources)
-        logger.info(f"[HelpTypst] 初始化完成")
+        logger.info("[HelpTypst] 初始化完成")
     
     def _refresh_resources(self):
         try:
@@ -95,7 +95,7 @@ class HelpTypst(Star):
                 try:
                     if f.exists(): # 双重检查
                         f.unlink()
-                except OSError as e:
+                except OSError:
                     pass
 
         except Exception as e:
@@ -110,7 +110,7 @@ class HelpTypst(Star):
     async def cmd_scan_fonts(self, event: AstrMessageEvent):
         """扫描字体并重载插件"""
         # 1. 扫描与更新
-        await self._refresh_resources()
+        await asyncio.to_thread(self._refresh_resources)
         count = len(self.font_manager.available_families)
 
         # 2. 尝试自我重载
@@ -147,11 +147,14 @@ class HelpTypst(Star):
         query: str | None,
     ):
         """通用请求处理逻辑"""
-        # 1. 发送提示
-        hint_text = (
-            self.hint.msg_searching(query) if query else self.hint.msg_rendering(mode)
-        )
-        wait_msg_id = await self.msg.send_wait(event, hint_text)
+        wait_msg_id = None
+
+        if self.plugin_config.enable_waiting_message:
+            # 1. 发送提示
+            hint_text = (
+                self.hint.msg_searching(query) if query else self.hint.msg_rendering(mode)
+            )
+            wait_msg_id = await self.msg.send_wait(event, hint_text)
 
         def data_pipeline(save_path: Path) -> int:
             """数据流转"""

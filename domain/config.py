@@ -17,11 +17,6 @@ class RenderingConfig:
 
 
 @dataclass
-class FilteringConfig:
-    ignored_plugins: set[str]
-
-
-@dataclass
 class ThemePreset:
     """单个外观预设"""
 
@@ -49,15 +44,23 @@ class AppearanceConfig:
 @dataclass
 class TypstPluginConfig:
     """插件全局配置聚合根"""
+    enable_waiting_message: bool
+    ignored_plugins: set[str]
 
     rendering: RenderingConfig
-    filtering: FilteringConfig
     appearance: AppearanceConfig
 
     @classmethod
     def load(cls, raw_config: AstrBotConfig) -> "TypstPluginConfig":
         """工厂方法：从 AstrBotConfig 加载配置，未配置项回退到 DefaultCFG"""
-        # 1. Rendering
+        enable_wait = raw_config.get("enable_waiting_message", False)
+
+        ignored_list = raw_config.get("ignored_plugins", None)
+        ignored_set = (
+            set(ignored_list) if ignored_list is not None else DefaultCFG.IGNORED_PLUGINS.copy()
+        )
+
+        # Rendering
         raw_render = raw_config.get("rendering", {})
         render_cfg = RenderingConfig(
             timeout_analysis=raw_render.get(
@@ -75,15 +78,7 @@ class TypstPluginConfig:
             ppi=float(raw_render.get("ppi", DefaultCFG.LIMIT_PPI)),
         )
 
-        # 2. Filtering
-        raw_filter = raw_config.get("filtering", {})
-        ignored_list = raw_filter.get("ignored_plugins", None)
-        ignored_set = (
-            set(ignored_list) if ignored_list else DefaultCFG.IGNORED_PLUGINS.copy()
-        )
-        filter_cfg = FilteringConfig(ignored_plugins=ignored_set)
-
-        # 3. Appearance
+        # Appearance
         raw_appearance = raw_config.get("appearance", {})
         active_preset_name = raw_appearance.get("active_preset", "default")
         raw_presets_list = raw_appearance.get("presets", [])  # 解析 template_list 列表
@@ -111,5 +106,8 @@ class TypstPluginConfig:
         )
 
         return cls(
-            rendering=render_cfg, filtering=filter_cfg, appearance=appearance_cfg
+            enable_waiting_message=enable_wait,
+            ignored_plugins=ignored_set,
+            rendering=render_cfg,
+            appearance=appearance_cfg
         )

@@ -185,7 +185,7 @@ class CommandAnalyzer(BaseAnalyzer):
             plugin_name = safe_name
 
             # 黑名单
-            if safe_name in self.cfg.filtering.ignored_plugins:
+            if safe_name in self.cfg.ignored_plugins:
                 continue
 
             # 模块路径
@@ -428,7 +428,7 @@ class EventAnalyzer(BaseAnalyzer):
                     # >>> 来源: 插件 <<<
                     plugin = module_to_plugin.get(tool.handler_module_path)
                     if plugin:
-                        if plugin.name in self.cfg.filtering.ignored_plugins:
+                        if plugin.name in self.cfg.ignored_plugins:
                             continue
                         source_name = plugin.name
                         source_display = getattr(plugin, "display_name", None)
@@ -465,7 +465,7 @@ class EventAnalyzer(BaseAnalyzer):
             if handler.handler_module_path in module_to_plugin:
                 plugin = module_to_plugin[handler.handler_module_path]
                 info = self._get_safe_plugin_info(plugin)
-                if info["name"] in self.cfg.filtering.ignored_plugins:
+                if info["name"] in self.cfg.ignored_plugins:
                     continue  # 黑名单
                 if not plugin.activated:
                     continue
@@ -565,7 +565,7 @@ class FilterAnalyzer(BaseAnalyzer):
             if handler.handler_module_path in module_to_plugin:
                 plugin = module_to_plugin[handler.handler_module_path]
                 p_info = self._get_safe_plugin_info(plugin)
-                if p_info["name"] in self.cfg.filtering.ignored_plugins:
+                if p_info["name"] in self.cfg.ignored_plugins:
                     continue  # 黑名单
                 if not plugin.activated:
                     continue

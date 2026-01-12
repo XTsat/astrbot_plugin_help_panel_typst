@@ -5,7 +5,7 @@
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-purple?style=flat-square)](https://github.com/Soulter/AstrBot)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.0.7-orange?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-0.0.8-orange?style=flat-square)]()
 
 ** 以优雅的方式组织你的插件菜单 **
 <br>
@@ -20,16 +20,15 @@
 * 把插件菜单、事件钩子、函数工具、过滤器列表渲染成友好界面，智能组织节点和分组，并附上丰富的元信息。不只是面向 bot 用户的说明，也是一份调试辅助工具。
 * 针对插件名、指令名、描述内容的泛用搜索工具，附关键词高亮【用法： helps/events/filters <关键词>】
 * 基于 typst 渲染实现，轻量、灵活、高效，你可以使用 typst 语法修改、构建属于自己的渲染模板（WIP）
+* 支持自定义字体 .ttf .otf .woff2<br>
+1.放入 插件目录/resources/fonts (之后会支持额外目录)<br>
+2.重载方式三选一(更新 optional scheme)<br>
+2a.在 AstrBot 面板中重载插件<br>
+2b.重启 AstrBot<br>
+2c.使用指令 typst font<br>
+3.新字体将会出现在配置面板供 勾选 & 排序 (不可用的字体会被自动剔除)
 
 <br>进度：基本功能 √
-
-## ✔ 计划清单
-* 配置-自定义项目
-* 配置-背景
-* 配置-模板 working...
-* ~~功能-黑名单~~
-* 指令-黑名单管理
-* 正式的说明文档
 
 ## 🖼️ 功能预览
 
@@ -43,11 +42,22 @@
 | <img src="./preview/filters.jpg" width="400"> | <img src="./preview/search.jpg" width="400"> |
 
 ## 🧱 依赖
-AstrBot
-<br>typst>=0.11
-<br>fonttools>=4.0.0
-<br>brotli>=1.0.0
-<br>pydantic
+AstrBot<br>
+typst>=0.11<br>
+fonttools>=4.0.0<br>
+brotli>=1.0.0<br>
+pydantic
+
+## 🤝 感谢 PR
+Zhalslar(饰乐)  https://github.com/Zhalslar
+
+## ✔ 计划清单
+* 配置-自定义项目
+* 配置-背景
+* 配置-模板 working...
+* ~~功能-黑名单~~
+* 指令-黑名单管理
+* 正式的说明文档
 
 ## ❓ 常见问题
 

@@ -2,7 +2,6 @@ from .schemas import RenderNode, PluginMetadata
 from .constants import InternalCFG, DefaultCFG, RenderMode
 from .config import (
     RenderingConfig,
-    FilteringConfig,
     ThemePreset,
     AppearanceConfig,
     TypstPluginConfig,
@@ -15,7 +14,6 @@ __all__ = [
     "DefaultCFG",
     "RenderMode",
     "RenderingConfig",
-    "FilteringConfig",
     "ThemePreset",
     "AppearanceConfig",
     "TypstPluginConfig",

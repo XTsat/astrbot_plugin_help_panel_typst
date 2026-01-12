@@ -24,7 +24,12 @@ class InternalCFG:
     }
 
     # 会引起布局变动的配置项 → 缓存失效
-    CACHE_SENSITIVE_CONFIGS: list[str] = ["giant_threshold", "split_height", "ppi"]
+    CACHE_SENSITIVE_CONFIGS: list[str] = [
+        "giant_threshold", 
+        "split_height", 
+        "ppi",
+        "ignored_plugins"
+    ]
 
     # 文件/文件夹名
     NAME_TEMPLATE: str = "base.typ"
@@ -47,7 +52,6 @@ class DefaultCFG:
     # 2. 超时设置 (秒)
     TIMEOUT_ANALYSIS: float = 10.0
     TIMEOUT_COMPILE: float = 30.0
-    TIMEOUT_SCAN: float = 3.0
 
     # 3. 过滤设置
     # config.py 负责 list → set
