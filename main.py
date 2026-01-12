@@ -201,32 +201,25 @@ class HelpTypst(Star):
             logger.warning(f"[HelpTypst] 获取唤醒词失败，使用默认值 '/': {e}")
             self.prefixes = ["/"]
 
-    def _parse_query(self, event: AstrMessageEvent) -> str | None:
-        parts = event.message_str.strip().split(maxsplit=1)
-        return parts[1].strip() if len(parts) > 1 else None
-
     @filter.command("helps")
-    async def show_menu(self, event: AstrMessageEvent):
+    async def show_menu(self, event: AstrMessageEvent, query: str = ""):
         """显示指令菜单"""
-        query = self._parse_query(event)
         async for r in self._handle_request(
             event, self.cmd_analyzer, "AstrBot 指令菜单", "command", query
         ):
             yield r
 
     @filter.command("events")
-    async def show_events(self, event: AstrMessageEvent):
+    async def show_events(self, event: AstrMessageEvent, query: str = ""):
         """显示事件监听列表"""
-        query = self._parse_query(event)
         async for r in self._handle_request(
             event, self.evt_analyzer, "AstrBot 事件监听", "event", query
         ):
             yield r
 
     @filter.command("filters")
-    async def show_filters(self, event: AstrMessageEvent):
+    async def show_filters(self, event: AstrMessageEvent, query: str = ""):
         """显示过滤器详情"""
-        query = self._parse_query(event)
         async for r in self._handle_request(
             event, self.flt_analyzer, "AstrBot 过滤器分析", "filter", query
         ):

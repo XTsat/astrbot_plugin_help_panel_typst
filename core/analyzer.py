@@ -32,6 +32,9 @@ class BaseAnalyzer:
 
     def get_plugins(self, query: str | None = None) -> list[PluginMetadata]:
         """获取（经过搜索过滤的）插件列表"""
+        if not query:
+            query = None
+
         try:
             # 1. 获取全量数据
             structured_plugins = self.analyze_hierarchy()
