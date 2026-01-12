@@ -45,7 +45,17 @@
 ## 🧱 依赖
 AstrBot
 <br>typst>=0.11
+<br>fonttools>=4.0.0
+<br>brotli>=1.0.0
 <br>pydantic
+
+## ❓ 常见问题
+
+### Typst 字体优先级
+文档显式指定 > 项目字体目录 > 系统字体库
+* 文档显式指定：通过 #set text(font: "font-family-name") 直接指定，优先级最高
+* 项目字体目录：即本插件的根目录下的 ./resources/fonts ，后面会考虑增加额外的目录支持
+* 系统字体库：获取系统默认字体目录 ( Windows、macOS 应该有官方支持，Linux 未测试支持度如何；🚨 docker 环境可能需要安装字体依赖）
 
 ## 🌳 目录结构（初步预期）
 ```
@@ -53,19 +63,20 @@ astrbot_plugin_typst_menu/
 ├── main.py                # [入口] AstrBot 插件主文件，注册指令和事件，转发给 core
 ├── domain/                # [数据定义层] (最底层，无依赖)
 │    ├── constants.py          # 存储 “魔术数字” 统一于此维护调试
+│    ├── config.py             # 配置结构
 │    └── schemas.py            # Pydantic Models & TypedDicts
 ├── utils/                 # [通用工具层] (各类公开可复用的静态方法)
-│    ├── config.py             # 配置转换 & 读取
 │    ├── hash.py               # hash
+│    ├── font.py               # 字体扫描 & 管理
 │    ├── image.py              # 图片处理
 │    └── views.py              # [视图层] 处理通过指令组管理和调试插件时展示给用户的格式化文本
 ├── core/                  # [核心业务层] (纯 Python 逻辑)
 │    ├── analyzer.py           # 获取、组织数据
 │    ├── renderer.py           # 渲染调度
-│    └── worker.py             # 进程调用
+│    └── worker.py             # 进程调用（即用即销）
 ├── templates/             # Typst 模板文件
 │    └── base.typ              # 基础库文件 (类似 CSS Reset)
-└── resources/                 # 静态资源
+└── resources/             # 静态资源
      ├── fonts/                # 内置开源中文字体
      └── images/               # 默认背景图、图标
 

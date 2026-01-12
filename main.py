@@ -1,11 +1,10 @@
 import asyncio
 from pathlib import Path
-from typing import List
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools
-import astrbot.api.message_components as Comp
+from astrbot.api.message_components import Image
 
 from .domain import InternalCFG, TypstPluginConfig
 from .utils import FontManager, HelpHint, MsgRecall, TypstLayout
@@ -31,7 +30,7 @@ class HelpTypst(Star):
         self.plugin_config = TypstPluginConfig.load(config)
 
         # 3. 视图层
-        self.prefixes: List[str] = []
+        self.prefixes: list[str] = []
         self._init_prefixes(context)
 
         self.layout = TypstLayout(self.plugin_config)
@@ -170,9 +169,7 @@ class HelpTypst(Star):
         # 4. 处理结果
         if result:
             try:
-                # 构建消息链
-                comps = [Comp.Image.fromFileSystem(p) for p in result.images]
-                yield event.chain_result(comps)
+                yield event.chain_result([Image.fromFileSystem(p) for p in result.images])
             finally:
                 # 后台任务清理文件列表
                 if result.temp_files:

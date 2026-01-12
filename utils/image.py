@@ -1,6 +1,6 @@
 import math
 from pathlib import Path
-from typing import List
+
 from PIL import Image
 
 
@@ -20,7 +20,7 @@ def process_image_to_webp(
     stem_name: str,
     webp_limit: int,
     split_height: int,
-) -> List[str]:
+) -> list[str]:
     """核心图片处理逻辑"""
     images = []
     src_path_obj = Path(source_path)

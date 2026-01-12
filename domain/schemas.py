@@ -1,4 +1,5 @@
-from typing import List, Optional, Any
+from typing import Any
+
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
@@ -18,10 +19,10 @@ class RenderNode(BaseModel):
     is_group: bool = Field(default=False, description="是否为容器/分组")
 
     tag: str = Field(default="normal", description="标记类型: normal/admin/event")
-    priority: Optional[int] = Field(default=None, description="事件监听优先级")
+    priority: int | None = Field(default=None, description="事件监听优先级")
 
     # 递归定义
-    children: List["RenderNode"] = Field(default_factory=list, description="子节点")
+    children: list["RenderNode"] = Field(default_factory=list, description="子节点")
 
     # 验证器
     @field_validator("name", mode="before")
@@ -42,11 +43,11 @@ class PluginMetadata(BaseModel):
     )
 
     name: str = Field(..., description="插件ID")
-    display_name: Optional[str] = Field(None, description="展示名称")
-    version: Optional[str] = Field(None, description="版本号")
+    display_name: str | None = Field(None, description="展示名称")
+    version: str | None = Field(None, description="版本号")
     desc: str = Field(default="")
 
-    nodes: List[RenderNode] = Field(default_factory=list)
+    nodes: list[RenderNode] = Field(default_factory=list)
 
     @field_validator("name", mode="before")
     @classmethod

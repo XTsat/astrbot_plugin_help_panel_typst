@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Set, List, Dict, Any
+from typing import Any
 
 from astrbot.api import logger
 
@@ -15,7 +15,7 @@ except ImportError:
 class FontManager:
     def __init__(self, font_dir: Path):
         self.font_dir = font_dir
-        self.available_families: Set[str] = set()
+        self.available_families: set[str] = set()
 
     def scan_fonts(self):
         """扫描本地字体(.ttf .otf .woff2)"""
@@ -111,7 +111,7 @@ class FontManager:
         except Exception as e:
             logger.warning(f"[HelpTypst] Schema 更新失败: {e}")
 
-    def prune_invalid_config_items(self, config: Dict[str, Any]):
+    def prune_invalid_config_items(self, config: dict[str, Any]):
         """失效字体清洗"""
         if not self.available_families:
             return  # 避免扫描失败导致清空配置
@@ -149,7 +149,7 @@ class FontManager:
             except Exception as e:
                 logger.warning(f"[HelpTypst] 字体配置保存失败: {e}")
 
-    def get_render_font_list(self, user_config_order: List[str]) -> List[str]:
+    def get_render_font_list(self, user_config_order: list[str]) -> list[str]:
         """生成传给 Typst 的最终字体列表"""
         final = []
         seen = set()

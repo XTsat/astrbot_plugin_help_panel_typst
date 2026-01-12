@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import List, Dict, Optional, Set, Any
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.star import Context
@@ -30,7 +30,7 @@ class BaseAnalyzer:
         self.context = context
         self.cfg = config
 
-    def get_plugins(self, query: str | None = None) -> List[PluginMetadata]:
+    def get_plugins(self, query: str | None = None) -> list[PluginMetadata]:
         """获取（经过搜索过滤的）插件列表"""
         try:
             # 1. 获取全量数据
@@ -72,7 +72,7 @@ class BaseAnalyzer:
             return []
 
     def _is_match(
-        self, name: str, display: Optional[str], desc: str, query: str
+        self, name: str, display: str | None, desc: str, query: str
     ) -> bool:
         """基础匹配检查"""
         if query in name.lower():
@@ -84,8 +84,8 @@ class BaseAnalyzer:
         return False
 
     def _filter_nodes_recursively(
-        self, nodes: List[RenderNode], query: str
-    ) -> List[RenderNode]:
+        self, nodes: list[RenderNode], query: str
+    ) -> list[RenderNode]:
         """递归过滤节点树，返回一个新的包含匹配的节点的节点列表"""
         result = []
         for node in nodes:
@@ -108,17 +108,17 @@ class BaseAnalyzer:
                         result.append(node)
         return result
 
-    def analyze_hierarchy(self) -> List[PluginMetadata]:
+    def analyze_hierarchy(self) -> list[PluginMetadata]:
         raise NotImplementedError
 
-    def _group_handlers_by_module(self) -> Dict[str, List[StarHandlerMetadata]]:
+    def _group_handlers_by_module(self) -> dict[str, list[StarHandlerMetadata]]:
         mapping = defaultdict(list)
         for handler in star_handlers_registry:
             if isinstance(handler, StarHandlerMetadata) and handler.handler_module_path:
                 mapping[handler.handler_module_path].append(handler)
         return mapping
 
-    def _get_safe_plugin_info(self, star_meta: Any) -> Dict[str, str | None]:
+    def _get_safe_plugin_info(self, star_meta: Any) -> dict[str, str | None]:
         """针对不规范的插件元信息进行防御性编程"""
         if not star_meta:
             return {"name": "Unknown", "display_name": None, "version": "", "desc": ""}
@@ -163,7 +163,7 @@ class BaseAnalyzer:
 class CommandAnalyzer(BaseAnalyzer):
     """指令分析器：处理 CommandFilter / CommandGroupFilter"""
 
-    def analyze_hierarchy(self) -> List[PluginMetadata]:
+    def analyze_hierarchy(self) -> list[PluginMetadata]:
         handlers_map = self._group_handlers_by_module()
         results = []
         all_stars = self.context.get_all_stars()
@@ -235,8 +235,8 @@ class CommandAnalyzer(BaseAnalyzer):
         return results
 
     def _build_plugin_command_tree(
-        self, handlers: List[StarHandlerMetadata]
-    ) -> List[RenderNode]:
+        self, handlers: list[StarHandlerMetadata]
+    ) -> list[RenderNode]:
         nodes = []
         # 黑名单扫描：防止子组重复出现在顶层
         child_handlers_blacklist = self._scan_all_children(handlers)
@@ -276,7 +276,7 @@ class CommandAnalyzer(BaseAnalyzer):
         self._sort_nodes(nodes)
         return nodes
 
-    def _scan_all_children(self, handlers: List[StarHandlerMetadata]) -> Set[str]:
+    def _scan_all_children(self, handlers: list[StarHandlerMetadata]) -> set[str]:
         blacklist = set()
         groups_map = {}
         for h in handlers:
@@ -323,7 +323,7 @@ class CommandAnalyzer(BaseAnalyzer):
             children=children,
         )
 
-    def _process_sub_filter(self, filter_obj: Any) -> Optional[RenderNode]:
+    def _process_sub_filter(self, filter_obj: Any) -> RenderNode | None:
         handler = getattr(filter_obj, "handler_md", None)
         desc = self._get_desc_safely(handler)
         tag = self._check_permission(handler) if handler else "normal"
@@ -361,7 +361,7 @@ class CommandAnalyzer(BaseAnalyzer):
             tag=self._check_permission(handler),
         )
 
-    def _sort_nodes(self, nodes: List[RenderNode]):
+    def _sort_nodes(self, nodes: list[RenderNode]):
         nodes.sort(key=lambda x: (x.is_group, x.name))
 
     def _check_permission(self, handler: Any) -> str:
@@ -390,7 +390,7 @@ class CommandAnalyzer(BaseAnalyzer):
 class EventAnalyzer(BaseAnalyzer):
     """事件分析器：处理所有 EventType，获取完整工具列表（含 MCP）"""
 
-    def analyze_hierarchy(self) -> List[PluginMetadata]:
+    def analyze_hierarchy(self) -> list[PluginMetadata]:
         results = []
 
         # 1. 映射模块路径到插件对象
@@ -541,7 +541,7 @@ class EventAnalyzer(BaseAnalyzer):
 class FilterAnalyzer(BaseAnalyzer):
     """过滤器分析器"""
 
-    def analyze_hierarchy(self) -> List[PluginMetadata]:
+    def analyze_hierarchy(self) -> list[PluginMetadata]:
         results = []
         module_to_plugin = {}
         all_stars = self.context.get_all_stars()
@@ -669,7 +669,7 @@ class FilterAnalyzer(BaseAnalyzer):
         self,
         title: str,
         tag_prefix: str,
-        data: Dict[str, List[StarHandlerMetadata]],
+        data: dict[str, list[StarHandlerMetadata]],
         module_to_plugin: dict,
     ) -> PluginMetadata:
         nodes = []

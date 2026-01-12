@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Set, List, Dict
 
 from astrbot.api import AstrBotConfig, logger
 
@@ -19,7 +18,7 @@ class RenderingConfig:
 
 @dataclass
 class FilteringConfig:
-    ignored_plugins: Set[str]
+    ignored_plugins: set[str]
 
 
 @dataclass
@@ -27,7 +26,7 @@ class ThemePreset:
     """单个外观预设"""
 
     name: str
-    font_order: List[str]
+    font_order: list[str]
     # 留待未来扩展
 
 
@@ -36,9 +35,9 @@ class AppearanceConfig:
     """外观配置聚合"""
 
     active_preset: str
-    presets: Dict[str, ThemePreset]
+    presets: dict[str, ThemePreset]
 
-    def get_active_font_order(self) -> List[str]:
+    def get_active_font_order(self) -> list[str]:
         """获取当前激活预设的字体列表"""
         preset = self.presets.get(self.active_preset)
         if preset:

@@ -1,10 +1,11 @@
 import asyncio
+import json
 import time
 import uuid
-import json
-from pathlib import Path
-from typing import Optional, Callable, List, Dict, Any, Tuple
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+from typing import Any
 
 from astrbot.api import logger
 
@@ -47,7 +48,7 @@ class TypstRenderer:
         # 静态资源锁
         self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
 
-    def _get_config_snapshot(self) -> Dict[str, Any]:
+    def _get_config_snapshot(self) -> dict[str, Any]:
         """渲染配置的快照字典"""
         snapshot = {}
         for key in InternalCFG.CACHE_SENSITIVE_CONFIGS:
@@ -64,8 +65,8 @@ class TypstRenderer:
         self,
         data_provider: Callable[[Path], int],
         mode: str,
-        query: Optional[str] = None,
-    ) -> Tuple[Optional[RenderResult], str]:
+        query: str | None = None,
+    ) -> tuple[RenderResult | None, str]:
         """核心渲染流程"""
         # 1. 确定路径策略
         paths = self._resolve_paths(mode, query)
@@ -186,7 +187,7 @@ class TypstRenderer:
 
         return None, "未知错误"
 
-    def _resolve_paths(self, mode: str, query: Optional[str]) -> Dict[str, Any]:
+    def _resolve_paths(self, mode: str, query: str | None) -> dict[str, Any]:
         """计算文件路径"""
         if query:
             uid = str(uuid.uuid4())
@@ -207,7 +208,7 @@ class TypstRenderer:
                 "req_id": "static",
             }
 
-    def _find_cached_webps(self, stem: str) -> List[str]:
+    def _find_cached_webps(self, stem: str) -> list[str]:
         p1 = self.data_dir / f"{stem}.webp"
         if p1.exists():
             return [str(p1)]

@@ -1,8 +1,8 @@
-import math
-import json
 import asyncio
+import json
+import math
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
@@ -19,7 +19,7 @@ class HelpHint:
     def msg_rendering(self, mode: str) -> str:
         return "正在渲染..." if mode == "command" else "正在获取列表..."
 
-    def msg_empty_result(self, mode: str, query: Optional[str]) -> str:
+    def msg_empty_result(self, mode: str, query: str | None) -> str:
         target = "事件监听器" if mode == "event" else "插件或指令"
         if query:
             return f"未找到包含 '{query}' 的{target}。"
@@ -31,7 +31,7 @@ class MsgRecall:
 
     async def send_wait(
         self, event: AstrMessageEvent, text: str
-    ) -> Optional[Union[int, str]]:
+    ) -> int | str | None:
         """发送提示并返回消息ID"""
         bot = event.bot
         payload = event.plain_result(text)
@@ -72,7 +72,7 @@ class MsgRecall:
             logger.error(f"[HelpTypst] 发送等待消息失败: {e}")
             return None
 
-    async def recall(self, event: AstrMessageEvent, message_id: Union[int, str, None]):
+    async def recall(self, event: AstrMessageEvent, message_id: int | str | None):
         """撤回指定消息"""
         if not message_id:
             return
@@ -96,7 +96,7 @@ class MsgRecall:
         except Exception as e:
             logger.warning(f"[HelpTypst] 撤回消息 {message_id} 失败: {e}")
 
-    def _extract_message_id(self, resp: Any) -> Optional[Union[int, str]]:
+    def _extract_message_id(self, resp: Any) -> int | str | None:
         """提取 Message ID"""
         if not resp:
             return None
@@ -132,12 +132,12 @@ class TypstLayout:
 
     def dump_layout_json(
         self,
-        plugins: List[PluginMetadata],
+        plugins: list[PluginMetadata],
         save_path: Path,
         title: str,
         mode: str,
-        prefixes: List[str],
-        font_list: List[str],
+        prefixes: list[str],
+        font_list: list[str],
     ):
         """生成布局数据并写入文件"""
         payload = self._generate_balanced_payload(
@@ -150,19 +150,19 @@ class TypstLayout:
 
     def _generate_balanced_payload(
         self,
-        plugins: List[PluginMetadata],
+        plugins: list[PluginMetadata],
         title: str,
         mode: str,
-        prefixes: List[str],
-        font_list: List[str],
-    ) -> Dict[str, Any]:
+        prefixes: list[str],
+        font_list: list[str],
+    ) -> dict[str, Any]:
         """瀑布流分发逻辑"""
         giants = []
         complex_plugins = []
         single_node_plugins = []
 
         # 辅助函数：获取节点列表
-        def get_nodes(p: PluginMetadata) -> List[RenderNode]:
+        def get_nodes(p: PluginMetadata) -> list[RenderNode]:
             if hasattr(p, "nodes") and p.nodes:
                 return p.nodes
             if hasattr(p, "command_nodes") and p.command_nodes:
@@ -228,7 +228,7 @@ class TypstLayout:
             "singles": single_node_plugins,
         }
 
-    def _estimate_height(self, nodes: List[RenderNode]) -> int:
+    def _estimate_height(self, nodes: list[RenderNode]) -> int:
         """高度估算器(暂硬编码，等待完善模板逻辑)"""
         total_h = 0
         complex_nodes = [n for n in nodes if n.is_group or n.desc != ""]
