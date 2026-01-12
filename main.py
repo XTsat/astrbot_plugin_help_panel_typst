@@ -7,24 +7,27 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools
 import astrbot.api.message_components as Comp
 
-from .domain import InternalCFG
-from .utils import TypstPluginConfig, HelpHint, MsgRecall, TypstLayout
+from .domain import InternalCFG, TypstPluginConfig
+from .utils import FontManager, HelpHint, MsgRecall, TypstLayout
 from .core import CommandAnalyzer, EventAnalyzer, FilterAnalyzer, TypstRenderer
 
 class HelpTypst(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-
-        # 1. 配置 (字典 → 强类型的 Dataclass)
-        self.plugin_config = TypstPluginConfig.load(config)
-
-        # 2. 路径
+        # 1. 资源路径
         self.plugin_dir = Path(__file__).parent
         self.data_dir = StarTools.get_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        template_path = self.plugin_dir / "templates" / InternalCFG.NAME_TEMPLATE
-        font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR
+        self.template_path = self.plugin_dir / "templates" / InternalCFG.NAME_TEMPLATE
+        self.font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR
+        self.schema_path = self.plugin_dir / "_conf_schema.json"
+
+        # 2. 配置 & 同步
+        self.config = config
+        self.font_manager = FontManager(self.font_dir)
+        self._refresh_resources()
+        self.plugin_config = TypstPluginConfig.load(config)
 
         # 3. 视图层
         self.prefixes: List[str] = []
@@ -37,8 +40,8 @@ class HelpTypst(Star):
         # 4. 渲染引擎配置注入
         self.renderer = TypstRenderer(
             data_dir=self.data_dir,
-            template_path=template_path,
-            font_dir=font_dir,
+            template_path=self.template_path,
+            font_dir=self.font_dir,
             config=self.plugin_config.rendering
         )
 
@@ -47,18 +50,66 @@ class HelpTypst(Star):
         self.evt_analyzer = EventAnalyzer(context, self.plugin_config)
         self.flt_analyzer = FilterAnalyzer(context, self.plugin_config)
 
-    def _init_prefixes(self, context: Context):
-        """唤醒词"""
+    def _refresh_resources(self):
         try:
-            global_config = context.get_config()
-            raw = global_config.get("wake_prefix", ["/"])
-            if isinstance(raw, str):
-                self.prefixes = [raw]
-            else:
-                self.prefixes = list(raw)
+            # 1. 扫描
+            self.font_manager.scan_fonts()
+
+            # 2. 更新 Schema
+            self.font_manager.update_json_schema(self.schema_path)
+
+            # 3. 清洗 Config
+            self.font_manager.prune_invalid_config_items(self.config)
+
         except Exception as e:
-            logger.warning(f"[HelpTypst] 获取唤醒词失败，使用默认值 '/': {e}")
-            self.prefixes = ["/"]
+            logger.warning(f"[HelpTypst] Resource refresh failed: {e}")
+
+    async def terminate(self):
+        """周期hook"""
+        # 1. 清理临时文件
+        try:
+            for f in self.data_dir.glob("temp_*"):
+                try: f.unlink()
+                except: pass
+        except Exception: pass
+
+        # 2. [Dirty Hook] 刷新 Schema (这是自动维护的最佳时点)
+        try:
+            self._refresh_resources()
+        except Exception: pass
+
+    @filter.command_group("typst") # 该指令组留待扩展更多调试功能
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    def typst(self):
+        pass
+
+    @typst.command("font")
+    async def cmd_scan_fonts(self, event: AstrMessageEvent):
+        """扫描字体并重载插件"""
+        # 1. 扫描与更新
+        self._refresh_resources()
+        count = len(self.font_manager.available_families)
+
+        # 2. 尝试自我重载
+        try:
+            pm = getattr(self.context, "_star_manager", None) # hack: 获取 PluginManager 实例
+            if pm:
+                plugin_name = getattr(self, "name", "astrbot_plugin_help_typst")
+                yield event.plain_result(f"✅ 扫描完成 ({count} fonts)。正在重载以刷新面板...")
+                asyncio.create_task(self._safe_reload(pm, plugin_name)) # 异步延迟重载
+            else:
+                yield event.plain_result(f"✅ 扫描完成 ({count} fonts)。请手动重载插件")
+        except Exception as e:
+            yield event.plain_result(f"❌ 自动重载失败: {e}")
+
+    async def _safe_reload(self, pm, plugin_name):
+        """延迟重载"""
+        await asyncio.sleep(InternalCFG.DELAY_SEND)
+        try:
+            logger.info(f"[HelpTypst] 正在执行自我重载: {plugin_name}")
+            await pm.reload(plugin_name)
+        except Exception as e:
+            logger.error(f"[HelpTypst] 自我重载异常: {e}")
 
     async def _handle_request(self, event: AstrMessageEvent, analyzer, title: str, mode: str, query: str | None):
         """通用请求处理逻辑"""
@@ -74,12 +125,16 @@ class HelpTypst(Star):
 
             # 视图层：决定标题 & 计算布局 & 写入JSON
             display_title = f"搜索结果: \"{query}\"" if query else title
+            user_fonts = self.plugin_config.appearance.get_active_font_order()   # 预设字体配置
+            final_font_list = self.font_manager.get_render_font_list(user_fonts) # 校验
+
             self.layout.dump_layout_json(
                 plugins=plugins, 
                 save_path=save_path, 
                 title=display_title, 
                 mode=mode,
-                prefixes=self.prefixes
+                prefixes=self.prefixes,
+                font_list=final_font_list
             )
 
             return len(plugins)
@@ -117,6 +172,16 @@ class HelpTypst(Star):
             except Exception as e:
                 logger.warning(f"[HelpTypst] 临时文件清理失败 {p}: {e}")
 
+    def _init_prefixes(self, context: Context):
+        """唤醒词"""
+        try:
+            global_config = context.get_config()
+            raw = global_config.get("wake_prefix", ["/"])
+            self.prefixes = [raw] if isinstance(raw, str) else list(raw)
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 获取唤醒词失败，使用默认值 '/': {e}")
+            self.prefixes = ["/"]
+
     def _parse_query(self, event: AstrMessageEvent) -> str | None:
         parts = event.message_str.strip().split(maxsplit=1)
         return parts[1].strip() if len(parts) > 1 else None
@@ -142,10 +207,4 @@ class HelpTypst(Star):
         async for r in self._handle_request(event, self.flt_analyzer, "AstrBot 过滤器分析", "filter", query):
             yield r
 
-    async def terminate(self):
-        """插件卸载时清理"""
-        try:
-            for f in self.data_dir.glob("temp_*"):
-                try: f.unlink()
-                except: pass
-        except Exception: pass
+    

@@ -12,8 +12,7 @@ from astrbot.core.star.filter.platform_adapter_type import PlatformAdapterTypeFi
 from astrbot.core.star.filter.event_message_type import EventMessageTypeFilter, EventMessageType
 from astrbot.core.agent.mcp_client import MCPTool
 
-from ..domain import PluginMetadata, RenderNode, InternalCFG
-from ..utils import TypstPluginConfig
+from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
 
 class BaseAnalyzer:
     def __init__(self, context: Context, config: TypstPluginConfig):

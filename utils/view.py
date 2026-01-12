@@ -7,9 +7,7 @@ from typing import List, Dict, Any, Optional, Union
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 
-from ..domain import PluginMetadata, RenderNode, InternalCFG
-from . import TypstPluginConfig
-
+from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
 
 class HelpHint:
     """提供用户提示文本"""
@@ -118,16 +116,16 @@ class TypstLayout:
     def __init__(self, config: TypstPluginConfig):
         self.cfg = config
 
-    def dump_layout_json(self, plugins: List[PluginMetadata], save_path: Path, title: str, mode: str, prefixes: List[str]):
+    def dump_layout_json(self, plugins: List[PluginMetadata], save_path: Path, title: str, mode: str, prefixes: List[str], font_list: List[str]):
         """生成布局数据并写入文件"""
-        payload = self._generate_balanced_payload(plugins, title, mode, prefixes)
+        payload = self._generate_balanced_payload(plugins, title, mode, prefixes, font_list)
 
         save_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
 
-    def _generate_balanced_payload(self, plugins: List[PluginMetadata], title: str, mode: str, prefixes: List[str]) -> Dict[str, Any]:
+    def _generate_balanced_payload(self, plugins: List[PluginMetadata], title: str, mode: str, prefixes: List[str], font_list: List[str]) -> Dict[str, Any]:
         """瀑布流分发逻辑"""
         giants = []
         complex_plugins = []
@@ -187,6 +185,7 @@ class TypstLayout:
             "title": title,
             "mode": mode,
             "prefixes": prefixes,
+            "fonts": font_list,
             "plugin_count": len(plugins),
             "giants": giants,
             "columns": cols_data, 

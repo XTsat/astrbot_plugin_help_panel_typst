@@ -8,8 +8,8 @@ from concurrent.futures import ProcessPoolExecutor
 
 from astrbot.api import logger
 
-from ..domain import InternalCFG
-from ..utils import calculate_hash, verify_image_header, RenderingConfig
+from ..domain import InternalCFG, RenderingConfig
+from ..utils import calculate_hash, verify_image_header
 from . import execute_render_task, RenderTask
 
 class AsyncNullContext: # 异步空上下文
@@ -40,6 +40,11 @@ class TypstRenderer:
         for key in InternalCFG.CACHE_SENSITIVE_CONFIGS:
             if hasattr(self.cfg, key):
                 snapshot[key] = getattr(self.cfg, key)
+
+        # 提取“生效中”的外观配置
+        if hasattr(self.cfg, "appearance"):
+            snapshot["effective_fonts"] = self.cfg.appearance.get_active_font_order()
+
         return snapshot
 
     async def render(self, data_provider: Callable[[Path], int], mode: str, query: Optional[str] = None) -> Tuple[Optional[RenderResult], str]:

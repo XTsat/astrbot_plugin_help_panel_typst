@@ -1,2 +1,4 @@
 typst>=0.11
+fonttools>=4.0.0
+brotli>=1.0.0
 pydantic

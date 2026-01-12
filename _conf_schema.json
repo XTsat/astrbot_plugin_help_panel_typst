@@ -24,7 +24,7 @@
 	  "ppi": {
         "description": "图片清晰度 (PPI)",
         "type": "float",
-        "default": 144.0,
+        "default": 180.0,
         "hint": "越高图片越清晰，但越慢&大&高占用，根据内存 & 带宽调整"
       },
       "giant_threshold": {
@@ -58,6 +58,50 @@
           "astrbot_plugin_help_typst"
         ],
         "hint": "屏蔽不想展示、导致问题的插件菜单"
+      }
+    }
+  },
+  "appearance": {
+    "description": "外观与主题预设",
+    "type": "object",
+    "items": {
+      "active_preset": {
+        "description": "当前激活的预设名称",
+        "type": "string",
+        "default": "default",
+        "hint": "填写下方预设列表中的 '预设名称' (preset_name)"
+      },
+      "presets": {
+        "description": "主题预设列表",
+        "type": "template_list",
+        "default": [
+          {
+            "__template_key": "standard_theme",
+            "preset_name": "default",
+            "font_order": ["Sarasa Gothic SC", "Noto Color Emoji"]
+          }
+        ],
+        "templates": {
+          "standard_theme": {
+            "name": "标准主题模板",
+            "hint": "自定义字体优先级",
+            "items": {
+              "preset_name": {
+                "description": "预设名称 (ID)",
+                "type": "string",
+                "default": "custom_1",
+                "hint": "用于在上方 'active_preset' 中引用"
+              },
+              "font_order": {
+                "description": "字体优先级排序",
+                "type": "list",
+                "hint": "勾选启用字体，调整回退顺序 (排在前面的优先使用)",
+                "default": ["Sarasa Gothic SC", "Noto Color Emoji"],
+                "options": ["Sarasa Gothic SC", "Noto Color Emoji"]
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -1,10 +1,14 @@
 // === 🔧 全局配置 ===
-#set page(width: 900pt, height: auto, margin: 20pt, fill: rgb("#f0f2f5"))
-#set text(font: ("Maple Mono NF"), size: 12pt)
 
+// --- 参数传入 ---
 #let data = json.decode(sys.inputs.json_string)
+#let user_fonts      = data.at("fonts", default: ("Sarasa Gothic SC", "Noto Color Emoji"))
 #let query_regex_str = sys.inputs.at("query_regex", default: none)
-#let generated_time = sys.inputs.at("timestamp", default: "Unknown Time")
+#let generated_time  = sys.inputs.at("timestamp", default: "Unknown Time")
+
+// --- 页面设置 ---
+#set page(width: 900pt, height: auto, margin: 20pt, fill: rgb("#f0f2f5"))
+#set text(font: user_fonts, size: 12pt)
 
 // === 🎨 调色板 ===
 
