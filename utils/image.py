@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List
 from PIL import Image
 
+
 def verify_image_header(path: Path) -> bool:
     """简单的图片完整性校验"""
     try:
@@ -12,18 +13,19 @@ def verify_image_header(path: Path) -> bool:
     except Exception:
         return False
 
+
 def process_image_to_webp(
-    source_path: str, 
-    output_dir: str, 
-    stem_name: str, 
-    webp_limit: int, 
-    split_height: int
+    source_path: str,
+    output_dir: str,
+    stem_name: str,
+    webp_limit: int,
+    split_height: int,
 ) -> List[str]:
     """核心图片处理逻辑"""
     images = []
     src_path_obj = Path(source_path)
     out_dir_obj = Path(output_dir)
-    
+
     if not src_path_obj.exists():
         return []
     try:
@@ -40,14 +42,14 @@ def process_image_to_webp(
                 for i in range(chunks):
                     top = i * split_height
                     bottom = min((i + 1) * split_height, total_height)
-                    
+
                     box = (0, top, width, bottom)
                     chunk = img.crop(box)
-                    
-                    chunk_path = out_dir_obj / f"{stem_name}_part{i+1}.webp"
+
+                    chunk_path = out_dir_obj / f"{stem_name}_part{i + 1}.webp"
                     chunk.save(chunk_path, "WEBP", quality=80, method=6)
                     images.append(str(chunk_path))
-                    
+
     except Exception as e:
         # 抛出异常让上层捕获
         raise RuntimeError(f"图片处理失败: {e}")

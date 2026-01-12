@@ -9,8 +9,10 @@ from astrbot.api.event import AstrMessageEvent, MessageChain
 
 from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
 
+
 class HelpHint:
     """提供用户提示文本"""
+
     def msg_searching(self, query: str) -> str:
         return f"正在搜索 '{query}'..."
 
@@ -26,7 +28,10 @@ class HelpHint:
 
 class MsgRecall:
     """负责发送提示消息, 并在完成后撤回"""
-    async def send_wait(self, event: AstrMessageEvent, text: str) -> Optional[Union[int, str]]:
+
+    async def send_wait(
+        self, event: AstrMessageEvent, text: str
+    ) -> Optional[Union[int, str]]:
         """发送提示并返回消息ID"""
         bot = event.bot
         payload = event.plain_result(text)
@@ -69,11 +74,12 @@ class MsgRecall:
 
     async def recall(self, event: AstrMessageEvent, message_id: Union[int, str, None]):
         """撤回指定消息"""
-        if not message_id: return
+        if not message_id:
+            return
         bot = event.bot
 
         # 稍等避免闪撤
-        await asyncio.sleep(InternalCFG.DELAY_SEND) 
+        await asyncio.sleep(InternalCFG.DELAY_SEND)
 
         try:
             # delete_msg
@@ -86,46 +92,70 @@ class MsgRecall:
                 except (ValueError, TypeError):
                     logger.debug(f"[HelpTypst] recall_message 不支持 ID: {message_id}")
             else:
-                logger.debug(f"[HelpTypst] 未找到撤回方法")
+                logger.debug("[HelpTypst] 未找到撤回方法")
         except Exception as e:
             logger.warning(f"[HelpTypst] 撤回消息 {message_id} 失败: {e}")
 
     def _extract_message_id(self, resp: Any) -> Optional[Union[int, str]]:
         """提取 Message ID"""
-        if not resp: return None
+        if not resp:
+            return None
 
         # 直接是 ID
-        if isinstance(resp, (int, str)): return resp
+        if isinstance(resp, (int, str)):
+            return resp
 
         # 字典结构解析
         if isinstance(resp, dict):
             data = resp.get("data")
             if isinstance(data, dict):
-                if "message_id" in data: return data["message_id"]
-                if "res_id" in data: return data["res_id"]
-                if "forward_id" in data: return data["forward_id"]
+                if "message_id" in data:
+                    return data["message_id"]
+                if "res_id" in data:
+                    return data["res_id"]
+                if "forward_id" in data:
+                    return data["forward_id"]
 
-            if "message_id" in resp: return resp["message_id"]
-        if hasattr(resp, "message_id"): return resp.message_id
+            if "message_id" in resp:
+                return resp["message_id"]
+        if hasattr(resp, "message_id"):
+            return resp.message_id
 
         return None
 
 
 class TypstLayout:
     """负责将结构化数据转换为 Typst 渲染所需的布局 JSON"""
+
     def __init__(self, config: TypstPluginConfig):
         self.cfg = config
 
-    def dump_layout_json(self, plugins: List[PluginMetadata], save_path: Path, title: str, mode: str, prefixes: List[str], font_list: List[str]):
+    def dump_layout_json(
+        self,
+        plugins: List[PluginMetadata],
+        save_path: Path,
+        title: str,
+        mode: str,
+        prefixes: List[str],
+        font_list: List[str],
+    ):
         """生成布局数据并写入文件"""
-        payload = self._generate_balanced_payload(plugins, title, mode, prefixes, font_list)
-
-        save_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8"
+        payload = self._generate_balanced_payload(
+            plugins, title, mode, prefixes, font_list
         )
 
-    def _generate_balanced_payload(self, plugins: List[PluginMetadata], title: str, mode: str, prefixes: List[str], font_list: List[str]) -> Dict[str, Any]:
+        save_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def _generate_balanced_payload(
+        self,
+        plugins: List[PluginMetadata],
+        title: str,
+        mode: str,
+        prefixes: List[str],
+        font_list: List[str],
+    ) -> Dict[str, Any]:
         """瀑布流分发逻辑"""
         giants = []
         complex_plugins = []
@@ -133,18 +163,22 @@ class TypstLayout:
 
         # 辅助函数：获取节点列表
         def get_nodes(p: PluginMetadata) -> List[RenderNode]:
-            if hasattr(p, "nodes") and p.nodes: return p.nodes
-            if hasattr(p, "command_nodes") and p.command_nodes: return p.command_nodes
+            if hasattr(p, "nodes") and p.nodes:
+                return p.nodes
+            if hasattr(p, "command_nodes") and p.command_nodes:
+                return p.command_nodes
             return []
 
-        extract_singles = (mode == "command")
+        extract_singles = mode == "command"
 
         # 1. 预分类
         for p in plugins:
             nodes = get_nodes(p)
 
             # A: 工具调用 -> Singles
-            is_tool = len(nodes) > 0 and (nodes[0].tag == "tool" or nodes[0].tag == "mcp")
+            is_tool = len(nodes) > 0 and (
+                nodes[0].tag == "tool" or nodes[0].tag == "mcp"
+            )
             if is_tool:
                 single_node_plugins.append(p.model_dump())
                 continue
@@ -156,7 +190,10 @@ class TypstLayout:
 
             # C: 巨型块 -> Giants (Event/Filter 模式)
             h_val = self._estimate_height(nodes)
-            if mode in ("event", "filter") and h_val > self.cfg.rendering.giant_threshold:
+            if (
+                mode in ("event", "filter")
+                and h_val > self.cfg.rendering.giant_threshold
+            ):
                 giants.append(p.model_dump())
                 continue
 
@@ -166,8 +203,7 @@ class TypstLayout:
         # 2. 瀑布流平衡算法
         # 计算高度权重 (+80 是对卡片头部和Padding的估算)
         plugins_with_height = [
-            (p, self._estimate_height(get_nodes(p)) + 80)
-            for p in complex_plugins
+            (p, self._estimate_height(get_nodes(p)) + 80) for p in complex_plugins
         ]
         # 降序排列 (贪心算法基础)
         sorted_plugins = sorted(plugins_with_height, key=lambda x: x[1], reverse=True)
@@ -188,8 +224,8 @@ class TypstLayout:
             "fonts": font_list,
             "plugin_count": len(plugins),
             "giants": giants,
-            "columns": cols_data, 
-            "singles": single_node_plugins 
+            "columns": cols_data,
+            "singles": single_node_plugins,
         }
 
     def _estimate_height(self, nodes: List[RenderNode]) -> int:
@@ -203,7 +239,7 @@ class TypstLayout:
             if node.is_group:
                 total_h += 60 + self._estimate_height(node.children)
             else:
-                total_h += 60 
+                total_h += 60
 
         # 简单节点：3列网格
         if simple_nodes:

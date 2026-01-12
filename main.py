@@ -11,6 +11,7 @@ from .domain import InternalCFG, TypstPluginConfig
 from .utils import FontManager, HelpHint, MsgRecall, TypstLayout
 from .core import CommandAnalyzer, EventAnalyzer, FilterAnalyzer, TypstRenderer
 
+
 class HelpTypst(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -35,14 +36,14 @@ class HelpTypst(Star):
 
         self.layout = TypstLayout(self.plugin_config)
         self.hint = HelpHint()
-        self.msg = MsgRecall() 
+        self.msg = MsgRecall()
 
         # 4. 渲染引擎配置注入
         self.renderer = TypstRenderer(
             data_dir=self.data_dir,
             template_path=self.template_path,
             font_dir=self.font_dir,
-            config=self.plugin_config.rendering
+            config=self.plugin_config.rendering,
         )
 
         # 5. 分析器
@@ -69,16 +70,20 @@ class HelpTypst(Star):
         # 1. 清理临时文件
         try:
             for f in self.data_dir.glob("temp_*"):
-                try: f.unlink()
-                except: pass
-        except Exception: pass
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # 2. [Dirty Hook] 刷新 Schema (这是自动维护的最佳时点)
         try:
             self._refresh_resources()
-        except Exception: pass
+        except Exception:
+            pass
 
-    @filter.command_group("typst") # 该指令组留待扩展更多调试功能
+    @filter.command_group("typst")  # 该指令组留待扩展更多调试功能
     @filter.permission_type(filter.PermissionType.ADMIN)
     def typst(self):
         pass
@@ -92,11 +97,15 @@ class HelpTypst(Star):
 
         # 2. 尝试自我重载
         try:
-            pm = getattr(self.context, "_star_manager", None) # hack: 获取 PluginManager 实例
+            pm = getattr(
+                self.context, "_star_manager", None
+            )  # hack: 获取 PluginManager 实例
             if pm:
                 plugin_name = getattr(self, "name", "astrbot_plugin_help_typst")
-                yield event.plain_result(f"✅ 扫描完成 ({count} fonts)。正在重载以刷新面板...")
-                asyncio.create_task(self._safe_reload(pm, plugin_name)) # 异步延迟重载
+                yield event.plain_result(
+                    f"✅ 扫描完成 ({count} fonts)。正在重载以刷新面板..."
+                )
+                asyncio.create_task(self._safe_reload(pm, plugin_name))  # 异步延迟重载
             else:
                 yield event.plain_result(f"✅ 扫描完成 ({count} fonts)。请手动重载插件")
         except Exception as e:
@@ -111,30 +120,42 @@ class HelpTypst(Star):
         except Exception as e:
             logger.error(f"[HelpTypst] 自我重载异常: {e}")
 
-    async def _handle_request(self, event: AstrMessageEvent, analyzer, title: str, mode: str, query: str | None):
+    async def _handle_request(
+        self,
+        event: AstrMessageEvent,
+        analyzer,
+        title: str,
+        mode: str,
+        query: str | None,
+    ):
         """通用请求处理逻辑"""
         # 1. 发送提示
-        hint_text = self.hint.msg_searching(query) if query else self.hint.msg_rendering(mode)
+        hint_text = (
+            self.hint.msg_searching(query) if query else self.hint.msg_rendering(mode)
+        )
         wait_msg_id = await self.msg.send_wait(event, hint_text)
 
         def data_pipeline(save_path: Path) -> int:
             """数据流转"""
             # 数据层：获取对象
             plugins = analyzer.get_plugins(query)
-            if not plugins: return 0
+            if not plugins:
+                return 0
 
             # 视图层：决定标题 & 计算布局 & 写入JSON
-            display_title = f"搜索结果: \"{query}\"" if query else title
-            user_fonts = self.plugin_config.appearance.get_active_font_order()   # 预设字体配置
-            final_font_list = self.font_manager.get_render_font_list(user_fonts) # 校验
+            display_title = f'搜索结果: "{query}"' if query else title
+            user_fonts = (
+                self.plugin_config.appearance.get_active_font_order()
+            )  # 预设字体配置
+            final_font_list = self.font_manager.get_render_font_list(user_fonts)  # 校验
 
             self.layout.dump_layout_json(
-                plugins=plugins, 
-                save_path=save_path, 
-                title=display_title, 
+                plugins=plugins,
+                save_path=save_path,
+                title=display_title,
                 mode=mode,
                 prefixes=self.prefixes,
-                font_list=final_font_list
+                font_list=final_font_list,
             )
 
             return len(plugins)
@@ -168,7 +189,8 @@ class HelpTypst(Star):
         await asyncio.sleep(InternalCFG.DELAY_SEND)
         for p in files:
             try:
-                if p.exists(): p.unlink()
+                if p.exists():
+                    p.unlink()
             except Exception as e:
                 logger.warning(f"[HelpTypst] 临时文件清理失败 {p}: {e}")
 
@@ -190,21 +212,25 @@ class HelpTypst(Star):
     async def show_menu(self, event: AstrMessageEvent):
         """显示指令菜单"""
         query = self._parse_query(event)
-        async for r in self._handle_request(event, self.cmd_analyzer, "AstrBot 指令菜单", "command", query):
+        async for r in self._handle_request(
+            event, self.cmd_analyzer, "AstrBot 指令菜单", "command", query
+        ):
             yield r
 
     @filter.command("events")
     async def show_events(self, event: AstrMessageEvent):
         """显示事件监听列表"""
         query = self._parse_query(event)
-        async for r in self._handle_request(event, self.evt_analyzer, "AstrBot 事件监听", "event", query):
+        async for r in self._handle_request(
+            event, self.evt_analyzer, "AstrBot 事件监听", "event", query
+        ):
             yield r
 
     @filter.command("filters")
     async def show_filters(self, event: AstrMessageEvent):
         """显示过滤器详情"""
         query = self._parse_query(event)
-        async for r in self._handle_request(event, self.flt_analyzer, "AstrBot 过滤器分析", "filter", query):
+        async for r in self._handle_request(
+            event, self.flt_analyzer, "AstrBot 过滤器分析", "filter", query
+        ):
             yield r
-
-    

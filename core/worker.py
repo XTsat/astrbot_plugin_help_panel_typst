@@ -11,6 +11,7 @@ import ctypes
 from ..domain import DefaultCFG
 from ..utils import process_image_to_webp
 
+
 def force_memory_release():
     # Python 层
     gc.collect()
@@ -22,6 +23,7 @@ def force_memory_release():
             libc.malloc_trim(0)
         except Exception:
             pass
+
 
 @dataclass
 class RenderTask:
@@ -37,6 +39,7 @@ class RenderTask:
     webp_limit: int = DefaultCFG.LIMIT_WEBP
     split_height: int = DefaultCFG.LIMIT_SIDE
     ppi: float = DefaultCFG.LIMIT_PPI
+
 
 def execute_render_task(task: RenderTask) -> List[str]:
     """渲染子进程"""
@@ -54,9 +57,9 @@ def execute_render_task(task: RenderTask) -> List[str]:
             task.template_path,
             output=task.output_png_path,
             font_paths=task.font_paths,
-            format="png", 
+            format="png",
             ppi=task.ppi,
-            sys_inputs=sys_inputs
+            sys_inputs=sys_inputs,
         )
 
         # 3. 调用图片处理
@@ -69,7 +72,7 @@ def execute_render_task(task: RenderTask) -> List[str]:
             output_dir=task.output_dir,
             stem_name=final_stem,
             webp_limit=task.webp_limit,
-            split_height=task.split_height
+            split_height=task.split_height,
         )
 
     except Exception:
