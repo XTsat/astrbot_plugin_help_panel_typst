@@ -6,7 +6,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.message_components import Image
 
-from .domain import InternalCFG, TypstPluginConfig
+from .domain import InternalCFG, DefaultCFG, TypstPluginConfig
 from .utils import FontManager, HelpHint, MsgRecall, TypstLayout
 from .core import CommandAnalyzer, EventAnalyzer, FilterAnalyzer, TypstRenderer
 
@@ -23,21 +23,17 @@ class HelpTypst(Star):
         self.font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR
         self.schema_path = self.plugin_dir / "_conf_schema.json"
 
-        # 2. 配置 & 同步
+        # 2. 配置加载
         self.config = config
-        self.font_manager = FontManager(self.font_dir)
-        self._refresh_resources()
         self.plugin_config = TypstPluginConfig.load(config)
 
-        # 3. 视图层
-        self.prefixes: list[str] = []
-        self._init_prefixes(context)
-
+        # 3. 初始化组件
+        self.font_manager = FontManager(self.font_dir)
         self.layout = TypstLayout(self.plugin_config)
         self.hint = HelpHint()
         self.msg = MsgRecall()
 
-        # 4. 渲染引擎配置注入
+        # 4. 渲染器
         self.renderer = TypstRenderer(
             data_dir=self.data_dir,
             template_path=self.template_path,
@@ -50,6 +46,14 @@ class HelpTypst(Star):
         self.evt_analyzer = EventAnalyzer(context, self.plugin_config)
         self.flt_analyzer = FilterAnalyzer(context, self.plugin_config)
 
+        self.prefixes: list[str] = []
+
+    async def initialize(self):
+        """异步初始化"""
+        self._init_prefixes(self.context)
+        await asyncio.to_thread(self._refresh_resources)
+        logger.info(f"[HelpTypst] 初始化完成")
+    
     def _refresh_resources(self):
         try:
             # 1. 扫描
@@ -62,25 +66,40 @@ class HelpTypst(Star):
             self.font_manager.prune_invalid_config_items(self.config)
 
         except Exception as e:
-            logger.warning(f"[HelpTypst] Resource refresh failed: {e}")
+            logger.warning(f"[HelpTypst] 资源重载失败: {e}")
 
     async def terminate(self):
         """周期hook"""
         # 1. 清理临时文件
-        try:
-            for f in self.data_dir.glob("temp_*"):
-                try:
-                    f.unlink()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        await self._perform_cleanup()
 
-        # 2. [Dirty Hook] 刷新 Schema (这是自动维护的最佳时点)
+        # 2. [Dirty Hook] 刷新 Schema
+        # 用需重载维护的 Optional: 因为 勾选 + 排序 是 字体优先级 操作逻辑上的最佳实践
+        # 时序: 配置页面构建于插件实例化之前, 这是自动维护的最佳时点
+        # 阻塞: 符合预期，这是确保 放入/删除字体 → 重载即可见 的必要代价
         try:
             self._refresh_resources()
         except Exception:
             pass
+
+    async def _perform_cleanup(self):
+        try:
+            # glob 匹配
+            temp_files = list(self.data_dir.glob("temp_*"))
+            if not temp_files:
+                return
+
+            logger.debug(f"[HelpTypst] 清理 {len(temp_files)} 个缓存文件...")
+            
+            for f in temp_files:
+                try:
+                    if f.exists(): # 双重检查
+                        f.unlink()
+                except OSError as e:
+                    pass
+
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 清理失败: {e}")
 
     @filter.command_group("typst")  # 该指令组留待扩展更多调试功能
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -91,7 +110,7 @@ class HelpTypst(Star):
     async def cmd_scan_fonts(self, event: AstrMessageEvent):
         """扫描字体并重载插件"""
         # 1. 扫描与更新
-        self._refresh_resources()
+        await self._refresh_resources()
         count = len(self.font_manager.available_families)
 
         # 2. 尝试自我重载

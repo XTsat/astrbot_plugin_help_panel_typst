@@ -47,6 +47,7 @@ class DefaultCFG:
     # 2. 超时设置 (秒)
     TIMEOUT_ANALYSIS: float = 10.0
     TIMEOUT_COMPILE: float = 30.0
+    TIMEOUT_SCAN: float = 3.0
 
     # 3. 过滤设置
     # config.py 负责 list → set
