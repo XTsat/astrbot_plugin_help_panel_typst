@@ -35,6 +35,7 @@ class HelpTypst(Star):
 
         # 4. 渲染器
         self.renderer = TypstRenderer(
+            star=self,
             data_dir=self.data_dir,
             template_path=self.template_path,
             font_dir=self.font_dir,

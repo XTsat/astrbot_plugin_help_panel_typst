@@ -42,7 +42,7 @@
 | <img src="./preview/filters.jpg" width="400"> | <img src="./preview/search.jpg" width="400"> |
 
 ## 🧱 依赖
-AstrBot<br>
+AstrBot>=4.10.4<br>
 typst>=0.11<br>
 fonttools>=4.0.0<br>
 brotli>=1.0.0<br>

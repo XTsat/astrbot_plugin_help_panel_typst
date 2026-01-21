@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
+from astrbot.api.star import Star 
 
 from ..domain import InternalCFG, TypstPluginConfig
 from ..utils import calculate_hash, verify_image_header
@@ -33,11 +34,13 @@ class RenderResult:
 class TypstRenderer:
     def __init__(
         self,
+        star: Star,
         data_dir: Path,
         template_path: Path,
         font_dir: Path,
         config: TypstPluginConfig,
     ):
+        self.star = star 
         self.data_dir = data_dir
         self.template_path = template_path
         self.font_dir = font_dir
@@ -80,7 +83,7 @@ class TypstRenderer:
         """核心渲染流程"""
         # 1. 确定路径策略
         paths = self._resolve_paths(mode, query)
-        json_path, img_path, hash_path = paths["json"], paths["img"], paths["hash"]
+        json_path, img_path, kv_key = paths["json"], paths["img"], paths["kv_key"]
         is_temp, req_id = paths["is_temp"], paths["req_id"]
 
         # 2. 获取锁 (仅静态模式需要)
@@ -109,7 +112,7 @@ class TypstRenderer:
                 if not is_temp and json_path.exists():
                     # hash + config 双校验
                     need_compile = await self._check_cache(
-                        json_path, hash_path, img_path
+                        json_path, kv_key, img_path
                     )
 
                 if not need_compile:
@@ -121,6 +124,9 @@ class TypstRenderer:
 
                 # --- 3. Typst 编译 ---
                 if need_compile:
+                    if not is_temp:
+                        self._purge_old_cache(img_path.stem)
+
                     json_str = await asyncio.to_thread(
                         json_path.read_text, encoding="utf-8"
                     )
@@ -155,7 +161,7 @@ class TypstRenderer:
                         return None, "渲染未生成图片文件"
 
                     # --- 4. 缓存写入 ---
-                    if not is_temp and hash_path:
+                    if not is_temp and kv_key:
                         new_content_hash = calculate_hash(json_str)
                         current_config_snapshot = self._get_config_snapshot()
 
@@ -164,11 +170,7 @@ class TypstRenderer:
                             "config": current_config_snapshot,
                         }
 
-                        await asyncio.to_thread(
-                            hash_path.write_text,
-                            json.dumps(meta_data, ensure_ascii=False),
-                            encoding="utf-8",
-                        )
+                        await self.star.put_kv_data(kv_key, meta_data)
 
                     # --- 5. 清理 ---
                     files_to_clean = []
@@ -181,6 +183,7 @@ class TypstRenderer:
         except Exception as e:
             logger.error(f"[HelpTypst] Render Error: {e}", exc_info=True)
 
+            # 清理临时文件
             if is_temp:
                 try:
                     if json_path.exists():
@@ -190,13 +193,34 @@ class TypstRenderer:
                 except Exception:
                     pass
 
-            if not is_temp and hash_path and hash_path.exists():
-                hash_path.unlink()
+            # 清理 KV 缓存
+            if not is_temp and kv_key:
+                try:
+                    await self.star.delete_kv_data(kv_key)
+                    logger.debug(f"[HelpTypst] 渲染异常，已清除缓存 Key: {kv_key}")
+                except Exception as del_err:
+                    # 这里吞掉删除异常，避免掩盖主异常 e
+                    logger.warning(f"[HelpTypst] 清除缓存失败: {del_err}")
 
             return None, f"渲染过程出错: {str(e)}"
 
         return None, "未知错误"
 
+    def _purge_old_cache(self, stem: str):
+        """清理旧 WebP 缓存"""
+        try:
+            # 未切片的单图
+            single_path = self.data_dir / f"{stem}.webp"
+            if single_path.exists():
+                single_path.unlink()
+
+            # glob 匹配所有切片 (_part1.webp, _part2.webp ...)
+            for p in self.data_dir.glob(f"{stem}_part*.webp"):
+                p.unlink(missing_ok=True)
+
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 清理旧缓存残留失败 {stem}: {e}")
+    
     def _resolve_paths(self, mode: str, query: str | None) -> dict[str, Any]:
         """计算文件路径"""
         if query:
@@ -204,16 +228,15 @@ class TypstRenderer:
             return {
                 "json": self.data_dir / f"temp_{uid}.json",
                 "img": self.data_dir / f"temp_{uid}.png",
-                "hash": None,
+                "kv_key": None,
                 "is_temp": True,
                 "req_id": uid,
             }
         else:
-            base_name = InternalCFG.CACHE_FILES.get(mode, "cache_unknown")
             return {
-                "json": self.data_dir / f"{base_name}.json",
-                "img": self.data_dir / f"{base_name}.png",
-                "hash": self.data_dir / f"{base_name}.hash",
+                "json": self.data_dir / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.json",
+                "img": self.data_dir / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.png",
+                "kv_key": f"typst_cache_{mode}",
                 "is_temp": False,
                 "req_id": "static",
             }
@@ -227,9 +250,9 @@ class TypstRenderer:
         return [str(p) for p in parts] if parts else []
 
     async def _check_cache(
-        self, json_path: Path, hash_path: Path, img_path: Path
+        self, json_path: Path, kv_key: str, img_path: Path
     ) -> bool:
-        """检查是否需要重新编译"""
+        """检查是否需要重新编译(AstrBot的简单KV存储)"""
         try:
             # 1. 计算当前 Hash
             json_content = await asyncio.to_thread(
@@ -237,22 +260,18 @@ class TypstRenderer:
             )
             current_content_hash = calculate_hash(json_content)
 
-            # 2. 读缓存
-            if not hash_path.exists():
+            # 2. 读 KV 缓存
+            if not kv_key:
                 return True
-            cached_data_str = await asyncio.to_thread(
-                hash_path.read_text, encoding="utf-8"
-            )
+
+            cached_meta = await self.star.get_kv_data(kv_key, default=None)
+
+            if not cached_meta:
+                return True # 无缓存记录
 
             # 3. 解析缓存
-            try:
-                cached_meta = json.loads(cached_data_str)
-                cached_content_hash = cached_meta.get("content_hash")
-                cached_config = cached_meta.get("config", {})
-            except json.JSONDecodeError:
-                # 兼容性处理
-                cached_content_hash = cached_data_str.strip()
-                cached_config = {}
+            cached_content_hash = cached_meta.get("content_hash")
+            cached_config = cached_meta.get("config", {})
 
             # 4. 当前配置快照
             current_config = self._get_config_snapshot()
