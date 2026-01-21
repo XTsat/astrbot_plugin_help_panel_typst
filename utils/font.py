@@ -13,32 +13,34 @@ except ImportError:
 
 
 class FontManager:
-    def __init__(self, font_dir: Path):
-        self.font_dir = font_dir
+    def __init__(self, font_dirs: list[Path]):
+        self.font_dirs = font_dirs
         self.available_families: set[str] = set()
 
     def scan_fonts(self):
         """扫描本地字体(.ttf .otf .woff2)"""
         self.available_families.clear()
-        if not self.font_dir.exists():
-            return
-
-        valid_extensions = {".ttf", ".otf", ".woff2"}
-
-        for file_path in self.font_dir.iterdir():
-            if not file_path.is_file():
+        # 遍历目录列表
+        for f_dir in self.font_dirs:
+            if not f_dir.exists():
                 continue
 
-            if file_path.suffix.lower() in valid_extensions:
-                try:
-                    family_name = self._extract_font_family(file_path)
-                    if family_name:
-                        self.available_families.add(family_name)
-                    else:
+            valid_extensions = {".ttf", ".otf", ".woff2"}
+
+            for file_path in f_dir.iterdir():
+                if not file_path.is_file():
+                    continue
+
+                if file_path.suffix.lower() in valid_extensions:
+                    try:
+                        family_name = self._extract_font_family(file_path)
+                        if family_name:
+                            self.available_families.add(family_name)
+                        else:
+                            self.available_families.add(file_path.stem)
+                    except Exception as e:
+                        logger.warning(f"[HelpTypst] 解析字体失败 {file_path.name}: {e}")
                         self.available_families.add(file_path.stem)
-                except Exception as e:
-                    logger.debug(f"[HelpTypst] Failed to parse {file_path.name}: {e}")
-                    self.available_families.add(file_path.stem)
 
         logger.info(f"[HelpTypst] 扫描完成，可用字体: {self.available_families}")
 

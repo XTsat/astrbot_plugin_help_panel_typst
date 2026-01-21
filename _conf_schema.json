@@ -19,6 +19,12 @@
     ],
     "hint": "屏蔽不想展示、导致问题的插件菜单 (使用 name 字段)"
   },
+  "custom_font_path": {
+    "description": "自定义字体目录",
+    "type": "string",
+    "default": "",
+    "hint": "绝对路径。缺省值 .../data/plugin_data/astrbot_plugin_help_typst/fonts"
+  },
   "rendering": {
     "description": "渲染引擎设置",
     "type": "object",

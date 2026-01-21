@@ -46,6 +46,7 @@ class TypstPluginConfig:
     """插件全局配置聚合根"""
     enable_waiting_message: bool
     ignored_plugins: set[str]
+    custom_font_path: str
 
     rendering: RenderingConfig
     appearance: AppearanceConfig
@@ -101,6 +102,8 @@ class TypstPluginConfig:
             active_preset=active_preset_name, presets=presets_dict
         )
 
+        custom_font_path = raw_config.get("custom_font_path", "")
+        
         logger.debug(
             f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}, 外观预设: {active_preset_name}"
         )
@@ -108,6 +111,7 @@ class TypstPluginConfig:
         return cls(
             enable_waiting_message=enable_wait,
             ignored_plugins=ignored_set,
+            custom_font_path=custom_font_path,
             rendering=render_cfg,
             appearance=appearance_cfg
         )

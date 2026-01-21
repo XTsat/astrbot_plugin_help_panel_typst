@@ -5,7 +5,7 @@
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-purple?style=flat-square)](https://github.com/Soulter/AstrBot)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.0.8-orange?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-0.0.9-orange?style=flat-square)]()
 
 ** 以优雅的方式组织你的插件菜单 **
 <br>
@@ -21,7 +21,7 @@
 * 针对插件名、指令名、描述内容的泛用搜索工具，附关键词高亮【用法： helps/events/filters <关键词>】
 * 基于 typst 渲染实现，轻量、灵活、高效，你可以使用 typst 语法修改、构建属于自己的渲染模板（WIP）
 * 支持自定义字体 .ttf .otf .woff2<br>
-1.放入 插件目录/resources/fonts (之后会支持额外目录)<br>
+1.放入 插件目录/resources/fonts 或[自定义字体目录](#-常见问题)<br>
 2.重载方式三选一(更新 optional scheme)<br>
 2a.在 AstrBot 面板中重载插件<br>
 2b.重启 AstrBot<br>
@@ -64,7 +64,8 @@ Zhalslar(饰乐)  https://github.com/Zhalslar
 ### Typst 字体优先级
 文档显式指定 > 项目字体目录 > 系统字体库
 * 文档显式指定：通过 #set text(font: "font-family-name") 直接指定，优先级最高
-* 项目字体目录：即本插件的根目录下的 ./resources/fonts ，后面会考虑增加额外的目录支持
+* 项目字体目录：即本插件的根目录下的 ./resources/fonts <br>
+~~后面会考虑增加额外的目录支持~~已完成，缺省值为 `.../data/plugin_data/astrbot_plugin_help_typst/fonts` 🚨 docker 用户记得确保自定义字体目录已被挂载
 * 系统字体库：获取系统默认字体目录 ( Windows、macOS 应该有官方支持，Linux 未测试支持度如何；🚨 docker 环境可能需要安装字体依赖）
 
 ## 🌳 目录结构（初步预期）
@@ -88,7 +89,7 @@ astrbot_plugin_typst_menu/
 │    └── base.typ              # 基础库文件 (类似 CSS Reset)
 └── resources/             # 静态资源
      ├── fonts/                # 内置开源中文字体
-     └── images/               # 默认背景图、图标
+     └── images/               # 默认背景图、图标 (未完成)
 
 ```
 

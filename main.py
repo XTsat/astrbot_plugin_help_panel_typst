@@ -14,21 +14,36 @@ from .core import CommandAnalyzer, EventAnalyzer, FilterAnalyzer, TypstRenderer
 class HelpTypst(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        # 1. 资源路径
+        # 1. 静态资源路径
         self.plugin_dir = Path(__file__).parent
         self.data_dir = StarTools.get_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self.template_path = self.plugin_dir / "templates" / InternalCFG.NAME_TEMPLATE
-        self.font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR
         self.schema_path = self.plugin_dir / "_conf_schema.json"
 
         # 2. 配置加载
         self.config = config
         self.plugin_config = TypstPluginConfig.load(config)
+        
+        # 3. 获取字体
+        raw_path = self.plugin_config.custom_font_path
+        if raw_path and raw_path.strip():
+            self.user_font_dir = Path(raw_path)          # 自定义字体目录
+        else:
+            self.user_font_dir = self.data_dir / "fonts" # 缺省值
+
+        try:
+            self.user_font_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            if not raw_path: 
+                logger.warning(f"[HelpTypst] 无法创建默认字体目录: {e}")
+
+        self.builtin_font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR # 内置
+        self.font_dirs = [self.builtin_font_dir, self.user_font_dir]                      # 汇总
 
         # 3. 初始化组件
-        self.font_manager = FontManager(self.font_dir)
+        self.font_manager = FontManager(self.font_dirs)
         self.layout = TypstLayout(self.plugin_config)
         self.hint = HelpHint()
         self.msg = MsgRecall()
@@ -38,7 +53,7 @@ class HelpTypst(Star):
             star=self,
             data_dir=self.data_dir,
             template_path=self.template_path,
-            font_dir=self.font_dir,
+            font_dirs=self.font_dirs,
             config=self.plugin_config,
         )
 

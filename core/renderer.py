@@ -37,13 +37,13 @@ class TypstRenderer:
         star: Star,
         data_dir: Path,
         template_path: Path,
-        font_dir: Path,
+        font_dirs: list[Path],
         config: TypstPluginConfig,
     ):
         self.star = star 
         self.data_dir = data_dir
         self.template_path = template_path
-        self.font_dir = font_dir
+        self.font_dirs = font_dirs
         self.cfg = config
         self._compile_semaphore = asyncio.Semaphore(self.cfg.rendering.max_concurrent_tasks)
         self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
@@ -131,10 +131,12 @@ class TypstRenderer:
                         json_path.read_text, encoding="utf-8"
                     )
 
+                    font_paths_str = [str(p) for p in self.font_dirs]
+
                     # 构造 DTO
                     task = RenderTask(
                         template_path=str(self.template_path),
-                        font_paths=[str(self.font_dir)],
+                        font_paths=font_paths_str,
                         json_str=json_str,
                         output_png_path=str(img_path),
                         output_dir=str(self.data_dir),
