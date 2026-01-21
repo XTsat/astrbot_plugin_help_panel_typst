@@ -5,7 +5,7 @@
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-purple?style=flat-square)](https://github.com/Soulter/AstrBot)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.0.9-orange?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-0.1.0-orange?style=flat-square)]()
 
 ** 以优雅的方式组织你的插件菜单 **
 <br>
@@ -43,9 +43,7 @@
 
 ## 🧱 依赖
 AstrBot>=4.10.4<br>
-typst>=0.11<br>
-fonttools>=4.0.0<br>
-brotli>=1.0.0<br>
+typst>=0.14.7<br>
 pydantic
 
 ## 🤝 感谢 PR

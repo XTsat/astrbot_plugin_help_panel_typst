@@ -2,14 +2,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+import typst
+
 from astrbot.api import logger
-
-try:
-    from fontTools.ttLib import TTFont
-
-    HAS_FONTTOOLS = True
-except ImportError:
-    HAS_FONTTOOLS = False
 
 
 class FontManager:
@@ -20,75 +15,24 @@ class FontManager:
     def scan_fonts(self):
         """扫描本地字体(.ttf .otf .woff2)"""
         self.available_families.clear()
-        # 遍历目录列表
-        for f_dir in self.font_dirs:
-            if not f_dir.exists():
-                continue
 
-            valid_extensions = {".ttf", ".otf", ".woff2"}
+        # 转换路径为 Typst 期望的字符串列表
+        search_paths = [str(p.resolve()) for p in self.font_dirs if p.exists()]
 
-            for file_path in f_dir.iterdir():
-                if not file_path.is_file():
-                    continue
-
-                if file_path.suffix.lower() in valid_extensions:
-                    try:
-                        family_name = self._extract_font_family(file_path)
-                        if family_name:
-                            self.available_families.add(family_name)
-                        else:
-                            self.available_families.add(file_path.stem)
-                    except Exception as e:
-                        logger.warning(f"[HelpTypst] 解析字体失败 {file_path.name}: {e}")
-                        self.available_families.add(file_path.stem)
-
-        logger.info(f"[HelpTypst] 扫描完成，可用字体: {self.available_families}")
-
-    def _extract_font_family(self, file_path: Path) -> str | None:
-        """从字体文件中提取 Family Name"""
-        if not HAS_FONTTOOLS:
-            logger.warning(
-                "[HelpTypst] 依赖 FONTTOOLS 似乎未安装，自定义字体可能无法正常读取"
-            )
-            return file_path.stem  # 兜底: 使用文件名
+        if not search_paths:
+            logger.warning("[HelpTypst] 没有有效的字体目录，跳过扫描")
+            return
 
         try:
-            # 对于 .woff2 自动尝试 import brotli
-            font = TTFont(file_path)
-            return self._get_best_family_name(font)
+            font_db = typst.Fonts(font_paths=search_paths) # 0.14.7 引入的字体查询接口
+            families = list(font_db.families())
+            self.available_families.update(families)
+            count = len(self.available_families)
+            logger.info(f"[HelpTypst] Typst 扫描完成，识别到 {count} 个字体家族")
+            logger.debug(f"可用字体: {self.available_families}")
+
         except Exception as e:
-            raise e  # 文件损坏或环境异常
-
-    def _get_best_family_name(self, font: Any) -> str | None:
-        """字体元信息优先级: 16 Typographic Family > 1 Font Family"""
-        names = font["name"]
-
-        def get_name(name_id):
-            # Windows English
-            n = names.getName(name_id, 3, 1, 0x409)
-            if n:
-                return n.toUnicode()
-            # Macintosh English
-            n = names.getName(name_id, 1, 0, 0)
-            if n:
-                return n.toUnicode()
-            # Fallback
-            for record in names.names:
-                if record.nameID == name_id:
-                    return record.toUnicode()
-            return None
-
-        # 1. Typographic Family
-        family_name = get_name(16)
-
-        # 2. Font Family
-        if not family_name:
-            family_name = get_name(1)
-
-        if family_name:
-            return family_name.strip()
-
-        return None
+            logger.error(f"[HelpTypst] Typst 字体扫描失败: {e}", exc_info=True)
 
     def update_json_schema(self, schema_path: Path):
         """更新 Schema options"""
