@@ -33,11 +33,11 @@ class MsgRecall:
         self, event: AstrMessageEvent, text: str
     ) -> int | str | None:
         """发送提示并返回消息ID"""
-        bot = event.bot
+        bot = getattr(event, "bot", None)
         payload = event.plain_result(text)
 
         # OneBot API
-        if hasattr(event, "_parse_onebot_json") and hasattr(bot, "call_action"):
+        if bot and hasattr(event, "_parse_onebot_json") and hasattr(bot, "call_action"):
             try:
                 chain = payload.chain if hasattr(payload, "chain") else payload
                 if not isinstance(chain, list):
@@ -76,7 +76,10 @@ class MsgRecall:
         """撤回指定消息"""
         if not message_id:
             return
-        bot = event.bot
+        bot = getattr(event, "bot", None)
+        if not bot:
+            logger.debug("[HelpTypst] 无法获取 Bot 实例，撤回可能失效")
+            return
 
         # 稍等避免闪撤
         await asyncio.sleep(InternalCFG.DELAY_SEND)
@@ -105,7 +108,7 @@ class MsgRecall:
         if isinstance(resp, (int, str)):
             return resp
 
-        # 字典结构解析
+        # 字典结构
         if isinstance(resp, dict):
             data = resp.get("data")
             if isinstance(data, dict):
@@ -116,10 +119,20 @@ class MsgRecall:
                 if "forward_id" in data:
                     return data["forward_id"]
 
+            # 外层字段
             if "message_id" in resp:
                 return resp["message_id"]
-        if hasattr(resp, "message_id"):
-            return resp.message_id
+            if "id" in resp:
+                return resp["id"]
+            return None
+
+        # 对象属性(Telegram)
+        if val := getattr(resp, "message_id", None):
+            return val
+
+        # 兜底
+        if val := getattr(resp, "id", None):
+            return val
 
         return None
 
