@@ -114,27 +114,107 @@
           {
             "__template_key": "standard_theme",
             "preset_name": "default",
-            "font_order": ["Sarasa Gothic SC", "Noto Color Emoji"]
+            "font_order": ["Sarasa Gothic SC", "Noto Color Emoji"],
+            "page_fill": "#f0f2f5",
+            "c_plugin_name": "#0d47a1"
           }
         ],
         "templates": {
           "standard_theme": {
-            "name": "标准主题模板",
-            "hint": "自定义字体优先级",
+            "name": "自定义主题模板",
+            "hint": "包含字体优先级与详细调色板",
             "items": {
               "preset_name": {
                 "description": "预设名称 (ID)",
                 "type": "string",
-                "default": "custom_1",
+                "default": "my_theme",
                 "hint": "用于在上方 'active_preset' 中引用"
               },
               "font_order": {
                 "description": "字体优先级排序",
                 "type": "list",
-                "hint": "勾选启用字体，调整回退顺序 (排在前面的优先使用)",
                 "default": ["Sarasa Gothic SC", "Noto Color Emoji"],
                 "options": ["Sarasa Gothic SC", "Noto Color Emoji"]
-              }
+              },
+              
+              "header_001": { "description": "🎨 基础背景与文字", "type": "string", "default": "---", "read_only": true },
+              
+              "page_fill": {
+                "description": "页面背景色",
+                "type": "string",
+                "default": "#f0f2f5"
+              },
+              "c_text_primary": {
+                "description": "主标题颜色",
+                "type": "string",
+                "default": "#1a1a1a"
+              },
+
+              "header_002": { "description": "🧩 插件卡片样式", "type": "string", "default": "---", "read_only": true },
+
+              "c_plugin_name": {
+                "description": "插件名称颜色",
+                "type": "string",
+                "default": "#0d47a1"
+              },
+              "c_plugin_id": {
+                "description": "插件 ID/Meta 颜色",
+                "type": "string",
+                "default": "#546e7a"
+              },
+
+              "header_003": { "description": "📂 指令组与列表", "type": "string", "default": "---", "read_only": true },
+
+              "c_group_title": {
+                "description": "分组标题颜色",
+                "type": "string",
+                "default": "#6a1b9a"
+              },
+              "c_group_bg": {
+                "description": "分组背景块颜色",
+                "type": "string",
+                "default": "#f3e5f5"
+              },
+              "c_leaf_text": {
+                "description": "子指令文字颜色",
+                "type": "string",
+                "default": "#37474f"
+              },
+              "c_desc_text": {
+                "description": "描述/注释文字颜色",
+                "type": "string",
+                "default": "#757575"
+              },
+              "c_bullet": {
+                "description": "列表圆点/图标颜色",
+                "type": "string",
+                "default": "#d81b60"
+              },
+              "c_box_bg": {
+                "description": "紧凑指令块背景",
+                "type": "string",
+                "default": "#f5f5f5"
+              },
+              "c_box_stroke": {
+                "description": "边框线条颜色",
+                "type": "string",
+                "default": "#e0e0e0"
+              },
+
+              "header_004": { "description": "🏷️ 标签与胶囊", "type": "string", "default": "---", "read_only": true },
+
+              "c_ver_bg": { "description": "版本号背景", "type": "string", "default": "#e3f2fd" },
+              "c_ver_text": { "description": "版本号文字", "type": "string", "default": "#1565c0" },
+              "c_prio_bg": { "description": "优先级背景", "type": "string", "default": "#e8eaf6" },
+              "c_prio_text": { "description": "优先级文字", "type": "string", "default": "#283593" },
+              "c_tag_admin": { "description": "管理员图标颜色", "type": "string", "default": "#c62828" },
+              "c_tag_event": { "description": "事件图标颜色", "type": "string", "default": "#f57c00" },
+              "c_tag_mcp": { "description": "MCP图标颜色", "type": "string", "default": "#00695c" },
+              
+              "header_005": { "description": "🔍 其他", "type": "string", "default": "---", "read_only": true },
+
+              "c_highlight_bg": { "description": "搜索高亮背景", "type": "string", "default": "#ffeb3b" },
+              "c_highlight_text": { "description": "搜索高亮文字", "type": "string", "default": "#000000" }
             }
           }
         }

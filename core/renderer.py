@@ -71,6 +71,7 @@ class TypstRenderer:
         # 提取“生效中”的外观配置
         if hasattr(self.cfg, "appearance"):
             snapshot["effective_fonts"] = self.cfg.appearance.get_active_font_order()
+            snapshot["effective_colors"] = self.cfg.appearance.get_active_colors()
 
         return snapshot
 

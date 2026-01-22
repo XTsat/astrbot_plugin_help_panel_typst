@@ -1,8 +1,12 @@
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from astrbot.api import AstrBotConfig, logger
 
 from . import DefaultCFG
+
+# 预编译正则
+HEX_COLOR_REGEX = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
 
 
 @dataclass
@@ -19,26 +23,63 @@ class RenderingConfig:
 @dataclass
 class ThemePreset:
     """单个外观预设"""
-
     name: str
     font_order: list[str]
-    # 留待未来扩展
+    colors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class AppearanceConfig:
     """外观配置聚合"""
-
     active_preset: str
     presets: dict[str, ThemePreset]
+    # 内部缓存字段
+    _color_cache: dict[str, str] | None = field(init=False, default=None, repr=False)
 
     def get_active_font_order(self) -> list[str]:
-        """获取当前激活预设的字体列表"""
+        """获取激活预设的字体列表"""
         preset = self.presets.get(self.active_preset)
         if preset:
             return preset.font_order
-        # 兜底： FontManager 补全默认值
-        return []
+        return [] # 兜底： FontManager 补全默认值
+
+    def get_active_colors(self) -> dict[str, str]:
+        """获取激活预设的颜色配置"""
+        if self._color_cache is not None:
+            return self._color_cache # 命中缓存
+
+        # 1. 默认
+        final_colors = DefaultCFG.DEFAULT_COLORS.copy()
+
+        # 2. 预设
+        preset = self.presets.get(self.active_preset)
+
+         # 3. 清洗 & 合并
+        if preset and preset.colors:
+            for key, user_val in preset.colors.items():
+                if key not in final_colors:
+                    continue
+                
+                # 校验
+                if self._is_valid_hex(user_val):
+                    final_colors[key] = user_val
+                else:
+                    logger.warning(
+                        f"[HelpTypst] 颜色配置异常: '{key}' 的值 '{user_val}' 不是有效的十六进制颜色。\n"
+                        f"已回退到默认值: {final_colors[key]}"
+                    )
+
+        # 4. 写入缓存
+        self._color_cache = final_colors
+
+        return final_colors
+
+    def _is_valid_hex(self, color_str: str) -> bool:
+        """校验 Hex Color"""
+        if not isinstance(color_str, str):
+            return False
+
+        return bool(HEX_COLOR_REGEX.match(color_str))
 
 
 @dataclass
@@ -86,9 +127,11 @@ class TypstPluginConfig:
         presets_dict = {}
 
         default_preset = ThemePreset(
-            name="default", font_order=["Sarasa Gothic SC", "Noto Color Emoji"]
+            name="default", 
+            font_order=["Sarasa Gothic SC", "Noto Color Emoji"],
+            colors={} 
         )
-        presets_dict["default"] = default_preset  # 兜底： 默认预设
+        presets_dict["default"] = default_preset  # 兜底：默认预设
 
         if isinstance(raw_presets_list, list):
             for p_data in raw_presets_list:
@@ -96,10 +139,22 @@ class TypstPluginConfig:
                 p_name = p_data.get("preset_name", "custom")
                 p_fonts = p_data.get("font_order", [])
 
-                presets_dict[p_name] = ThemePreset(name=p_name, font_order=p_fonts)
+                 # 解析颜色配置
+                p_colors = {}
+                for color_key in DefaultCFG.DEFAULT_COLORS.keys():
+                    if color_key in p_data:
+                        raw_val = p_data[color_key] # 防 None、数字类型传入
+                        p_colors[color_key] = str(raw_val) if raw_val is not None else ""
+
+                presets_dict[p_name] = ThemePreset(
+                    name=p_name, 
+                    font_order=p_fonts, 
+                    colors=p_colors
+                )
 
         appearance_cfg = AppearanceConfig(
-            active_preset=active_preset_name, presets=presets_dict
+            active_preset=active_preset_name, 
+            presets=presets_dict
         )
 
         custom_font_path = raw_config.get("custom_font_path", "")

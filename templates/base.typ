@@ -1,59 +1,65 @@
 // === 🔧 全局配置 ===
 
 // --- 参数传入 ---
-#let data = json.decode(sys.inputs.json_string)
+#let data            = json.decode(sys.inputs.json_string)
 #let user_fonts      = data.at("fonts", default: ("Sarasa Gothic SC", "Noto Color Emoji"))
 #let query_regex_str = sys.inputs.at("query_regex", default: none)
 #let generated_time  = sys.inputs.at("timestamp", default: "Unknown Time")
+// 颜色参数
+#let c_map           = data.at("colors", default: (:))
+#let get_color(key, default_hex) = {
+  rgb(c_map.at(key, default: default_hex))
+}
 
 // --- 页面设置 ---
-#set page(width: 900pt, height: auto, margin: 20pt, fill: rgb("#f0f2f5"))
+#let page_fill       = get_color("page_fill", "#f0f2f5")
+#set page(width: 900pt, height: auto, margin: 20pt, fill: page_fill)
 #set text(font: user_fonts, size: 12pt)
 
 // === 🎨 调色板 ===
 
 // --- 插件卡片 ---
-#let c_plugin_name   = rgb("#0d47a1")
-#let c_plugin_id     = rgb("#546e7a")
+#let c_plugin_name   = get_color("c_plugin_name", "#0d47a1")
+#let c_plugin_id     = get_color("c_plugin_id", "#546e7a")
 
 // --- 指令内容 ---
 // 父级/分组标题
-#let c_group_title   = rgb("#6a1b9a") 
+#let c_group_title   = get_color("c_group_title", "#6a1b9a")
 // 子指令/具体项
-#let c_bullet        = rgb("#d81b60")
-#let c_event_icon    = rgb("#ffc72c")
-#let c_leaf_text     = rgb("#37474f")
+#let c_bullet        = get_color("c_bullet", "#d81b60")
+#let c_event_icon    = get_color("c_event_icon", "#ffc72c")
+#let c_leaf_text     = get_color("c_leaf_text", "#37474f")
 // 描述文本
-#let c_desc_text     = rgb("#757575")
+#let c_desc_text     = get_color("c_desc_text", "#757575")
 
 // --- 容器布局 ---
-#let c_group_bg      = rgb("#f3e5f5")
-#let c_rich_bg      = rgb("#fcfcfc")
+#let c_group_bg      = get_color("c_group_bg", "#f3e5f5")
+#let c_rich_bg       = get_color("c_rich_bg", "#fcfcfc")
 // 紧凑块
-#let c_box_bg        = rgb("#f5f5f5")
-#let c_box_stroke    = rgb("#e0e0e0")
+#let c_box_bg        = get_color("c_box_bg", "#f5f5f5")
+#let c_box_stroke    = get_color("c_box_stroke", "#e0e0e0")
 
 // --- 特殊视图 ---
 // 分区大标题
-#let c_text_primary = rgb("#1a1a1a")
+#let c_text_primary  = get_color("c_text_primary", "#1a1a1a")
 // 正则表达式视图
-#let c_regex_bg      = rgb("#fff3e0")
-#let c_regex_text    = rgb("#e65100")
-#let c_regex_icon    = rgb("#f57c00")
+#let c_regex_bg      = get_color("c_regex_bg", "#fff3e0")
+#let c_regex_text    = get_color("c_regex_text", "#e65100")
+#let c_regex_icon    = get_color("c_regex_icon", "#f57c00")
 // 事件与管理标签
-#let c_tag_admin     = rgb("#c62828")
-#let c_tag_event     = rgb("#f57c00")
-#let c_tag_mcp       = rgb("#00695c")
-#let c_tag_id        = rgb("#283593")
+#let c_tag_admin     = get_color("c_tag_admin", "#c62828")
+#let c_tag_event     = get_color("c_tag_event", "#f57c00")
+#let c_tag_mcp       = get_color("c_tag_mcp", "#00695c")
+#let c_tag_id        = get_color("c_tag_id", "#283593")
 // 胶囊
-#let c_ver_bg        = rgb("#e3f2fd")
-#let c_ver_text      = rgb("#1565c0")
-#let c_prio_bg       = rgb("#e8eaf6")
-#let c_prio_text     = rgb("#283593")
+#let c_ver_bg        = get_color("c_ver_bg", "#e3f2fd")
+#let c_ver_text      = get_color("c_ver_text", "#1565c0")
+#let c_prio_bg       = get_color("c_prio_bg", "#e8eaf6")
+#let c_prio_text     = get_color("c_prio_text", "#283593")
 
 // --- 搜索高亮 ---
-#let c_highlight_bg  = rgb("#ffeb3b")
-#let c_highlight_text = black
+#let c_highlight_bg  = get_color("c_highlight_bg", "#ffeb3b")
+#let c_highlight_text = get_color("c_highlight_text", "#000000")
 
 // === 🏷︎ 图标 ===
 #let admin_icon  = text(size: 0.9em, baseline: -1pt)[🔒]

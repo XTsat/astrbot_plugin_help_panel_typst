@@ -156,6 +156,8 @@ class TypstLayout:
         payload = self._generate_balanced_payload(
             plugins, title, mode, prefixes, font_list
         )
+        # 注入颜色配置
+        payload["colors"] = self.cfg.appearance.get_active_colors()
 
         save_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
