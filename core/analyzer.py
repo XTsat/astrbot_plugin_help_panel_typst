@@ -26,6 +26,9 @@ from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
 
 
 class BaseAnalyzer:
+    # 子类可覆写: 是否支持按全局编号定位搜索 (仅指令模式)
+    _supports_order_search: bool = False
+
     def __init__(self, context: Context, config: TypstPluginConfig):
         self.context = context
         self.cfg = config
@@ -42,6 +45,14 @@ class BaseAnalyzer:
             # 2. 非搜索 → 返回
             if not query:
                 return structured_plugins
+
+            # 2.5 纯数字定位 (仅指令模式): /helps <编号> 按全局编号精确命中
+            if self._supports_order_search and query.strip().isdigit():
+                target = int(query.strip())
+                for p in structured_plugins:
+                    if p.order == target:
+                        return [p]
+                return []
 
             # 3. 搜索 → 过滤
             q_lower = query.lower()
@@ -74,9 +85,7 @@ class BaseAnalyzer:
             logger.error(f"[HelpTypst] 分析失败: {e}", exc_info=True)
             return []
 
-    def _is_match(
-        self, name: str, display: str | None, desc: str, query: str
-    ) -> bool:
+    def _is_match(self, name: str, display: str | None, desc: str, query: str) -> bool:
         """基础匹配检查"""
         if query in name.lower():
             return True
@@ -114,6 +123,21 @@ class BaseAnalyzer:
     def analyze_hierarchy(self) -> list[PluginMetadata]:
         raise NotImplementedError
 
+    def _derive_category(self, info: dict[str, str | None]) -> str:
+        """根据插件元信息推断分类: 关键词命中 (desc/name/display_name/tags) → 兜底"""
+        text_parts = []
+        for key in ("desc", "name", "display_name", "tags"):
+            val = info.get(key)
+            if val:
+                text_parts.append(str(val))
+        text = " ".join(text_parts).lower()
+
+        for category, keywords in InternalCFG.CATEGORY_KEYWORDS.items():
+            for kw in keywords:
+                if kw.lower() in text:
+                    return category
+        return InternalCFG.CATEGORY_FALLBACK
+
     def _group_handlers_by_module(self) -> dict[str, list[StarHandlerMetadata]]:
         mapping = defaultdict(list)
         for handler in star_handlers_registry:
@@ -124,7 +148,13 @@ class BaseAnalyzer:
     def _get_safe_plugin_info(self, star_meta: Any) -> dict[str, str | None]:
         """针对不规范的插件元信息进行防御性编程"""
         if not star_meta:
-            return {"name": "Unknown", "display_name": None, "version": "", "desc": ""}
+            return {
+                "name": "Unknown",
+                "display_name": None,
+                "version": "",
+                "desc": "",
+                "author": "",
+            }
 
         # 智能名称
         raw_name = getattr(
@@ -153,18 +183,30 @@ class BaseAnalyzer:
 
         version = str(getattr(star_meta, "version", "")) or ""
         desc = str(getattr(star_meta, "desc", "")) or ""
+        author = str(getattr(star_meta, "author", "")) or ""
+
+        # tags 为可选字段 (metadata.yaml 中用于插件市场分类), 缺失时兜底为空字符串
+        raw_tags = getattr(star_meta, "tags", None)
+        if isinstance(raw_tags, list):
+            tags_str = " ".join(str(t) for t in raw_tags)
+        else:
+            tags_str = ""
 
         return {
             "name": safe_name,
             "display_name": display,
             "version": version,
             "desc": desc,
+            "author": author,
+            "tags": tags_str,
             "raw_module": raw_module,  # handler 查找
         }
 
 
 class CommandAnalyzer(BaseAnalyzer):
     """指令分析器：处理 CommandFilter / CommandGroupFilter"""
+
+    _supports_order_search: bool = True
 
     def analyze_hierarchy(self) -> list[PluginMetadata]:
         handlers_map = self._group_handlers_by_module()
@@ -183,6 +225,7 @@ class CommandAnalyzer(BaseAnalyzer):
             safe_name = info["name"]
             raw_module = info["raw_module"]
             plugin_name = safe_name
+            category = self._derive_category(info)
 
             # 黑名单
             if safe_name in self.cfg.ignored_plugins:
@@ -222,6 +265,8 @@ class CommandAnalyzer(BaseAnalyzer):
                             display_name=info["display_name"],
                             version=info["version"],
                             desc=info["desc"],
+                            author=info["author"],
+                            category=category,
                             nodes=nodes,
                         )
                     )
@@ -231,11 +276,40 @@ class CommandAnalyzer(BaseAnalyzer):
                 logger.warning(f"[HelpTypst] 处理插件 {safe_name} 时发生异常: {e}")
                 continue
 
-        # 排序
-        results.sort(key=lambda x: (x.display_name is None, x.name))
+        # 按分类分组排序, 并分配全局连续编号 (跨分类)
+        results = self._assign_global_order(results)
 
         logger.info(f"[HelpTypst] 指令分析完成。找到 {len(results)} 个有指令的插件。")
         return results
+
+    def _assign_global_order(
+        self, plugins: list[PluginMetadata]
+    ) -> list[PluginMetadata]:
+        """按分类分组排序, 为每个插件分配跨分类连续的全局编号 order"""
+        # 按分类聚合
+        grouped: dict[str, list[PluginMetadata]] = {}
+        for p in plugins:
+            cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
+            grouped.setdefault(cat, []).append(p)
+
+        # 分类名升序, 兜底分类置底
+        names = sorted(grouped.keys())
+        if InternalCFG.CATEGORY_FALLBACK in names:
+            names.remove(InternalCFG.CATEGORY_FALLBACK)
+            names.append(InternalCFG.CATEGORY_FALLBACK)
+
+        # 分类内插件排序, 展平为全局序列
+        ordered: list[PluginMetadata] = []
+        for name in names:
+            plist = sorted(
+                grouped[name], key=lambda x: (x.display_name is None, x.name)
+            )
+            ordered.extend(plist)
+
+        # 分配全局连续编号
+        for idx, p in enumerate(ordered, start=1):
+            p.order = idx
+        return ordered
 
     def _build_plugin_command_tree(
         self, handlers: list[StarHandlerMetadata]

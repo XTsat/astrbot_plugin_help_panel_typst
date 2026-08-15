@@ -25,22 +25,24 @@ class HelpTypst(Star):
         # 2. 配置加载
         self.config = config
         self.plugin_config = TypstPluginConfig.load(config)
-        
+
         # 3. 获取字体
         raw_path = self.plugin_config.custom_font_path
         if raw_path and raw_path.strip():
-            self.user_font_dir = Path(raw_path)          # 自定义字体目录
+            self.user_font_dir = Path(raw_path)  # 自定义字体目录
         else:
-            self.user_font_dir = self.data_dir / "fonts" # 缺省值
+            self.user_font_dir = self.data_dir / "fonts"  # 缺省值
 
         try:
             self.user_font_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            if not raw_path: 
+            if not raw_path:
                 logger.warning(f"[HelpTypst] 无法创建默认字体目录: {e}")
 
-        self.builtin_font_dir = self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR # 内置
-        self.font_dirs = [self.builtin_font_dir, self.user_font_dir]                      # 汇总
+        self.builtin_font_dir = (
+            self.plugin_dir / "resources" / InternalCFG.NAME_FONT_DIR
+        )  # 内置
+        self.font_dirs = [self.builtin_font_dir, self.user_font_dir]  # 汇总
 
         # 3. 初始化组件
         self.font_manager = FontManager(self.font_dirs)
@@ -69,7 +71,7 @@ class HelpTypst(Star):
         self._init_prefixes(self.context)
         await asyncio.to_thread(self._refresh_resources)
         logger.info("[HelpTypst] 初始化完成")
-    
+
     def _refresh_resources(self):
         try:
             # 1. 扫描
@@ -106,10 +108,10 @@ class HelpTypst(Star):
                 return
 
             logger.debug(f"[HelpTypst] 清理 {len(temp_files)} 个缓存文件...")
-            
+
             for f in temp_files:
                 try:
-                    if f.exists(): # 双重检查
+                    if f.exists():  # 双重检查
                         f.unlink()
                 except OSError:
                     pass
@@ -168,7 +170,9 @@ class HelpTypst(Star):
         if self.plugin_config.enable_waiting_message:
             # 1. 发送提示
             hint_text = (
-                self.hint.msg_searching(query) if query else self.hint.msg_rendering(mode)
+                self.hint.msg_searching(query)
+                if query
+                else self.hint.msg_rendering(mode)
             )
             wait_msg_id = await self.msg.send_wait(event, hint_text)
 
@@ -180,7 +184,15 @@ class HelpTypst(Star):
                 return 0
 
             # 视图层：决定标题 & 计算布局 & 写入JSON
-            display_title = f'搜索结果: "{query}"' if query else title
+            # 数字定位 → 单插件详情页
+            is_detail = mode == "command" and bool(query) and query.strip().isdigit()
+            if is_detail:
+                display_title = plugins[0].display_name or plugins[0].name
+                layout_mode = "plugin_detail"
+            else:
+                display_title = f'搜索结果: "{query}"' if query else title
+                layout_mode = mode
+
             user_fonts = (
                 self.plugin_config.appearance.get_active_font_order()
             )  # 预设字体配置
@@ -190,7 +202,7 @@ class HelpTypst(Star):
                 plugins=plugins,
                 save_path=save_path,
                 title=display_title,
-                mode=mode,
+                mode=layout_mode,
                 prefixes=self.prefixes,
                 font_list=final_font_list,
             )
@@ -207,7 +219,9 @@ class HelpTypst(Star):
         # 4. 处理结果
         if result:
             try:
-                yield event.chain_result([Image.fromFileSystem(p) for p in result.images])
+                yield event.chain_result(
+                    [Image.fromFileSystem(p) for p in result.images]
+                )
             finally:
                 # 后台任务清理文件列表
                 if result.temp_files:
@@ -239,7 +253,7 @@ class HelpTypst(Star):
             logger.warning(f"[HelpTypst] 获取唤醒词失败，使用默认值 '/': {e}")
             self.prefixes = ["/"]
 
-    @filter.command("helps")
+    @filter.command("helps", alias={"功能", "菜单", "帮助"})
     async def show_menu(self, event: AstrMessageEvent, query: str = ""):
         """显示指令菜单"""
         async for r in self._handle_request(

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.api.star import Star 
+from astrbot.api.star import Star
 
 from ..domain import InternalCFG, TypstPluginConfig
 from ..utils import calculate_hash, verify_image_header
@@ -40,12 +40,14 @@ class TypstRenderer:
         font_dirs: list[Path],
         config: TypstPluginConfig,
     ):
-        self.star = star 
+        self.star = star
         self.data_dir = data_dir
         self.template_path = template_path
         self.font_dirs = font_dirs
         self.cfg = config
-        self._compile_semaphore = asyncio.Semaphore(self.cfg.rendering.max_concurrent_tasks)
+        self._compile_semaphore = asyncio.Semaphore(
+            self.cfg.rendering.max_concurrent_tasks
+        )
         self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
 
         # 静态资源锁
@@ -112,9 +114,7 @@ class TypstRenderer:
                 need_compile = True
                 if not is_temp and json_path.exists():
                     # hash + config 双校验
-                    need_compile = await self._check_cache(
-                        json_path, kv_key, img_path
-                    )
+                    need_compile = await self._check_cache(json_path, kv_key, img_path)
 
                 if not need_compile:
                     cached_webps = self._find_cached_webps(img_path.stem)
@@ -223,7 +223,7 @@ class TypstRenderer:
 
         except Exception as e:
             logger.warning(f"[HelpTypst] 清理旧缓存残留失败 {stem}: {e}")
-    
+
     def _resolve_paths(self, mode: str, query: str | None) -> dict[str, Any]:
         """计算文件路径"""
         if query:
@@ -237,8 +237,10 @@ class TypstRenderer:
             }
         else:
             return {
-                "json": self.data_dir / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.json",
-                "img": self.data_dir / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.png",
+                "json": self.data_dir
+                / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.json",
+                "img": self.data_dir
+                / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.png",
                 "kv_key": f"typst_cache_{mode}",
                 "is_temp": False,
                 "req_id": "static",
@@ -252,9 +254,7 @@ class TypstRenderer:
         parts = sorted(self.data_dir.glob(f"{stem}_part*.webp"), key=lambda x: x.name)
         return [str(p) for p in parts] if parts else []
 
-    async def _check_cache(
-        self, json_path: Path, kv_key: str, img_path: Path
-    ) -> bool:
+    async def _check_cache(self, json_path: Path, kv_key: str, img_path: Path) -> bool:
         """检查是否需要重新编译(AstrBot的简单KV存储)"""
         try:
             # 1. 计算当前 Hash
@@ -270,7 +270,7 @@ class TypstRenderer:
             cached_meta = await self.star.get_kv_data(kv_key, default=None)
 
             if not cached_meta:
-                return True # 无缓存记录
+                return True  # 无缓存记录
 
             # 3. 解析缓存
             cached_content_hash = cached_meta.get("content_hash")

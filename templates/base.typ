@@ -535,7 +535,197 @@
   }
 }
 
+// === 🗂️ 分类卡片视图 (Zhenxun 风格) ===
+
+// 数字序号徽章
+#let number_badge(idx, color) = {
+  box(
+    fill: rgb(color), radius: 5pt, inset: (x: 5pt, y: 1pt),
+  )[
+    #text(fill: white, size: 9pt, weight: "bold")[#idx]
+  ]
+}
+
+// 分类卡片
+#let category_card(cat) = {
+  let color = cat.at("color", default: "#3949ab")
+  let name = cat.at("name", default: "")
+  let count = cat.at("count", default: 0)
+  let plugins = cat.at("plugins", default: ())
+
+  // 阴影层 (右下露出淡灰), 卡片浮于其上
+  block(
+    width: 100%, breakable: false,
+    fill: luma(0, 6%), radius: 13pt,
+    inset: (bottom: 2.5pt, right: 2.5pt),
+  )[
+    #block(width: 100%, fill: white, radius: 12pt, inset: 0pt)[
+      // 彩色头部
+      #block(
+        width: 100%, fill: rgb(color), radius: (top: 12pt),
+        inset: (x: 12pt, y: 8pt),
+      )[
+        #grid(
+          columns: (1fr, auto), gutter: 8pt,
+          align(left + horizon)[#text(fill: white, weight: "bold", size: 12.5pt)[#hl(name)]],
+          align(right + horizon)[
+            #box(fill: rgb(color).lighten(25%), radius: 9pt, inset: (x: 7pt, y: 2pt))[
+              #text(fill: white, size: 9pt, weight: "bold")[#count]
+            ]
+          ]
+        )
+      ]
+      // 白色主体: 插件列表
+      #block(inset: (x: 12pt, y: 8pt))[
+        #grid(
+          columns: (1fr), row-gutter: 6pt,
+          ..plugins.map(p => {
+            let pidx = p.at("id", default: 0)
+            let pname = p.at("name", default: "")
+            let pdisp = p.at("display_name", default: "")
+            grid(
+              columns: (auto, 1fr), gutter: 7pt,
+              align(top + left)[#number_badge(pidx, color)],
+              align(left + horizon)[
+                #if pdisp != none and pdisp != "" {
+                  text(size: 10.5pt, weight: "bold", fill: c_leaf_text)[#hl(pdisp)]
+                  linebreak()
+                  text(size: 8pt, fill: c_desc_text)[@#hl(breakable_id(pname))]
+                } else {
+                  text(size: 10.5pt, weight: "bold", fill: c_leaf_text)[#hl(breakable_id(pname))]
+                }
+              ]
+            )
+          })
+        )
+      ]
+    ]
+  ]
+}
+
+// 分类卡片网格 (2 列)
+#let render_categories() = {
+  let cols = data.at("category_columns", default: ())
+  if cols.len() > 0 {
+    v(15pt)
+    grid(
+      columns: (1fr, 1fr),
+      column-gutter: 15pt,
+      row-gutter: 15pt,
+      ..cols.map(col => {
+        align(top)[
+          #stack(spacing: 15pt, ..col.map(cat => category_card(cat)))
+        ]
+      })
+    )
+  }
+}
+
 // === 🏭 组装视图 ===
+
+// --- 插件详情页 (数字定位) ---
+
+// 信息胶囊: 作者/版本/编号
+#let info_pill(label, value, bg, color) = {
+  if value != none and value != "" {
+    box(fill: bg, radius: 8pt, inset: (x: 8pt, y: 3pt), baseline: 2pt)[
+      #text(size: 9pt, fill: color)[#label  ]
+      #text(size: 9.5pt, fill: color, weight: "bold")[#value]
+    ]
+  }
+}
+
+// 分区标题行 (图标 + 标题 + 英文副标题 + 分隔线)
+#let section_header(icon, title, en_title) = {
+  block[
+    #grid(columns: (auto, 1fr, auto), gutter: 6pt,
+      align(left + horizon)[
+        #box(fill: c_bullet.lighten(85%), radius: 4pt, inset: (x: 5pt, y: 2pt))[#icon]
+      ],
+      align(left + horizon)[#text(size: 12pt, weight: "bold", fill: c_bullet)[#title]],
+      align(right + horizon)[#text(size: 8pt, fill: silver, tracking: 0.5em)[#en_title]]
+    )
+    #v(4pt)
+    #line(length: 100%, stroke: 0.6pt + c_bullet.lighten(75%))
+    #v(8pt)
+  ]
+}
+
+// 指令条目行: 指令名 - 说明
+#let command_row(cmd) = {
+  block(breakable: false, inset: (bottom: 5pt))[
+    #grid(columns: (auto, 1fr), gutter: 6pt,
+      align(top + left)[#bullet_icon],
+      align(left + horizon)[
+        #text(size: 10.5pt, weight: "bold", fill: c_leaf_text)[#hl(breakable_id(cmd.at("name", default: "")))]
+        #if cmd.at("desc", default: "") != "" {
+          text(size: 9pt, fill: c_desc_text)[  —  #hl(cmd.at("desc", default: ""))]
+        }
+      ]
+    )
+  ]
+}
+
+// 插件详情主体
+#let render_plugin_detail() = {
+  let p = data.at("plugin", default: (:))
+  let admin_cmds = data.at("admin_commands", default: ())
+  let normal_cmds = data.at("normal_commands", default: ())
+
+  v(12pt)
+
+  // 阴影层包裹整卡
+  block(
+    width: 100%, breakable: false,
+    fill: luma(0, 6%), radius: 13pt,
+    inset: (bottom: 2.5pt, right: 2.5pt),
+  )[
+    #block(width: 100%, fill: white, radius: 12pt, inset: (x: 18pt, y: 16pt))[
+      // 标题区
+      #align(center)[
+        #text(size: 26pt, weight: "bold", fill: c_bullet)[#p.at("display_name", default: "")]
+      ]
+      v(10pt)
+
+      // 信息条: 作者 / 版本 / 编号
+      #align(center)[
+        #stack(dir: ltr, spacing: 8pt,
+          info_pill("作者", p.at("author", default: ""), c_ver_bg, c_ver_text),
+          info_pill("版本", p.at("version", default: ""), c_prio_bg, c_prio_text),
+          info_pill("编号", str(p.at("order", default: 0)), c_box_bg, c_leaf_text),
+        )
+      ]
+      v(14pt)
+
+      // 功能简介
+      #if p.at("desc", default: "") != "" {
+        section_header(text(size: 0.9em)[📄], "功能简介", "ABOUT")
+        text(size: 10.5pt, fill: c_leaf_text)[#hl(p.at("desc", default: ""))]
+        v(12pt)
+      }
+
+      // 管理员指令
+      #if admin_cmds.len() > 0 {
+        section_header(text(size: 0.9em)[🛡️], "管理员指令", "ADMIN COMMANDS")
+        stack(spacing: 0pt, ..admin_cmds.map(cmd => command_row(cmd)))
+        v(6pt)
+      }
+
+      // 普通指令
+      #if normal_cmds.len() > 0 {
+        section_header(text(size: 0.9em)[📋], "指令", "COMMANDS")
+        stack(spacing: 0pt, ..normal_cmds.map(cmd => command_row(cmd)))
+        v(4pt)
+      }
+
+      // 指令数量统计
+      #v(6pt)
+      #align(right)[
+        #text(size: 8.5pt, fill: silver)[共 #(admin_cmds.len() + normal_cmds.len()) 条指令]
+      ]
+    ]
+  ]
+}
 
 // --- 主布局 ---
 #align(center)[
@@ -543,36 +733,45 @@
     #text(size: 36pt, weight: "black", fill: c_text_primary)[#data.title] \
     #v(6pt)
     #text(size: 11pt, fill: c_desc_text)[
-      已加载 #data.plugin_count 个插件/监听组  ·  #generated_time
+      #if data.at("mode", default: "command") == "plugin_detail" [
+        插件详情  ·  #generated_time
+      ] else if data.at("mode", default: "command") == "command" [
+        已加载 #data.plugin_count 个插件  ·  共 #data.at("category_count", default: 0) 个分类  ·  #generated_time
+      ] else [
+        已加载 #data.plugin_count 个插件/监听组  ·  #generated_time
+      ]
     ]
   ]
 ]
 
-// 语法指引
-#if data.at("mode", default: "command") == "command" {
-  render_syntax_guide()
+#if data.at("mode", default: "command") == "plugin_detail" {
+  // 插件详情页
+  render_plugin_detail()
+} else if data.at("mode", default: "command") == "command" {
+  // 指令模式: 分类卡片视图
+  render_categories()
 } else {
   v(15pt) // 如果不是指令模式，补回一点间距
+
+  // --- 巨型块 --- 
+  if data.giants.len() > 0 {
+    stack(spacing: 10pt, ..data.giants.map(plugin => plugin_card(plugin, mode: "giant")))
+    v(15pt)
+  }
+
+  // --- Columns ---
+  grid(
+    columns: (1fr, 1fr, 1fr), gutter: 15pt,
+    ..data.columns.map(col_plugins => {
+      align(top)[
+        #stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
+      ]
+    })
+  )
+
+  // --- Singles ---
+  render_singles_section(data.singles)
 }
-
-// --- 巨型块 --- 
-#if data.giants.len() > 0 {
-  stack(spacing: 10pt, ..data.giants.map(plugin => plugin_card(plugin, mode: "giant")))
-  v(15pt)
-}
-
-// --- Columns ---
-#grid(
-  columns: (1fr, 1fr, 1fr), gutter: 15pt,
-  ..data.columns.map(col_plugins => {
-    align(top)[
-      #stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
-    ]
-  })
-)
-
-// --- Singles ---
-#render_singles_section(data.singles)
 
 #v(20pt)
 #align(center + bottom)[

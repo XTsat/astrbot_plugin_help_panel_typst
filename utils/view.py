@@ -29,9 +29,7 @@ class HelpHint:
 class MsgRecall:
     """负责发送提示消息, 并在完成后撤回"""
 
-    async def send_wait(
-        self, event: AstrMessageEvent, text: str
-    ) -> int | str | None:
+    async def send_wait(self, event: AstrMessageEvent, text: str) -> int | str | None:
         """发送提示并返回消息ID"""
         bot = getattr(event, "bot", None)
         payload = event.plain_result(text)
@@ -172,6 +170,15 @@ class TypstLayout:
         font_list: list[str],
     ) -> dict[str, Any]:
         """瀑布流分发逻辑"""
+        # 插件详情页 (数字定位单个插件)
+        if mode == "plugin_detail":
+            return self._generate_plugin_detail_payload(
+                plugins, title, prefixes, font_list
+            )
+        # 指令模式: 按分类分组, 渲染为分类卡片 (Zhenxun 风格)
+        if mode == "command":
+            return self._generate_command_payload(plugins, title, prefixes, font_list)
+
         giants = []
         complex_plugins = []
         single_node_plugins = []
@@ -242,6 +249,151 @@ class TypstLayout:
             "columns": cols_data,
             "singles": single_node_plugins,
         }
+
+    def _generate_command_payload(
+        self,
+        plugins: list[PluginMetadata],
+        title: str,
+        prefixes: list[str],
+        font_list: list[str],
+    ) -> dict[str, Any]:
+        """指令模式: 按分类分组为卡片, 并均衡分配到 2 列"""
+        categories = self._group_by_category(plugins)
+        cols = self._balance_categories(categories)
+
+        return {
+            "title": title,
+            "mode": "command",
+            "prefixes": prefixes,
+            "fonts": font_list,
+            "plugin_count": len(plugins),
+            "category_count": len(categories),
+            "category_columns": cols,
+        }
+
+    def _generate_plugin_detail_payload(
+        self,
+        plugins: list[PluginMetadata],
+        title: str,
+        prefixes: list[str],
+        font_list: list[str],
+    ) -> dict[str, Any]:
+        """插件详情页: 单插件完整信息 (标题/作者/版本/简介/指令)"""
+        p = plugins[0] if plugins else None
+        if not p:
+            return {
+                "title": title,
+                "mode": "plugin_detail",
+                "prefixes": prefixes,
+                "fonts": font_list,
+            }
+
+        # 扁平化指令树 → 管理员指令 / 普通指令
+        admin_commands, normal_commands = self._flatten_commands(p.nodes)
+
+        return {
+            "title": title,
+            "mode": "plugin_detail",
+            "prefixes": prefixes,
+            "fonts": font_list,
+            "plugin": {
+                "name": p.name,
+                "display_name": p.display_name or p.name,
+                "version": p.version,
+                "desc": p.desc,
+                "author": p.author,
+                "order": p.order,
+            },
+            "admin_commands": admin_commands,
+            "normal_commands": normal_commands,
+        }
+
+    def _flatten_commands(
+        self, nodes: list[RenderNode], prefix: str = "", parent_admin: bool = False
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """递归展平指令树, 按权限拆分为管理员/普通指令列表"""
+        admin: list[dict[str, str]] = []
+        normal: list[dict[str, str]] = []
+
+        for node in nodes:
+            full_name = f"{prefix} {node.name}".strip() if prefix else node.name
+            is_admin = parent_admin or node.tag == "admin"
+
+            if node.is_group:
+                # 分组容器: 递归子节点, 权限继承
+                sub_admin, sub_normal = self._flatten_commands(
+                    node.children, full_name, is_admin
+                )
+                admin.extend(sub_admin)
+                normal.extend(sub_normal)
+            else:
+                item = {"name": full_name, "desc": node.desc or ""}
+                if is_admin:
+                    admin.append(item)
+                else:
+                    normal.append(item)
+
+        return admin, normal
+
+    def _group_by_category(self, plugins: list[PluginMetadata]) -> list[dict[str, Any]]:
+        """将插件按分类聚合, 输出分类卡片数据 (含主题色与全局序号徽章)"""
+        grouped: dict[str, list[PluginMetadata]] = {}
+        for p in plugins:
+            cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
+            grouped.setdefault(cat, []).append(p)
+
+        # 分类排序: 名称升序, 兜底分类置底
+        names = sorted(grouped.keys())
+        if InternalCFG.CATEGORY_FALLBACK in names:
+            names.remove(InternalCFG.CATEGORY_FALLBACK)
+            names.append(InternalCFG.CATEGORY_FALLBACK)
+
+        palette = InternalCFG.CATEGORY_PALETTE
+        categories = []
+        for idx, name in enumerate(names):
+            # 插件按全局编号排序, 保持与全量列表一致的展示顺序
+            plist = sorted(grouped[name], key=lambda x: x.order)
+            categories.append(
+                {
+                    "name": name,
+                    "count": len(plist),
+                    "color": palette[idx % len(palette)],
+                    "plugins": [
+                        {
+                            "id": p.order,
+                            "name": p.name,
+                            "display_name": p.display_name,
+                            "version": p.version,
+                        }
+                        for p in plist
+                    ],
+                }
+            )
+        return categories
+
+    def _balance_categories(
+        self, categories: list[dict[str, Any]]
+    ) -> list[list[dict[str, Any]]]:
+        """将分类卡片按估算高度贪心分配到 2 列, 使两列高度接近"""
+        weighted = [(c, self._estimate_category_height(c)) for c in categories]
+        sorted_cats = sorted(weighted, key=lambda x: x[1], reverse=True)
+
+        cols: list[list[dict[str, Any]]] = [[], []]
+        heights = [0, 0]
+
+        for cat, h in sorted_cats:
+            idx = heights.index(min(heights))
+            cols[idx].append(cat)
+            heights[idx] += h
+
+        return cols
+
+    def _estimate_category_height(self, cat: dict[str, Any]) -> int:
+        """估算单个分类卡片高度 (pt): 头部 + 每个插件一行"""
+        count = int(cat.get("count", 0))
+        return (
+            InternalCFG.CATEGORY_HEADER_HEIGHT + count * InternalCFG.CATEGORY_ROW_HEIGHT
+        )
 
     def _estimate_height(self, nodes: list[RenderNode]) -> int:
         """高度估算器(暂硬编码，等待完善模板逻辑)"""
