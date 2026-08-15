@@ -163,6 +163,7 @@ class HelpTypst(Star):
         title: str,
         mode: str,
         query: str | None,
+        is_detail: bool = False,
     ):
         """通用请求处理逻辑"""
         wait_msg_id = None
@@ -171,7 +172,7 @@ class HelpTypst(Star):
             # 1. 发送提示
             hint_text = (
                 self.hint.msg_searching(query)
-                if query
+                if query and not is_detail
                 else self.hint.msg_rendering(mode)
             )
             wait_msg_id = await self.msg.send_wait(event, hint_text)
@@ -184,9 +185,8 @@ class HelpTypst(Star):
                 return 0
 
             # 视图层：决定标题 & 计算布局 & 写入JSON
-            # 数字定位 → 单插件详情页
-            is_detail = mode == "command" and bool(query) and query.strip().isdigit()
             if is_detail:
+                # 数字定位 → 单插件详情页
                 display_title = plugins[0].display_name or plugins[0].name
                 layout_mode = "plugin_detail"
             else:
@@ -253,26 +253,53 @@ class HelpTypst(Star):
             logger.warning(f"[HelpTypst] 获取唤醒词失败，使用默认值 '/': {e}")
             self.prefixes = ["/"]
 
+    def _parse_search_query(self, raw_query: str) -> str | None:
+        """解析 `s <关键词>` 搜索子命令: 命中返回关键词, 否则返回 None(不搜索)"""
+        query = raw_query.strip()
+        if not query or query == "s":
+            return None
+        if query.startswith("s "):
+            keyword = query[2:].strip()
+            return keyword or None
+        return None
+
+    def _parse_menu_query(self, raw_query: str) -> tuple[str | None, bool]:
+        """解析参数: 返回 (搜索关键词, 是否详情页)
+
+        - `s <关键词>` → 搜索模式
+        - `<数字>`     → 指定插件详情页
+        - 空/其它      → 完整菜单
+        """
+        query = raw_query.strip()
+        if not query:
+            return None, False
+        if query.isdigit():
+            return query, True
+        return self._parse_search_query(query), False
+
     @filter.command("helps", alias={"功能", "菜单", "帮助"})
     async def show_menu(self, event: AstrMessageEvent, query: str = ""):
         """显示指令菜单"""
+        keyword, is_detail = self._parse_menu_query(query)
         async for r in self._handle_request(
-            event, self.cmd_analyzer, "AstrBot 指令菜单", "command", query
+            event, self.cmd_analyzer, "AstrBot 指令菜单", "command", keyword, is_detail
         ):
             yield r
 
-    @filter.command("events")
+    @filter.command("events", alias={"事件", "事件监听"})
     async def show_events(self, event: AstrMessageEvent, query: str = ""):
         """显示事件监听列表"""
+        keyword = self._parse_search_query(query)
         async for r in self._handle_request(
-            event, self.evt_analyzer, "AstrBot 事件监听", "event", query
+            event, self.evt_analyzer, "AstrBot 事件监听", "event", keyword
         ):
             yield r
 
-    @filter.command("filters")
+    @filter.command("filters", alias={"过滤器", "过滤"})
     async def show_filters(self, event: AstrMessageEvent, query: str = ""):
         """显示过滤器详情"""
+        keyword = self._parse_search_query(query)
         async for r in self._handle_request(
-            event, self.flt_analyzer, "AstrBot 过滤器分析", "filter", query
+            event, self.flt_analyzer, "AstrBot 过滤器分析", "filter", keyword
         ):
             yield r

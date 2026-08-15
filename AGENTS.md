@@ -12,7 +12,7 @@
 
 - 把 AstrBot 的 **插件菜单 / 指令、事件钩子、函数工具(MCP)、过滤器列表** 渲染成友好图片界面。
 - 基于 **Typst** 渲染（`typst` Python 包，子进程编译成 PNG → 转 WebP）。
-- 提供**搜索**能力：`helps/events/filters <关键词>`，附关键词高亮。
+- 提供**搜索**能力：`helps/events/filters s <关键词>`，附关键词高亮。
 - 支持自定义字体（`.ttf/.otf/.woff2`）、多套外观预设（字体顺序 + 配色）。
 
 **插件元信息**（`metadata.yaml`）：name=`astrbot_plugin_help_typst`，version 见文件。
@@ -63,7 +63,7 @@ resources/         # 静态资源
 ## 4. 核心数据流
 
 ```
-用户指令 (helps/events/filters [query])
+用户指令 (helps/events/filters [s <关键词>|<编号>])
   └─ main.py._handle_request()
        ├─ analyzer.get_plugins(query)      # 分析器：从 star_handlers_registry / tools 组织数据
        │     └─ 产出 list[PluginMetadata] → RenderNode 树
@@ -94,9 +94,11 @@ resources/         # 静态资源
 
 | 指令 | 权限 | 说明 |
 |---|---|---|
-| `/helps [关键词]` | 任意 | 指令菜单 |
-| `/events [关键词]` | 任意 | 事件监听列表 |
-| `/filters [关键词]` | 任意 | 过滤器详情 |
+| `/helps` | 任意 | 显示卡片式帮助面板（别名：`/功能`、`/菜单`、`/帮助`） |
+| `/helps <编号>` | 任意 | 指定插件详情页 |
+| `/helps s <关键词>` | 任意 | 搜索指令 |
+| `/events [s <关键词>]` | 任意 | 事件监听列表（别名：`/事件`、`/事件监听`） |
+| `/filters [s <关键词>]` | 任意 | 过滤器详情（别名：`/过滤器`、`/过滤`） |
 | `/typst font` | 管理员 | 扫描字体并自重载 |
 
 ---
