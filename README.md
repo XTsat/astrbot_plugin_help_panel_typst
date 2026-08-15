@@ -1,30 +1,20 @@
-# 📂︎ Astrbot Plugin Help Typst | 插件菜单(typst实现)
-
-<div align="center">
-
-**以优雅的方式组织你的插件菜单**
-<br>
-*轻量  丰富  更多🗃*
-
-</div>
+# 📂︎ Astrbot Plugin Help Panel Typst | 插件帮助面板
 
 ---
 
 ## 📖 简介
 
-* 基于 tinkerbellqwq/astrbot_plugin_help 进行重度开发的插件菜单，实现缓存功能
+* 基于 [tinkerbellqwq/astrbot_plugin_help](https://github.com/bylkuse/astrbot_plugin_help_typst) 进行特化修改的插件帮助菜单
 * 把插件菜单、事件钩子、函数工具、过滤器列表渲染成友好界面，智能组织节点和分组，并附上丰富的元信息。不只是面向 bot 用户的说明，也是一份调试辅助工具。
 * 针对插件名、指令名、描述内容的泛用搜索工具，附关键词高亮【用法： helps/events/filters <关键词>】
 * 基于 typst 渲染实现，轻量、灵活、高效，你可以使用 typst 语法修改、构建属于自己的渲染模板（WIP）
 * 支持自定义字体 .ttf .otf .woff2<br>
-1.放入 插件目录/resources/fonts 或[自定义字体目录](#-常见问题)<br>
-2.重载方式三选一(更新 optional scheme)<br>
-2a.在 AstrBot 面板中重载插件<br>
-2b.重启 AstrBot<br>
-2c.使用指令 typst font<br>
-3.新字体将会出现在配置面板供 勾选 & 排序 (不可用的字体会被自动剔除)
-
-<br>进度：基本功能 √
+  1. 放入 插件目录/resources/fonts 或[自定义字体目录](#-常见问题)<br>
+  2. 重载方式三选一(更新 optional scheme)<br>
+     1. 在 AstrBot 面板中重载插件<br>
+     2. 重启 AstrBot<br>
+     3. 使用指令 typst font<br>
+  3. 新字体将会出现在配置面板供 勾选 & 排序 (不可用的字体会被自动剔除)
 
 ## 🖼️ 功能预览
 
@@ -72,10 +62,3 @@ astrbot_plugin_typst_menu/
      └── images/               # 默认背景图、图标 (未完成)
 
 ```
-
----
-
-<div align="center">
-🔔 Merry Christmas~<br>
-Made with 😊 by LilDawn
-</div>
