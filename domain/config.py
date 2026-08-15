@@ -23,6 +23,7 @@ class RenderingConfig:
 @dataclass
 class ThemePreset:
     """单个外观预设"""
+
     name: str
     font_order: list[str]
     colors: dict[str, str] = field(default_factory=dict)
@@ -31,6 +32,7 @@ class ThemePreset:
 @dataclass
 class AppearanceConfig:
     """外观配置聚合"""
+
     active_preset: str
     presets: dict[str, ThemePreset]
     # 内部缓存字段
@@ -41,12 +43,12 @@ class AppearanceConfig:
         preset = self.presets.get(self.active_preset)
         if preset:
             return preset.font_order
-        return [] # 兜底： FontManager 补全默认值
+        return []  # 兜底： FontManager 补全默认值
 
     def get_active_colors(self) -> dict[str, str]:
         """获取激活预设的颜色配置"""
         if self._color_cache is not None:
-            return self._color_cache # 命中缓存
+            return self._color_cache  # 命中缓存
 
         # 1. 默认
         final_colors = DefaultCFG.DEFAULT_COLORS.copy()
@@ -54,12 +56,12 @@ class AppearanceConfig:
         # 2. 预设
         preset = self.presets.get(self.active_preset)
 
-         # 3. 清洗 & 合并
+        # 3. 清洗 & 合并
         if preset and preset.colors:
             for key, user_val in preset.colors.items():
                 if key not in final_colors:
                     continue
-                
+
                 # 校验
                 if self._is_valid_hex(user_val):
                     final_colors[key] = user_val
@@ -85,6 +87,7 @@ class AppearanceConfig:
 @dataclass
 class TypstPluginConfig:
     """插件全局配置聚合根"""
+
     enable_waiting_message: bool
     ignored_plugins: set[str]
     custom_font_path: str
@@ -99,7 +102,9 @@ class TypstPluginConfig:
 
         ignored_list = raw_config.get("ignored_plugins", None)
         ignored_set = (
-            set(ignored_list) if ignored_list is not None else DefaultCFG.IGNORED_PLUGINS.copy()
+            set(ignored_list)
+            if ignored_list is not None
+            else DefaultCFG.IGNORED_PLUGINS.copy()
         )
 
         # Rendering
@@ -127,9 +132,9 @@ class TypstPluginConfig:
         presets_dict = {}
 
         default_preset = ThemePreset(
-            name="default", 
-            font_order=["Sarasa Gothic SC", "Noto Color Emoji"],
-            colors={} 
+            name="default",
+            font_order=["LXGW Neo XiHei", "Noto Color Emoji"],
+            colors={},
         )
         presets_dict["default"] = default_preset  # 兜底：默认预设
 
@@ -139,26 +144,25 @@ class TypstPluginConfig:
                 p_name = p_data.get("preset_name", "custom")
                 p_fonts = p_data.get("font_order", [])
 
-                 # 解析颜色配置
+                # 解析颜色配置
                 p_colors = {}
                 for color_key in DefaultCFG.DEFAULT_COLORS.keys():
                     if color_key in p_data:
-                        raw_val = p_data[color_key] # 防 None、数字类型传入
-                        p_colors[color_key] = str(raw_val) if raw_val is not None else ""
+                        raw_val = p_data[color_key]  # 防 None、数字类型传入
+                        p_colors[color_key] = (
+                            str(raw_val) if raw_val is not None else ""
+                        )
 
                 presets_dict[p_name] = ThemePreset(
-                    name=p_name, 
-                    font_order=p_fonts, 
-                    colors=p_colors
+                    name=p_name, font_order=p_fonts, colors=p_colors
                 )
 
         appearance_cfg = AppearanceConfig(
-            active_preset=active_preset_name, 
-            presets=presets_dict
+            active_preset=active_preset_name, presets=presets_dict
         )
 
         custom_font_path = raw_config.get("custom_font_path", "")
-        
+
         logger.debug(
             f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}, 外观预设: {active_preset_name}"
         )
@@ -168,5 +172,5 @@ class TypstPluginConfig:
             ignored_plugins=ignored_set,
             custom_font_path=custom_font_path,
             rendering=render_cfg,
-            appearance=appearance_cfg
+            appearance=appearance_cfg,
         )

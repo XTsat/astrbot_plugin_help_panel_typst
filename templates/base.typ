@@ -2,7 +2,7 @@
 
 // --- 参数传入 ---
 #let data            = json(bytes(sys.inputs.at("json_string", default: "{}")))
-#let user_fonts      = data.at("fonts", default: ("Sarasa Gothic SC", "Noto Color Emoji"))
+#let user_fonts      = data.at("fonts", default: ("LXGW Neo XiHei", "Noto Color Emoji"))
 #let query_regex_str = sys.inputs.at("query_regex", default: none)
 #let generated_time  = sys.inputs.at("timestamp", default: "Unknown Time")
 // 颜色参数

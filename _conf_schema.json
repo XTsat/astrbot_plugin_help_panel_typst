@@ -114,7 +114,7 @@
           {
             "__template_key": "standard_theme",
             "preset_name": "default",
-            "font_order": ["Sarasa Gothic SC", "Noto Color Emoji"],
+            "font_order": ["LXGW Neo XiHei", "Noto Color Emoji"],
             "page_fill": "#f0f2f5",
             "c_plugin_name": "#0d47a1"
           }
@@ -133,8 +133,8 @@
               "font_order": {
                 "description": "字体优先级排序",
                 "type": "list",
-                "default": ["Sarasa Gothic SC", "Noto Color Emoji"],
-                "options": ["Sarasa Gothic SC", "Noto Color Emoji"]
+                "default": ["LXGW Neo XiHei", "Noto Color Emoji"],
+                "options": ["LXGW Neo XiHei", "Noto Color Emoji"]
               },
               
               "header_001": { "description": "🎨 基础背景与文字", "type": "string", "default": "---", "read_only": true },

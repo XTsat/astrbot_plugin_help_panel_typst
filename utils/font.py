@@ -24,7 +24,7 @@ class FontManager:
             return
 
         try:
-            font_db = typst.Fonts(font_paths=search_paths) # 0.14.7 引入的字体查询接口
+            font_db = typst.Fonts(font_paths=search_paths)  # 0.14.7 引入的字体查询接口
             families = list(font_db.families())
             self.available_families.update(families)
             count = len(self.available_families)
@@ -107,7 +107,7 @@ class FontManager:
                 seen.add(f)
 
         # 2. 兜底
-        defaults = ["Sarasa Gothic SC", "Noto Color Emoji"]
+        defaults = ["LXGW Neo XiHei", "Noto Color Emoji"]
         for f in defaults:
             if f not in seen:
                 final.append(f)
