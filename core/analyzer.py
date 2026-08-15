@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -23,6 +24,34 @@ from astrbot.core.star.filter.event_message_type import (
 from astrbot.core.agent.mcp_client import MCPTool
 
 from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
+
+
+# 命令监听描述识别: 头部含「命令/指令」, 冒号后为顿号/逗号分隔的关键词列表
+_LIST_SEP_RE = re.compile(r"[、，,;；|/]")
+
+
+def _extract_command_keywords(desc: str) -> list[str]:
+    """从事件监听器 desc 中启发式提取命令关键词列表。
+
+    仅当 desc 形如「监听…命令：a、b、c」时返回关键词, 否则返回空列表
+    (调用方据此决定是否回退为原始 desc 展示)。
+    """
+    if not desc:
+        return []
+    head, sep, tail = desc.partition("：")
+    if not sep:
+        head, sep, tail = desc.partition(":")
+    if not sep:
+        return []
+    # 头部须暗示「命令/指令」
+    if "命令" not in head and "指令" not in head:
+        return []
+    # 尾部须为列表形式 (含顿号/逗号等分隔符)
+    if not _LIST_SEP_RE.search(tail):
+        return []
+    keywords = [t.strip() for t in _LIST_SEP_RE.split(tail) if t.strip()]
+    # 过滤: 关键词应为短词, 剔除误切的长句/纯标点
+    return [k for k in keywords if 1 <= len(k) <= 16]
 
 
 class BaseAnalyzer:
@@ -604,6 +633,58 @@ class EventAnalyzer(BaseAnalyzer):
             )
             results.append(pm)
 
+        return results
+
+    def get_plugin_event_listeners(self, plugin_name: str) -> list[RenderNode]:
+        """获取指定插件的所有事件监听器节点 (用于插件详情页)。
+
+        通过 _get_safe_plugin_info 派生插件名进行匹配, 与 CommandAnalyzer 产出
+        的 PluginMetadata.name 保持一致。
+        """
+        results: list[RenderNode] = []
+
+        # 1. 解析目标插件的 module_path
+        target_module: str | None = None
+        for star in self.context.get_all_stars():
+            info = self._get_safe_plugin_info(star)
+            if info["name"] == plugin_name:
+                target_module = info["raw_module"]
+                break
+
+        if not target_module:
+            return results
+
+        # 2. 收集该插件的非指令事件监听器
+        for handler in star_handlers_registry:
+            if not isinstance(handler, StarHandlerMetadata):
+                continue
+            if handler.handler_module_path != target_module:
+                continue
+            if self._is_command_handler(handler):
+                continue  # 纯 @command 已在指令区展示
+            if handler.event_type == EventType.OnCallingFuncToolEvent:
+                continue  # 函数工具已在工具区展示
+
+            raw_desc = (handler.desc or "").split("\n")[0].strip()
+            if not raw_desc and handler.handler.__doc__:
+                raw_desc = handler.handler.__doc__.split("\n")[0].strip()
+
+            prio = handler.extras_configs.get("priority", 0)
+            results.append(
+                RenderNode(
+                    name=handler.handler_name,
+                    desc=raw_desc,
+                    is_group=False,
+                    tag="event_listener",
+                    priority=prio,
+                    commands=_extract_command_keywords(raw_desc),
+                )
+            )
+
+        results.sort(key=lambda x: x.name)
+        results.sort(
+            key=lambda x: x.priority if x.priority is not None else 0, reverse=True
+        )
         return results
 
     def _is_command_handler(self, handler: StarHandlerMetadata) -> bool:

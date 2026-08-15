@@ -189,6 +189,10 @@ class HelpTypst(Star):
                 # 数字定位 → 单插件详情页
                 display_title = plugins[0].display_name or plugins[0].name
                 layout_mode = "plugin_detail"
+                # 附加该插件的事件监听器 (含命令式监听)
+                plugins[0].event_nodes = self.evt_analyzer.get_plugin_event_listeners(
+                    plugins[0].name
+                )
             else:
                 display_title = f'搜索结果: "{query}"' if query else title
                 layout_mode = mode

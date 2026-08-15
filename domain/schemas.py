@@ -43,6 +43,11 @@ class RenderNode(BaseModel):
     tag: str = Field(default="normal", description="标记类型: normal/admin/event")
     priority: int | None = Field(default=None, description="事件监听优先级")
 
+    # 事件监听器命令提取 (插件详情页展示命令关键词)
+    commands: list[str] = Field(
+        default_factory=list, description="命令关键词列表 (事件监听器命令提取)"
+    )
+
     # 递归定义
     children: list["RenderNode"] = Field(default_factory=list, description="子节点")
 
@@ -64,3 +69,6 @@ class PluginMetadata(BaseModel):
     order: int = Field(default=0, description="全局展示编号 (指令模式, 跨分类连续)")
 
     nodes: list[RenderNode] = Field(default_factory=list)
+    event_nodes: list[RenderNode] = Field(
+        default_factory=list, description="事件监听器节点 (插件详情页展示)"
+    )

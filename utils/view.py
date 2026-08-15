@@ -306,7 +306,22 @@ class TypstLayout:
             },
             "admin_commands": admin_commands,
             "normal_commands": normal_commands,
+            "event_listeners": self._build_event_listener_payload(p.event_nodes),
         }
+
+    def _build_event_listener_payload(
+        self, event_nodes: list[RenderNode]
+    ) -> list[dict[str, Any]]:
+        """构建插件详情页的事件监听器列表"""
+        return [
+            {
+                "name": node.name,
+                "desc": node.desc or "",
+                "priority": node.priority,
+                "commands": list(node.commands or []),
+            }
+            for node in event_nodes
+        ]
 
     def _flatten_commands(
         self, nodes: list[RenderNode], prefix: str = "", parent_admin: bool = False

@@ -666,11 +666,35 @@
   ]
 }
 
+// 事件监听条目行: 处理器名 - 命令关键词(命中则胶囊展示) 或 原始描述
+#let event_listener_row(listener) = {
+  let cmds = listener.at("commands", default: ())
+  block(breakable: false, inset: (bottom: 5pt))[
+    #grid(columns: (auto, 1fr), gutter: 6pt,
+      align(top + left)[#event_icon],
+      align(left)[
+        #text(size: 10.5pt, weight: "bold", fill: c_leaf_text)[#hl(breakable_id(listener.at("name", default: "")))]
+        #if listener.at("priority", default: none) != none {
+          h(2pt)
+          priority_pill(listener.at("priority", default: none))
+        }
+        #if cmds.len() > 0 {
+          h(3pt)
+          text(size: 9pt, fill: c_bullet)[#hl(cmds.join("  ·  "))]
+        } else if listener.at("desc", default: "") != "" {
+          text(size: 9pt, fill: c_desc_text)[#hl(listener.at("desc", default: ""))]
+        }
+      ]
+    )
+  ]
+}
+
 // 插件详情主体
 #let render_plugin_detail() = {
   let p = data.at("plugin", default: (:))
   let admin_cmds = data.at("admin_commands", default: ())
   let normal_cmds = data.at("normal_commands", default: ())
+  let event_listeners = data.at("event_listeners", default: ())
 
   v(12pt)
 
@@ -715,6 +739,13 @@
       #if normal_cmds.len() > 0 {
         section_header(text(size: 0.9em)[📋], "指令", "COMMANDS")
         stack(spacing: 0pt, ..normal_cmds.map(cmd => command_row(cmd)))
+        v(4pt)
+      }
+
+      // 事件监听
+      #if event_listeners.len() > 0 {
+        section_header(text(size: 0.9em)[⚡], "事件监听", "EVENT LISTENERS")
+        stack(spacing: 0pt, ..event_listeners.map(listener => event_listener_row(listener)))
         v(4pt)
       }
 
