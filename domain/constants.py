@@ -181,6 +181,21 @@ class DefaultCFG:
     # 3. 全局字体优先级 (appearance.font_order 缺省值)
     DEFAULT_FONT_ORDER: list[str] = ["LXGW Neo XiHei", "Noto Color Emoji"]
 
+    # 系统字体目录映射 (扫描时并入选择框选项; ~ 在代码中展开)
+    SYSTEM_FONT_DIRS: tuple[str, ...] = (
+        # Windows
+        "C:/Windows/Fonts",
+        # macOS
+        "/System/Library/Fonts",
+        "/Library/Fonts",
+        "~/Library/Fonts",
+        # Linux
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        "~/.fonts",
+        "~/.local/share/fonts",
+    )
+
     # 4. 过滤设置
     # config.py 负责 list → set
     IGNORED_PLUGINS: set[str] = {

@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +15,32 @@ class FontManager:
         self.font_dirs = font_dirs
         self.available_families: set[str] = set()
 
+    @staticmethod
+    def get_system_font_dirs() -> list[Path]:
+        """收集系统字体目录 (仅返回实际存在的目录)"""
+        dirs = [Path(p).expanduser() for p in DefaultCFG.SYSTEM_FONT_DIRS]
+
+        # Windows 每用户字体目录 (LOCALAPPDATA 可能不存在)
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            dirs.append(Path(local_appdata) / "Microsoft" / "Windows" / "Fonts")
+
+        return [d for d in dirs if d.is_dir()]
+
     def scan_fonts(self):
-        """扫描本地字体(.ttf .otf .woff2)"""
+        """扫描本地字体(.ttf .otf .woff2) —— 项目目录 + 系统字体目录"""
         self.available_families.clear()
 
-        # 转换路径为 Typst 期望的字符串列表
-        search_paths = [str(p.resolve()) for p in self.font_dirs if p.exists()]
+        # 合并项目目录与系统目录, 去重后转换为 Typst 期望的字符串列表
+        search_paths: list[str] = []
+        seen: set[str] = set()
+        for p in [*self.font_dirs, *self.get_system_font_dirs()]:
+            if not p.exists():
+                continue
+            resolved = str(p.resolve())
+            if resolved not in seen:
+                seen.add(resolved)
+                search_paths.append(resolved)
 
         if not search_paths:
             logger.warning("[HelpTypst] 没有有效的字体目录，跳过扫描")

@@ -17,7 +17,8 @@
      1. 在 AstrBot 面板中重载插件<br>
      2. 重启 AstrBot<br>
      3. 使用指令 typst font<br>
-  3. 新字体将会出现在配置面板的全局字体配置（`appearance.font_order`）中供勾选排序，不可用的字体会被自动剔除
+  3. 新字体将会出现在配置面板的全局字体配置（`appearance.font_order`）中供勾选排序，不可用的字体会被自动剔除<br>
+   4. 系统字体库也会被自动扫描进选择框（Windows/macOS/Linux 常见字体目录），也可直接输入字体名
 
 ### 🖼️ 功能预览
 
@@ -78,7 +79,7 @@
 * 文档显式指定：通过 #set text(font: "font-family-name") 直接指定，优先级最高
 * 项目字体目录：即本插件的根目录下的 ./resources/fonts <br>
 ~~后面会考虑增加额外的目录支持~~已完成，缺省值为 `.../data/plugin_data/astrbot_plugin_help_typst/fonts` 🚨 docker 用户记得确保自定义字体目录已被挂载
-* 系统字体库：获取系统默认字体目录 ( Windows、macOS 应该有官方支持，Linux 未测试支持度如何；🚨 docker 环境可能需要安装字体依赖）
+* 系统字体库：自动扫描并收录进 `appearance.font_order` 选择框（Windows: `C:/Windows/Fonts`；macOS: `/System/Library/Fonts`、`/Library/Fonts`、`~/Library/Fonts`；Linux: `/usr/share/fonts`、`/usr/local/share/fonts` 等）🚨 docker 环境可能没有系统字体，需要把字体放入自定义字体目录或安装字体依赖）
 
 ## 🌳 目录结构（初步预期）
 

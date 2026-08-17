@@ -233,7 +233,7 @@
 // ============================================================
 #let render_header() = {
   let total = data.at("plugin_count", default: 0)
-  let cat_count = data.at("category_count", default: 0)
+  let enabled = data.at("enabled_count", default: total)
 
   let stat(value, label, color, divided: false) = box(
     inset: (left: if divided { 14pt } else { 0pt }, y: 0pt),
@@ -261,15 +261,17 @@
         align(left + horizon)[
           #stack(
             spacing: 4pt,
-            text(size: 22pt, weight: "bold", fill: c_navy)[#hl(data.title)],
-            text(size: 9pt, fill: c_gray)[Plugin Command Center],
+            text(size: 22pt, weight: "bold", fill: c_navy)[Astrbot 插件面板],
+            if (query_regex_str != none and query_regex_str != "") [
+              text(size: 9pt, fill: c_gray)[#data.title]
+            ],
           )
         ],
         align(right + horizon)[
           #stack(
             dir: ltr, spacing: 14pt,
-            stat(str(total), "总功能", c_sky),
-            stat(str(cat_count), "分类", c_cream, divided: true),
+            stat(str(total), "总插件", c_sky),
+            stat(str(enabled), "已开启", c_cream, divided: true),
             stat("AstrBot", "System", c_navy, divided: true),
           )
         ],

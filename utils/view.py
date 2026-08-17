@@ -269,6 +269,7 @@ class TypstLayout:
             "prefixes": prefixes,
             "fonts": font_list,
             "plugin_count": len(plugins),
+            "enabled_count": sum(1 for p in plugins if not p.disabled),
             "category_count": len(categories),
             "category_columns": cols,
         }
