@@ -178,7 +178,10 @@ class DefaultCFG:
     TIMEOUT_ANALYSIS: float = 10.0
     TIMEOUT_COMPILE: float = 30.0
 
-    # 3. 过滤设置
+    # 3. 全局字体优先级 (appearance.font_order 缺省值)
+    DEFAULT_FONT_ORDER: list[str] = ["LXGW Neo XiHei", "Noto Color Emoji"]
+
+    # 4. 过滤设置
     # config.py 负责 list → set
     IGNORED_PLUGINS: set[str] = {
         "astrbot",
@@ -190,7 +193,7 @@ class DefaultCFG:
         "astrbot_plugin_help_typst",
     }
 
-    # 4. 内置主题预设 (preset_name → 完整配色)
+    # 5. 内置主题预设 (preset_name → 完整配色)
     # 每个配色字典含三类键:
     #   brand_* : 品牌色板 (主色/结构色/背景/边框等, 13 个, 供指令菜单使用)
     #   cat_*   : 分类主题色 (按分类名, 供分类卡片标题栏使用)
@@ -477,6 +480,9 @@ class DefaultCFG:
 
     # 默认激活的预设名
     DEFAULT_PRESET: str = "Ocean Blue"
+
+    # 下拉框中的「自定义」选项 (对应下方 presets 列表中的自定义配置)
+    CUSTOM_PRESET_KEY: str = "自定义"
 
     # 向后兼容: DEFAULT_COLORS 指向默认预设配色
     DEFAULT_COLORS: dict[str, str] = OCEAN_BLUE_COLORS

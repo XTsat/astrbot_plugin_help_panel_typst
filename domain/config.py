@@ -34,31 +34,35 @@ class AppearanceConfig:
     """外观配置聚合"""
 
     active_preset: str
-    presets: dict[str, ThemePreset]
+    font_order: list[str]
+    presets: dict[str, ThemePreset]  # 内置预设注册 (兼容旧配置中的自定义预设)
     # 内部缓存字段
     _color_cache: dict[str, str] | None = field(init=False, default=None, repr=False)
 
     def get_active_font_order(self) -> list[str]:
-        """获取激活预设的字体列表"""
-        preset = self.presets.get(self.active_preset)
-        if preset:
-            return preset.font_order
-        return []  # 兜底： FontManager 补全默认值
+        """获取全局字体优先级列表"""
+        return list(self.font_order)
 
     def get_active_colors(self) -> dict[str, str]:
         """获取激活预设的颜色配置"""
         if self._color_cache is not None:
             return self._color_cache  # 命中缓存
 
-        # 1. 基底: 激活预设对应的内置配色 (未知预设回退默认预设)
-        base = DefaultCFG.PRESETS.get(
-            self.active_preset, DefaultCFG.DEFAULT_COLORS
-        ).copy()
+        # 1. 基底: 激活预设对应的内置配色 (内置预设锁定, 不受列表条目影响)
+        if self.active_preset == DefaultCFG.CUSTOM_PRESET_KEY:
+            # 「自定义」: 使用下方 presets 列表中的自定义配置
+            base = DefaultCFG.DEFAULT_COLORS.copy()
+            preset = self._get_custom_preset()
+        elif self.active_preset in DefaultCFG.PRESETS:
+            # 内置预设: 配色固定, 列表条目仅作为「自定义」的配置源
+            base = DefaultCFG.PRESETS[self.active_preset].copy()
+            preset = None
+        else:
+            # 旧配置兼容: 直接引用列表中的自定义预设名
+            base = DefaultCFG.DEFAULT_COLORS.copy()
+            preset = self.presets.get(self.active_preset)
 
-        # 2. 用户自定义预设覆盖
-        preset = self.presets.get(self.active_preset)
-
-        # 3. 清洗 & 合并
+        # 2. 列表条目配色覆盖 (缺失/非法值跳过)
         if preset and preset.colors:
             for key, user_val in preset.colors.items():
                 if key not in base:
@@ -73,10 +77,24 @@ class AppearanceConfig:
                         f"已回退到默认值: {base[key]}"
                     )
 
-        # 4. 写入缓存
+        # 3. 写入缓存
         self._color_cache = base
 
         return base
+
+    def _get_custom_preset(self) -> ThemePreset | None:
+        """获取自定义预设: 列表中第一个非内置条目, 无则回退第一个带配色的条目 (默认即 zhenxun)"""
+        # 1. 优先: 用户添加/改名的新条目
+        for name, preset in self.presets.items():
+            if name not in DefaultCFG.PRESETS and preset.colors:
+                return preset
+
+        # 2. 回退: 第一个带配色的列表条目 (默认提供 zhenxun)
+        for preset in self.presets.values():
+            if preset.colors:
+                return preset
+
+        return None
 
     def get_active_category_colors(self) -> dict[str, str]:
         """从激活配色中提取分类主题色 (cat_* 前缀 → 分类名)"""
@@ -141,26 +159,45 @@ class TypstPluginConfig:
         active_preset_name = raw_appearance.get(
             "active_preset", DefaultCFG.DEFAULT_PRESET
         )
-        raw_presets_list = raw_appearance.get("presets", [])  # 解析 template_list 列表
+        raw_font_order = raw_appearance.get("font_order", None)
+
+        # 全局字体优先级 (旧配置迁移: 缺失时尝试从旧激活预设中提取)
+        if not isinstance(raw_font_order, list) or not raw_font_order:
+            legacy_fonts = None
+            legacy_presets = raw_appearance.get("presets", [])
+            if isinstance(legacy_presets, list):
+                for p_data in legacy_presets:
+                    if p_data.get("preset_name") == active_preset_name:
+                        legacy_fonts = p_data.get("font_order", [])
+                        break
+            font_order = [
+                str(f)
+                for f in (legacy_fonts or DefaultCFG.DEFAULT_FONT_ORDER)
+                if isinstance(f, str)
+            ]
+        else:
+            font_order = [str(f) for f in raw_font_order if isinstance(f, str)]
+        if not font_order:  # 清洗后为空 → 回退默认值
+            font_order = DefaultCFG.DEFAULT_FONT_ORDER.copy()
+
+        raw_presets_list = raw_appearance.get("presets", [])  # 旧配置兼容
         presets_dict = {}
 
         # 内置预设注册 (配色由 DefaultCFG.PRESETS 提供, 此处仅登记名称与字体)
         for preset_name in DefaultCFG.PRESETS:
             presets_dict[preset_name] = ThemePreset(
                 name=preset_name,
-                font_order=["LXGW Neo XiHei", "Noto Color Emoji"],
+                font_order=font_order.copy(),
                 colors={},
             )
 
         if isinstance(raw_presets_list, list):
             for p_data in raw_presets_list:
-                # 解析用户配置的列表
+                # 解析旧配置的列表 (仅用于颜色覆盖兼容)
                 p_name = p_data.get("preset_name", "custom")
                 p_fonts = p_data.get("font_order", [])
 
-                # 解析颜色配置 (内置预设与自定义预设统一处理;
-                # 内置预设的正确配色已由 _conf_schema.json 预设列表显式给出,
-                # 故此处直接覆盖即可, 用户在面板微调内置预设颜色也能生效)
+                # 解析颜色配置 (旧配置中微调过的内置预设颜色覆盖仍生效)
                 p_colors = {}
                 for color_key in DefaultCFG.DEFAULT_COLORS.keys():
                     if color_key in p_data:
@@ -174,7 +211,9 @@ class TypstPluginConfig:
                 )
 
         appearance_cfg = AppearanceConfig(
-            active_preset=active_preset_name, presets=presets_dict
+            active_preset=active_preset_name,
+            font_order=font_order,
+            presets=presets_dict,
         )
 
         custom_font_path = raw_config.get("custom_font_path", "")
