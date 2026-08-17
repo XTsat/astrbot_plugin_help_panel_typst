@@ -189,18 +189,15 @@
 #let breakable_id(text_str) = { text_str.replace("_", "_\u{200B}") }
 
 // --- 自适应缩放 ---
+// 超宽内容一律等比缩放到容器宽度 (避免原样溢出导致 typst 0.15 布局收敛诊断)
 #let adaptive_text(content, max_width) = {
   context {
     let size = measure(content)
-    if size.width > max_width {
-       let s = max_width / size.width
-       if s > 0.7 {
-         scale(x: s * 100%, y: s * 100%, origin: left)[#content]
-       } else {
-         content
-       }
+    if size.width > max_width and max_width > 0pt {
+      let s = max_width / size.width
+      scale(x: s * 100%, y: s * 100%, origin: left)[#content]
     } else {
-       content
+      content
     }
   }
 }
@@ -419,7 +416,7 @@
         )
       ]
       // 插件列表
-      #block(inset: (x: 10pt, y: 10pt))[
+      #block(inset: (x: 10pt, y: 10pt), spacing: 0pt)[
         #stack(
           spacing: 7pt,
           ..plugins.map(p => plugin_item(p, color))

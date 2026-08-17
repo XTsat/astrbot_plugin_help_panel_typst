@@ -75,6 +75,20 @@ def execute_render_task(task: RenderTask) -> list[str]:
             split_height=task.split_height,
         )
 
+    except typst.TypstError as e:
+        # 完整回显 typst 诊断 (message/diagnostic/hints/trace), 便于直接定位
+        parts = [f"Typst 编译错误: {getattr(e, 'message', None) or str(e)}"]
+        diag = getattr(e, "diagnostic", "")
+        if diag:
+            parts.append(f"诊断: {diag}")
+        hints = getattr(e, "hints", None)
+        if hints:
+            parts.append(f"提示: {'; '.join(hints)}")
+        trace = getattr(e, "trace", None)
+        if trace:
+            parts.append(f"位置: {' | '.join(str(t) for t in trace)}")
+        return [f"ERROR: {chr(10).join(parts)}"]
+
     except Exception:
         return [f"ERROR: {traceback.format_exc()}"]
 
