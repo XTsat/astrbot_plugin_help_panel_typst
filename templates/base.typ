@@ -260,7 +260,7 @@
             spacing: 4pt,
             text(size: 22pt, weight: "bold", fill: c_navy)[Astrbot 插件面板],
             if (query_regex_str != none and query_regex_str != "") [
-              text(size: 9pt, fill: c_gray)[#data.title]
+              #text(size: 9pt, fill: c_gray)[#data.title]
             ],
           )
         ],
@@ -905,7 +905,7 @@
       #align(center)[
         #text(size: 26pt, weight: "bold", fill: title_color)[#p.at("display_name", default: "")]
       ]
-      v(10pt)
+      #v(10pt)
 
       #align(center)[
         #stack(dir: ltr, spacing: 8pt,
@@ -914,7 +914,7 @@
           info_pill("编号", str(p.at("order", default: 0)), c_box_bg, c_leaf_text),
         )
       ]
-      v(14pt)
+      #v(14pt)
 
       #if p.at("desc", default: "") != "" {
         section_header(text(size: 0.9em)[📄], "功能简介", "ABOUT")
@@ -964,10 +964,10 @@
 } else if mode == "plugin_detail" {
   // 插件详情页
   align(center)[
-    block(inset: (top: 16pt, bottom: 8pt))[
-      text(size: 24pt, weight: "bold", fill: c_text_primary)[#data.title] \
-      v(5pt)
-      text(size: 9.5pt, fill: c_desc_text)[
+    #block(inset: (top: 16pt, bottom: 8pt))[
+      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#data.title] \
+      #v(5pt)
+      #text(size: 9.5pt, fill: c_desc_text)[
         插件详情  ·  #generated_time
       ]
     ]
@@ -976,10 +976,10 @@
 } else {
   // 事件/过滤器模式
   align(center)[
-    block(inset: (top: 16pt, bottom: 8pt))[
-      text(size: 24pt, weight: "bold", fill: c_text_primary)[#data.title] \
-      v(5pt)
-      text(size: 9.5pt, fill: c_desc_text)[
+    #block(inset: (top: 16pt, bottom: 8pt))[
+      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#data.title] \
+      #v(5pt)
+      #text(size: 9.5pt, fill: c_desc_text)[
         已加载 #data.at("plugin_count", default: 0) 个插件/监听组  ·  #generated_time
       ]
     ]
