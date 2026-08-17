@@ -997,7 +997,7 @@
     columns: (1fr, 1fr, 1fr), gutter: 15pt,
     ..data.at("columns", default: ()).map(col_plugins => {
       align(top)[
-        stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
+        #stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
       ]
     })
   )
