@@ -3,6 +3,7 @@ from pathlib import Path
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.message_components import Image
 
@@ -282,7 +283,7 @@ class HelpTypst(Star):
         return self._parse_search_query(query), False
 
     @filter.command("helps", alias={"功能", "菜单", "帮助"})
-    async def show_menu(self, event: AstrMessageEvent, query: str = ""):
+    async def show_menu(self, event: AstrMessageEvent, query: GreedyStr):
         """显示指令菜单"""
         keyword, is_detail = self._parse_menu_query(query)
         async for r in self._handle_request(
@@ -291,7 +292,7 @@ class HelpTypst(Star):
             yield r
 
     @filter.command("events", alias={"事件", "事件监听"})
-    async def show_events(self, event: AstrMessageEvent, query: str = ""):
+    async def show_events(self, event: AstrMessageEvent, query: GreedyStr):
         """显示事件监听列表"""
         keyword = self._parse_search_query(query)
         async for r in self._handle_request(
@@ -300,7 +301,7 @@ class HelpTypst(Star):
             yield r
 
     @filter.command("filters", alias={"过滤器", "过滤"})
-    async def show_filters(self, event: AstrMessageEvent, query: str = ""):
+    async def show_filters(self, event: AstrMessageEvent, query: GreedyStr):
         """显示过滤器详情"""
         keyword = self._parse_search_query(query)
         async for r in self._handle_request(
