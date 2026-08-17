@@ -67,6 +67,7 @@ class PluginMetadata(BaseModel):
     author: SafeStr = Field(default="", description="作者 (详情页展示)")
     category: SafeStr = Field(default="", description="插件分类 (指令模式分组依据)")
     order: int = Field(default=0, description="全局展示编号 (指令模式, 跨分类连续)")
+    disabled: bool = Field(default=False, description="插件是否禁用 (指令模式灰化展示)")
 
     nodes: list[RenderNode] = Field(default_factory=list)
     event_nodes: list[RenderNode] = Field(

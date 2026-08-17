@@ -9,12 +9,12 @@
     "description": "黑名单插件 ID",
     "type": "list",
     "default": [
-      "astrbot", 
-      "astrbot-web-searcher", 
+      "astrbot",
+      "astrbot-web-searcher",
       "astrbot-python-interpreter",
       "session_controller",
       "builtin_commands",
-      "astrbot-reminder", 
+      "astrbot-reminder",
       "astrbot_plugin_help_typst"
     ],
     "hint": "屏蔽不想展示、导致问题的插件菜单 (使用 name 字段)"
@@ -32,7 +32,7 @@
       "timeout_analysis": {
         "description": "数据分析超时 (秒)",
         "type": "float",
-		"slider": {
+        "slider": {
           "min": 3,
           "max": 30,
           "step": 1
@@ -43,7 +43,7 @@
       "timeout_compile": {
         "description": "Typst 编译超时 (秒)",
         "type": "float",
-		"slider": {
+        "slider": {
           "min": 3,
           "max": 60,
           "step": 1
@@ -51,10 +51,10 @@
         "default": 30.0,
         "hint": "调用 Typst 编译图片的超时时间，根据其他项目调整"
       },
-	  "max_concurrent_tasks": {
+      "max_concurrent_tasks": {
         "description": "最大并发编译数",
         "type": "int",
-		"slider": {
+        "slider": {
           "min": 1,
           "max": 10,
           "step": 1
@@ -62,10 +62,10 @@
         "default": 2,
         "hint": "同时进行的 Typst 编译任务数量限制，根据 CPU 调整"
       },
-	  "ppi": {
+      "ppi": {
         "description": "图片清晰度 (PPI)",
         "type": "float",
-		"slider": {
+        "slider": {
           "min": 64,
           "max": 256,
           "step": 1
@@ -76,7 +76,7 @@
       "giant_threshold": {
         "description": "巨型块阈值 (pt)",
         "type": "int",
-		"slider": {
+        "slider": {
           "min": 100,
           "max": 3000,
           "step": 100
@@ -84,10 +84,10 @@
         "default": 1500,
         "hint": "超过此高度的插件将独占一行显示 (仅 Event/Filter 模式有效)"
       },
-	  "split_height": {
+      "split_height": {
         "description": "长图切分高度 (px)",
         "type": "int",
-		"slider": {
+        "slider": {
           "min": 1000,
           "max": 16000,
           "step": 1000
@@ -104,7 +104,7 @@
       "active_preset": {
         "description": "当前激活的预设名称",
         "type": "string",
-        "default": "default",
+        "default": "Ocean Blue",
         "hint": "填写下方预设列表中的 '预设名称' (preset_name)"
       },
       "presets": {
@@ -113,16 +113,284 @@
         "default": [
           {
             "__template_key": "standard_theme",
-            "preset_name": "default",
-            "font_order": ["LXGW Neo XiHei", "Noto Color Emoji"],
-            "page_fill": "#f0f2f5",
-            "c_plugin_name": "#0d47a1"
+            "preset_name": "Ocean Blue",
+            "font_order": [
+              "LXGW Neo XiHei",
+              "Noto Color Emoji"
+            ],
+            "brand_sky": "#57CDE3",
+            "brand_navy": "#355A81",
+            "brand_mint": "#8AE6E1",
+            "brand_cream": "#FADE86",
+            "brand_gold": "#F0C14B",
+            "brand_blush": "#A8E9F2",
+            "brand_ink": "#2E2E35",
+            "brand_gray": "#808E9D",
+            "brand_card": "#FFFFFF",
+            "brand_border": "#DCEFF1",
+            "brand_soft": "#E7EFF1",
+            "brand_ghost": "#F3F6F7",
+            "cat_AI": "#57CDE3",
+            "cat_工具": "#2E9BB8",
+            "cat_管理": "#355A81",
+            "cat_娱乐": "#8AE6E1",
+            "cat_查询": "#FADE86",
+            "cat_其他": "#808E9D",
+            "cat_资讯": "#A8E9F2",
+            "cat_调试": "#6C8CA8",
+            "page_fill": "#F5FBFC",
+            "c_plugin_name": "#355A81",
+            "c_plugin_id": "#808E9D",
+            "c_group_title": "#355A81",
+            "c_bullet": "#57CDE3",
+            "c_event_icon": "#F0C14B",
+            "c_leaf_text": "#2E2E35",
+            "c_desc_text": "#808E9D",
+            "c_group_bg": "#E8F6F9",
+            "c_rich_bg": "#FFFFFF",
+            "c_box_bg": "#F3F6F7",
+            "c_box_stroke": "#E7EFF1",
+            "c_text_primary": "#355A81",
+            "c_regex_bg": "#FFF6E3",
+            "c_regex_text": "#C99114",
+            "c_regex_icon": "#D4A017",
+            "c_tag_admin": "#2E9BB8",
+            "c_tag_event": "#F0C14B",
+            "c_tag_mcp": "#355A81",
+            "c_tag_id": "#355A81",
+            "c_ver_bg": "#E8F6F9",
+            "c_ver_text": "#355A81",
+            "c_prio_bg": "#FDF6DC",
+            "c_prio_text": "#C99114",
+            "c_highlight_bg": "#FADE86",
+            "c_highlight_text": "#2E2E35",
+            "c_on_light": "#355A81"
+          },
+          {
+            "__template_key": "standard_theme",
+            "preset_name": "Night Navy",
+            "font_order": [
+              "LXGW Neo XiHei",
+              "Noto Color Emoji"
+            ],
+            "brand_sky": "#57CDE3",
+            "brand_navy": "#D8E6F5",
+            "brand_mint": "#8AE6E1",
+            "brand_cream": "#FFE08A",
+            "brand_gold": "#FFD54A",
+            "brand_blush": "#B7E9F5",
+            "brand_ink": "#E6EEF5",
+            "brand_gray": "#8AA0B8",
+            "brand_card": "#1B3048",
+            "brand_border": "#2E4560",
+            "brand_soft": "#243C54",
+            "brand_ghost": "#16283E",
+            "cat_AI": "#57CDE3",
+            "cat_工具": "#4A7FB5",
+            "cat_管理": "#1F3A5F",
+            "cat_娱乐": "#8AE6E1",
+            "cat_查询": "#FFE08A",
+            "cat_其他": "#6B88A3",
+            "cat_资讯": "#A8D8F0",
+            "cat_调试": "#5B7EA3",
+            "page_fill": "#0E1E31",
+            "c_plugin_name": "#D8E6F5",
+            "c_plugin_id": "#8AA0B8",
+            "c_group_title": "#D8E6F5",
+            "c_bullet": "#57CDE3",
+            "c_event_icon": "#FFD54A",
+            "c_leaf_text": "#E6EEF5",
+            "c_desc_text": "#8AA0B8",
+            "c_group_bg": "#1B3048",
+            "c_rich_bg": "#1B3048",
+            "c_box_bg": "#16283E",
+            "c_box_stroke": "#2E4560",
+            "c_text_primary": "#D8E6F5",
+            "c_regex_bg": "#243C54",
+            "c_regex_text": "#FFE08A",
+            "c_regex_icon": "#FFD54A",
+            "c_tag_admin": "#8AE6E1",
+            "c_tag_event": "#FFD54A",
+            "c_tag_mcp": "#57CDE3",
+            "c_tag_id": "#8AA0B8",
+            "c_ver_bg": "#243C54",
+            "c_ver_text": "#8AE6E1",
+            "c_prio_bg": "#243C54",
+            "c_prio_text": "#FFE08A",
+            "c_highlight_bg": "#2E5A8A",
+            "c_highlight_text": "#FFFFFF",
+            "c_on_light": "#10233A"
+          },
+          {
+            "__template_key": "standard_theme",
+            "preset_name": "Soft Mist",
+            "font_order": [
+              "LXGW Neo XiHei",
+              "Noto Color Emoji"
+            ],
+            "brand_sky": "#8FC6D8",
+            "brand_navy": "#5C7086",
+            "brand_mint": "#A8DCD8",
+            "brand_cream": "#E5D3A8",
+            "brand_gold": "#D9BE7E",
+            "brand_blush": "#C4D8E0",
+            "brand_ink": "#3C4652",
+            "brand_gray": "#8A98A6",
+            "brand_card": "#FFFFFF",
+            "brand_border": "#D7E6EC",
+            "brand_soft": "#E2EBEF",
+            "brand_ghost": "#EEF2F4",
+            "cat_AI": "#8FC6D8",
+            "cat_工具": "#6FA3B8",
+            "cat_管理": "#5C7086",
+            "cat_娱乐": "#A8DCD8",
+            "cat_查询": "#E5D3A8",
+            "cat_其他": "#8A98A6",
+            "cat_资讯": "#B0C6D4",
+            "cat_调试": "#7A8FA6",
+            "page_fill": "#F2F7F9",
+            "c_plugin_name": "#5C7086",
+            "c_plugin_id": "#8A98A6",
+            "c_group_title": "#5C7086",
+            "c_bullet": "#8FC6D8",
+            "c_event_icon": "#D9BE7E",
+            "c_leaf_text": "#3C4652",
+            "c_desc_text": "#8A98A6",
+            "c_group_bg": "#E6EEF2",
+            "c_rich_bg": "#FFFFFF",
+            "c_box_bg": "#EEF2F4",
+            "c_box_stroke": "#E2EBEF",
+            "c_text_primary": "#5C7086",
+            "c_regex_bg": "#F4EEE0",
+            "c_regex_text": "#8A7430",
+            "c_regex_icon": "#A08A50",
+            "c_tag_admin": "#6FA3B8",
+            "c_tag_event": "#D9BE7E",
+            "c_tag_mcp": "#5C7086",
+            "c_tag_id": "#5C7086",
+            "c_ver_bg": "#E6EEF2",
+            "c_ver_text": "#5C7086",
+            "c_prio_bg": "#F0EAD8",
+            "c_prio_text": "#8A7430",
+            "c_highlight_bg": "#E5D3A8",
+            "c_highlight_text": "#3C4652",
+            "c_on_light": "#3C4652"
+          },
+          {
+            "__template_key": "standard_theme",
+            "preset_name": "Vivid Pop",
+            "font_order": [
+              "LXGW Neo XiHei",
+              "Noto Color Emoji"
+            ],
+            "brand_sky": "#22C8E8",
+            "brand_navy": "#1E3A7A",
+            "brand_mint": "#2FE0D0",
+            "brand_cream": "#FFD54A",
+            "brand_gold": "#FFC400",
+            "brand_blush": "#B3F0FA",
+            "brand_ink": "#1A2438",
+            "brand_gray": "#7C8AA0",
+            "brand_card": "#FFFFFF",
+            "brand_border": "#D8F0F8",
+            "brand_soft": "#E3F3F9",
+            "brand_ghost": "#F1F8FB",
+            "cat_AI": "#22C8E8",
+            "cat_工具": "#4A90E2",
+            "cat_管理": "#1E3A7A",
+            "cat_娱乐": "#2FE0D0",
+            "cat_查询": "#FFD54A",
+            "cat_其他": "#7C8AA0",
+            "cat_资讯": "#B3F0FA",
+            "cat_调试": "#5B7DB5",
+            "page_fill": "#F2FBFF",
+            "c_plugin_name": "#1E3A7A",
+            "c_plugin_id": "#7C8AA0",
+            "c_group_title": "#1E3A7A",
+            "c_bullet": "#22C8E8",
+            "c_event_icon": "#FFC400",
+            "c_leaf_text": "#1A2438",
+            "c_desc_text": "#7C8AA0",
+            "c_group_bg": "#E3F7FD",
+            "c_rich_bg": "#FFFFFF",
+            "c_box_bg": "#F1F8FB",
+            "c_box_stroke": "#E3F3F9",
+            "c_text_primary": "#1E3A7A",
+            "c_regex_bg": "#FFF4D6",
+            "c_regex_text": "#B8860B",
+            "c_regex_icon": "#E6A800",
+            "c_tag_admin": "#4A90E2",
+            "c_tag_event": "#FFC400",
+            "c_tag_mcp": "#1E3A7A",
+            "c_tag_id": "#1E3A7A",
+            "c_ver_bg": "#E3F7FD",
+            "c_ver_text": "#1E3A7A",
+            "c_prio_bg": "#FFF0C2",
+            "c_prio_text": "#B8860B",
+            "c_highlight_bg": "#FFD54A",
+            "c_highlight_text": "#1A2438",
+            "c_on_light": "#1E3A7A"
+          },
+          {
+            "__template_key": "standard_theme",
+            "preset_name": "zhenxun",
+            "font_order": [
+              "LXGW Neo XiHei",
+              "Noto Color Emoji"
+            ],
+            "brand_sky": "#F36F88",
+            "brand_navy": "#3A3A3A",
+            "brand_mint": "#F7C8D0",
+            "brand_cream": "#FADE86",
+            "brand_gold": "#FFB84D",
+            "brand_blush": "#E1BEE7",
+            "brand_ink": "#2B2B2B",
+            "brand_gray": "#9E9E9E",
+            "brand_card": "#FFFFFF",
+            "brand_border": "#ECE9E4",
+            "brand_soft": "#F0EDE8",
+            "brand_ghost": "#F6F5F3",
+            "cat_AI": "#F16B86",
+            "cat_工具": "#FFB84D",
+            "cat_管理": "#B45BC5",
+            "cat_娱乐": "#4DBCE8",
+            "cat_查询": "#A8D77A",
+            "cat_其他": "#4DB5AD",
+            "cat_资讯": "#E97878",
+            "cat_调试": "#F36F88",
+            "page_fill": "#FAF9F7",
+            "c_plugin_name": "#0d47a1",
+            "c_plugin_id": "#546e7a",
+            "c_group_title": "#6a1b9a",
+            "c_bullet": "#F36F88",
+            "c_event_icon": "#ffc72c",
+            "c_leaf_text": "#37474f",
+            "c_desc_text": "#9e9e9e",
+            "c_group_bg": "#f3e5f5",
+            "c_rich_bg": "#fcfcfc",
+            "c_box_bg": "#f6f5f3",
+            "c_box_stroke": "#ece9e4",
+            "c_text_primary": "#2b2b2b",
+            "c_regex_bg": "#fff3e0",
+            "c_regex_text": "#e65100",
+            "c_regex_icon": "#f57c00",
+            "c_tag_admin": "#c62828",
+            "c_tag_event": "#f57c00",
+            "c_tag_mcp": "#00695c",
+            "c_tag_id": "#283593",
+            "c_ver_bg": "#e3f2fd",
+            "c_ver_text": "#1565c0",
+            "c_prio_bg": "#e8eaf6",
+            "c_prio_text": "#283593",
+            "c_highlight_bg": "#ffeb3b",
+            "c_highlight_text": "#000000",
+            "c_on_light": "#3A3A3A"
           }
         ],
         "templates": {
           "standard_theme": {
-            "name": "自定义主题模板",
-            "hint": "包含字体优先级与详细调色板",
+            "name": "主题预设",
+            "hint": "预设名称 (ID) 用于在上方 active_preset 中引用，含字体优先级与完整调色板",
             "items": {
               "preset_name": {
                 "description": "预设名称 (ID)",
@@ -133,88 +401,262 @@
               "font_order": {
                 "description": "字体优先级排序",
                 "type": "list",
-                "default": ["LXGW Neo XiHei", "Noto Color Emoji"],
-                "options": ["LXGW Neo XiHei", "Noto Color Emoji"]
+                "default": [
+                  "LXGW Neo XiHei",
+                  "Noto Color Emoji"
+                ],
+                "options": [
+                  "LXGW Neo XiHei",
+                  "Noto Color Emoji"
+                ]
               },
-              
-              "header_001": { "description": "🎨 基础背景与文字", "type": "string", "default": "---", "read_only": true },
-              
+              "header_001": {
+                "description": "🎨 基础背景与文字",
+                "type": "string",
+                "default": "---",
+                "read_only": true
+              },
               "page_fill": {
                 "description": "页面背景色",
                 "type": "string",
-                "default": "#f0f2f5"
+                "default": "#F5FBFC"
               },
               "c_text_primary": {
                 "description": "主标题颜色",
                 "type": "string",
-                "default": "#1a1a1a"
+                "default": "#355A81"
               },
-
-              "header_002": { "description": "🧩 插件卡片样式", "type": "string", "default": "---", "read_only": true },
-
+              "header_brand": {
+                "description": "🌈 品牌主题色板 (指令菜单)",
+                "type": "string",
+                "default": "---",
+                "read_only": true
+              },
+              "brand_sky": {
+                "description": "第一主色",
+                "type": "string",
+                "default": "#57CDE3"
+              },
+              "brand_navy": {
+                "description": "结构色 (标题/插件名)",
+                "type": "string",
+                "default": "#355A81"
+              },
+              "brand_mint": {
+                "description": "浅青蓝 (高光)",
+                "type": "string",
+                "default": "#8AE6E1"
+              },
+              "brand_cream": {
+                "description": "奶油黄 (强调)",
+                "type": "string",
+                "default": "#FADE86"
+              },
+              "brand_gold": {
+                "description": "金黄 (暖强调)",
+                "type": "string",
+                "default": "#F0C14B"
+              },
+              "brand_blush": {
+                "description": "浅天蓝 (柔和辅助)",
+                "type": "string",
+                "default": "#A8E9F2"
+              },
+              "brand_ink": {
+                "description": "深色文字",
+                "type": "string",
+                "default": "#2E2E35"
+              },
+              "brand_gray": {
+                "description": "次级文字/禁用",
+                "type": "string",
+                "default": "#808E9D"
+              },
+              "brand_card": {
+                "description": "卡片背景",
+                "type": "string",
+                "default": "#FFFFFF"
+              },
+              "brand_border": {
+                "description": "卡片边框",
+                "type": "string",
+                "default": "#DCEFF1"
+              },
+              "brand_soft": {
+                "description": "插件行边框",
+                "type": "string",
+                "default": "#E7EFF1"
+              },
+              "brand_ghost": {
+                "description": "禁用行背景",
+                "type": "string",
+                "default": "#F3F6F7"
+              },
+              "header_cat": {
+                "description": "🗂️ 分类主题色",
+                "type": "string",
+                "default": "---",
+                "read_only": true
+              },
+              "cat_AI": {
+                "description": "分类「AI」主题色",
+                "type": "string",
+                "default": "#57CDE3"
+              },
+              "cat_工具": {
+                "description": "分类「工具」主题色",
+                "type": "string",
+                "default": "#2E9BB8"
+              },
+              "cat_管理": {
+                "description": "分类「管理」主题色",
+                "type": "string",
+                "default": "#355A81"
+              },
+              "cat_娱乐": {
+                "description": "分类「娱乐」主题色",
+                "type": "string",
+                "default": "#8AE6E1"
+              },
+              "cat_查询": {
+                "description": "分类「查询」主题色",
+                "type": "string",
+                "default": "#FADE86"
+              },
+              "cat_其他": {
+                "description": "分类「其他」主题色",
+                "type": "string",
+                "default": "#808E9D"
+              },
+              "cat_资讯": {
+                "description": "分类「资讯」主题色",
+                "type": "string",
+                "default": "#A8E9F2"
+              },
+              "cat_调试": {
+                "description": "分类「调试」主题色",
+                "type": "string",
+                "default": "#6C8CA8"
+              },
+              "header_002": {
+                "description": "🧩 插件卡片样式",
+                "type": "string",
+                "default": "---",
+                "read_only": true
+              },
               "c_plugin_name": {
                 "description": "插件名称颜色",
                 "type": "string",
-                "default": "#0d47a1"
+                "default": "#355A81"
               },
               "c_plugin_id": {
                 "description": "插件 ID/Meta 颜色",
                 "type": "string",
-                "default": "#546e7a"
+                "default": "#808E9D"
               },
-
-              "header_003": { "description": "📂 指令组与列表", "type": "string", "default": "---", "read_only": true },
-
+              "header_003": {
+                "description": "📂 指令组与列表",
+                "type": "string",
+                "default": "---",
+                "read_only": true
+              },
               "c_group_title": {
                 "description": "分组标题颜色",
                 "type": "string",
-                "default": "#6a1b9a"
+                "default": "#355A81"
               },
               "c_group_bg": {
                 "description": "分组背景块颜色",
                 "type": "string",
-                "default": "#f3e5f5"
+                "default": "#E8F6F9"
               },
               "c_leaf_text": {
                 "description": "子指令文字颜色",
                 "type": "string",
-                "default": "#37474f"
+                "default": "#2E2E35"
               },
               "c_desc_text": {
                 "description": "描述/注释文字颜色",
                 "type": "string",
-                "default": "#757575"
+                "default": "#808E9D"
               },
               "c_bullet": {
                 "description": "列表圆点/图标颜色",
                 "type": "string",
-                "default": "#d81b60"
+                "default": "#57CDE3"
               },
               "c_box_bg": {
                 "description": "紧凑指令块背景",
                 "type": "string",
-                "default": "#f5f5f5"
+                "default": "#F3F6F7"
               },
               "c_box_stroke": {
                 "description": "边框线条颜色",
                 "type": "string",
-                "default": "#e0e0e0"
+                "default": "#E7EFF1"
               },
-
-              "header_004": { "description": "🏷️ 标签与胶囊", "type": "string", "default": "---", "read_only": true },
-
-              "c_ver_bg": { "description": "版本号背景", "type": "string", "default": "#e3f2fd" },
-              "c_ver_text": { "description": "版本号文字", "type": "string", "default": "#1565c0" },
-              "c_prio_bg": { "description": "优先级背景", "type": "string", "default": "#e8eaf6" },
-              "c_prio_text": { "description": "优先级文字", "type": "string", "default": "#283593" },
-              "c_tag_admin": { "description": "管理员图标颜色", "type": "string", "default": "#c62828" },
-              "c_tag_event": { "description": "事件图标颜色", "type": "string", "default": "#f57c00" },
-              "c_tag_mcp": { "description": "MCP图标颜色", "type": "string", "default": "#00695c" },
-              
-              "header_005": { "description": "🔍 其他", "type": "string", "default": "---", "read_only": true },
-
-              "c_highlight_bg": { "description": "搜索高亮背景", "type": "string", "default": "#ffeb3b" },
-              "c_highlight_text": { "description": "搜索高亮文字", "type": "string", "default": "#000000" }
+              "header_004": {
+                "description": "🏷️ 标签与胶囊",
+                "type": "string",
+                "default": "---",
+                "read_only": true
+              },
+              "c_ver_bg": {
+                "description": "版本号背景",
+                "type": "string",
+                "default": "#E8F6F9"
+              },
+              "c_ver_text": {
+                "description": "版本号文字",
+                "type": "string",
+                "default": "#355A81"
+              },
+              "c_prio_bg": {
+                "description": "优先级背景",
+                "type": "string",
+                "default": "#FDF6DC"
+              },
+              "c_prio_text": {
+                "description": "优先级文字",
+                "type": "string",
+                "default": "#C99114"
+              },
+              "c_tag_admin": {
+                "description": "管理员图标颜色",
+                "type": "string",
+                "default": "#2E9BB8"
+              },
+              "c_tag_event": {
+                "description": "事件图标颜色",
+                "type": "string",
+                "default": "#F0C14B"
+              },
+              "c_tag_mcp": {
+                "description": "MCP图标颜色",
+                "type": "string",
+                "default": "#355A81"
+              },
+              "header_005": {
+                "description": "🔍 其他",
+                "type": "string",
+                "default": "---",
+                "read_only": true
+              },
+              "c_highlight_bg": {
+                "description": "搜索高亮背景",
+                "type": "string",
+                "default": "#FADE86"
+              },
+              "c_highlight_text": {
+                "description": "搜索高亮文字",
+                "type": "string",
+                "default": "#2E2E35"
+              },
+              "c_on_light": {
+                "description": "浅色标题栏/徽章文字 (深色主题内部用)",
+                "type": "string",
+                "default": "#355A81"
+              }
             }
           }
         }

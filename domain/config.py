@@ -50,31 +50,42 @@ class AppearanceConfig:
         if self._color_cache is not None:
             return self._color_cache  # 命中缓存
 
-        # 1. 默认
-        final_colors = DefaultCFG.DEFAULT_COLORS.copy()
+        # 1. 基底: 激活预设对应的内置配色 (未知预设回退默认预设)
+        base = DefaultCFG.PRESETS.get(
+            self.active_preset, DefaultCFG.DEFAULT_COLORS
+        ).copy()
 
-        # 2. 预设
+        # 2. 用户自定义预设覆盖
         preset = self.presets.get(self.active_preset)
 
         # 3. 清洗 & 合并
         if preset and preset.colors:
             for key, user_val in preset.colors.items():
-                if key not in final_colors:
+                if key not in base:
                     continue
 
                 # 校验
                 if self._is_valid_hex(user_val):
-                    final_colors[key] = user_val
+                    base[key] = user_val
                 else:
                     logger.warning(
                         f"[HelpTypst] 颜色配置异常: '{key}' 的值 '{user_val}' 不是有效的十六进制颜色。\n"
-                        f"已回退到默认值: {final_colors[key]}"
+                        f"已回退到默认值: {base[key]}"
                     )
 
         # 4. 写入缓存
-        self._color_cache = final_colors
+        self._color_cache = base
 
-        return final_colors
+        return base
+
+    def get_active_category_colors(self) -> dict[str, str]:
+        """从激活配色中提取分类主题色 (cat_* 前缀 → 分类名)"""
+        colors = self.get_active_colors()
+        cat_colors: dict[str, str] = {}
+        for key, val in colors.items():
+            if key.startswith("cat_"):
+                cat_colors[key[4:]] = val
+        return cat_colors
 
     def _is_valid_hex(self, color_str: str) -> bool:
         """校验 Hex Color"""
@@ -127,16 +138,19 @@ class TypstPluginConfig:
 
         # Appearance
         raw_appearance = raw_config.get("appearance", {})
-        active_preset_name = raw_appearance.get("active_preset", "default")
+        active_preset_name = raw_appearance.get(
+            "active_preset", DefaultCFG.DEFAULT_PRESET
+        )
         raw_presets_list = raw_appearance.get("presets", [])  # 解析 template_list 列表
         presets_dict = {}
 
-        default_preset = ThemePreset(
-            name="default",
-            font_order=["LXGW Neo XiHei", "Noto Color Emoji"],
-            colors={},
-        )
-        presets_dict["default"] = default_preset  # 兜底：默认预设
+        # 内置预设注册 (配色由 DefaultCFG.PRESETS 提供, 此处仅登记名称与字体)
+        for preset_name in DefaultCFG.PRESETS:
+            presets_dict[preset_name] = ThemePreset(
+                name=preset_name,
+                font_order=["LXGW Neo XiHei", "Noto Color Emoji"],
+                colors={},
+            )
 
         if isinstance(raw_presets_list, list):
             for p_data in raw_presets_list:
@@ -144,7 +158,9 @@ class TypstPluginConfig:
                 p_name = p_data.get("preset_name", "custom")
                 p_fonts = p_data.get("font_order", [])
 
-                # 解析颜色配置
+                # 解析颜色配置 (内置预设与自定义预设统一处理;
+                # 内置预设的正确配色已由 _conf_schema.json 预设列表显式给出,
+                # 故此处直接覆盖即可, 用户在面板微调内置预设颜色也能生效)
                 p_colors = {}
                 for color_key in DefaultCFG.DEFAULT_COLORS.keys():
                     if color_key in p_data:

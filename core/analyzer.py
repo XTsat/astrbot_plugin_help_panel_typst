@@ -11,7 +11,7 @@ from astrbot.core.star.star_handler import (
 )
 from astrbot.core.star.filter.command import CommandFilter
 from astrbot.core.star.filter.command_group import CommandGroupFilter
-from astrbot.core.star.filter.permission import PermissionTypeFilter
+from astrbot.core.star.filter.permission import PermissionTypeFilter, PermissionType
 from astrbot.core.star.filter.regex import RegexFilter
 from astrbot.core.star.filter.platform_adapter_type import (
     PlatformAdapterTypeFilter,
@@ -247,8 +247,8 @@ class CommandAnalyzer(BaseAnalyzer):
         )
 
         for star_meta in all_stars:
-            if not star_meta.activated:
-                continue
+            # 禁用插件不再跳过: 标记 disabled=True 供模板灰化展示 (仅指令模式)
+            disabled = not star_meta.activated
 
             info = self._get_safe_plugin_info(star_meta)
             safe_name = info["name"]
@@ -296,6 +296,7 @@ class CommandAnalyzer(BaseAnalyzer):
                             desc=info["desc"],
                             author=info["author"],
                             category=category,
+                            disabled=disabled,
                             nodes=nodes,
                         )
                     )
@@ -475,7 +476,11 @@ class CommandAnalyzer(BaseAnalyzer):
             return "normal"
         for f in handler.event_filters:
             if isinstance(f, PermissionTypeFilter):
-                return "admin"
+                # 仅当权限类型为 ADMIN 时才需要管理员权限;
+                # MEMBER 仅需普通成员 (任何人均可), 应归类为普通指令
+                if getattr(f, "permission_type", None) == PermissionType.ADMIN:
+                    return "admin"
+                return "normal"
         return "normal"
 
     def _get_filter(self, handler: StarHandlerMetadata, filter_type):

@@ -154,8 +154,10 @@ class TypstLayout:
         payload = self._generate_balanced_payload(
             plugins, title, mode, prefixes, font_list
         )
-        # 注入颜色配置
-        payload["colors"] = self.cfg.appearance.get_active_colors()
+        # 注入颜色配置 (激活预设配色 + 主题无关的禁用灰化色板)
+        colors = dict(self.cfg.appearance.get_active_colors())
+        colors.update(InternalCFG.DISABLED_COLORS)
+        payload["colors"] = colors
 
         save_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -291,6 +293,13 @@ class TypstLayout:
         # 扁平化指令树 → 管理员指令 / 普通指令
         admin_commands, normal_commands = self._flatten_commands(p.nodes)
 
+        # 插件分类主题色 (与 /helps 分类卡片一致, 供详情页标题着色)
+        cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
+        cat_colors = self.cfg.appearance.get_active_category_colors()
+        category_color = cat_colors.get(
+            cat, cat_colors.get(InternalCFG.CATEGORY_FALLBACK, "#808E9D")
+        )
+
         return {
             "title": title,
             "mode": "plugin_detail",
@@ -303,6 +312,8 @@ class TypstLayout:
                 "desc": p.desc,
                 "author": p.author,
                 "order": p.order,
+                "category": cat,
+                "category_color": category_color,
             },
             "admin_commands": admin_commands,
             "normal_commands": normal_commands,
@@ -363,22 +374,30 @@ class TypstLayout:
             names.remove(InternalCFG.CATEGORY_FALLBACK)
             names.append(InternalCFG.CATEGORY_FALLBACK)
 
-        palette = InternalCFG.CATEGORY_PALETTE
         categories = []
-        for idx, name in enumerate(names):
+        # 分类色板随激活预设切换 (cat_* 键)
+        cat_colors = self.cfg.appearance.get_active_category_colors()
+        for name in names:
             # 插件按全局编号排序, 保持与全量列表一致的展示顺序
             plist = sorted(grouped[name], key=lambda x: x.order)
+            # 分类色按名称固定映射 (来自激活预设的 cat_* 配色)
+            theme_color = cat_colors.get(
+                name, cat_colors.get(InternalCFG.CATEGORY_FALLBACK, "#808E9D")
+            )
             categories.append(
                 {
                     "name": name,
                     "count": len(plist),
-                    "color": palette[idx % len(palette)],
+                    "color": theme_color,
+                    # 标题文字对比度由模板自动计算, 保留该字段以兼容旧模板
+                    "text_color": "#355A81",
                     "plugins": [
                         {
                             "id": p.order,
                             "name": p.name,
                             "display_name": p.display_name,
                             "version": p.version,
+                            "disabled": p.disabled,
                         }
                         for p in plist
                     ],
@@ -389,22 +408,64 @@ class TypstLayout:
     def _balance_categories(
         self, categories: list[dict[str, Any]]
     ) -> list[list[dict[str, Any]]]:
-        """将分类卡片按估算高度贪心分配到 2 列, 使两列高度接近"""
-        weighted = [(c, self._estimate_category_height(c)) for c in categories]
-        sorted_cats = sorted(weighted, key=lambda x: x[1], reverse=True)
+        """将分类卡片按估算高度分配到 2 列, 使两列高度接近
 
-        cols: list[list[dict[str, Any]]] = [[], []]
-        heights = [0, 0]
+        分类数量通常很少 (<20), 采用子集和 DP 求最接近等高的一列, 而非贪心。
+        估算高度已计入卡片固定开销、插件盒子与卡片间距, 见 _estimate_category_height。
+        """
+        n = len(categories)
+        heights = [self._estimate_category_height(c) for c in categories]
+        total = sum(heights)
+        target = total // 2
 
-        for cat, h in sorted_cats:
-            idx = heights.index(min(heights))
-            cols[idx].append(cat)
-            heights[idx] += h
+        # 子集和 DP: 找到高度和 <= target 的最大子集 (作为第一列)
+        # dp[s] = 能否用前 i 个分类凑出高度 s (滚动数组存可达)
+        reachable = [False] * (target + 1)
+        reachable[0] = True
+        # 回溯记录: prev[s] = 凑出高度 s 时最后一个分类的索引
+        prev: list[int] = [-1] * (target + 1)
 
-        return cols
+        for i in range(n):
+            h = heights[i]
+            for s in range(target, h - 1, -1):
+                if not reachable[s] and reachable[s - h]:
+                    reachable[s] = True
+                    prev[s] = i
+
+        # 取最接近 target 的可达高度
+        best = 0
+        for s in range(target, -1, -1):
+            if reachable[s]:
+                best = s
+                break
+
+        # 回溯出第一列的分类索引集合
+        col1_idx: set[int] = set()
+        s = best
+        while s > 0:
+            i = prev[s]
+            if i < 0:
+                break
+            col1_idx.add(i)
+            s -= heights[i]
+
+        col1 = [categories[i] for i in range(n) if i in col1_idx]
+        col2 = [categories[i] for i in range(n) if i not in col1_idx]
+
+        # 保证较高的列放在左侧, 视觉更稳定
+        h1 = sum(self._estimate_category_height(c) for c in col1)
+        h2 = sum(self._estimate_category_height(c) for c in col2)
+        if h1 >= h2:
+            return [col1, col2]
+        return [col2, col1]
 
     def _estimate_category_height(self, cat: dict[str, Any]) -> int:
-        """估算单个分类卡片高度 (pt): 头部 + 每个插件一行"""
+        """估算单个分类卡片在列内占用的高度 (pt)
+
+        与模板 category_card 的 spacing 保持近似:
+          固定开销 = 彩色头部 + 列表 padding + 边框/阴影 + 卡片间距
+          每插件   = 独立边框盒子 + 盒子间距 (最后一个盒子无间距, 误差忽略)
+        """
         count = int(cat.get("count", 0))
         return (
             InternalCFG.CATEGORY_HEADER_HEIGHT + count * InternalCFG.CATEGORY_ROW_HEIGHT
