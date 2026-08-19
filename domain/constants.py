@@ -206,6 +206,7 @@ class DefaultCFG:
         "builtin_commands",
         "astrbot-reminder",
         "astrbot_plugin_help_typst",
+        "astrbot_plugin_help_panel_typst",
     }
 
     # 5. 内置主题预设 (preset_name → 完整配色)
@@ -494,13 +495,13 @@ class DefaultCFG:
     }
 
     # 默认激活的预设名
-    DEFAULT_PRESET: str = "Ocean Blue"
+    DEFAULT_PRESET: str = "zhenxun"
 
     # 下拉框中的「自定义」选项 (对应下方 presets 列表中的自定义配置)
     CUSTOM_PRESET_KEY: str = "自定义"
 
     # 向后兼容: DEFAULT_COLORS 指向默认预设配色
-    DEFAULT_COLORS: dict[str, str] = OCEAN_BLUE_COLORS
+    DEFAULT_COLORS: dict[str, str] = ZHENXUN_COLORS
 
 
 class RenderMode(str, Enum):

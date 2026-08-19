@@ -27,6 +27,8 @@ class ThemePreset:
     name: str
     font_order: list[str]
     colors: dict[str, str] = field(default_factory=dict)
+    # 条目内「启用」开关: 勾选后无论 active_preset 选什么, 都使用此条目作为自定义配色
+    enabled: bool = False
 
 
 @dataclass
@@ -48,8 +50,13 @@ class AppearanceConfig:
         if self._color_cache is not None:
             return self._color_cache  # 命中缓存
 
+        # 0. 启用开关优先: 列表中存在 enabled=True 的条目时, 无视 active_preset 直接使用
+        enabled_preset = self._get_enabled_preset()
+        if enabled_preset is not None:
+            base = DefaultCFG.DEFAULT_COLORS.copy()
+            preset = enabled_preset
         # 1. 基底: 激活预设对应的内置配色 (内置预设锁定, 不受列表条目影响)
-        if self.active_preset == DefaultCFG.CUSTOM_PRESET_KEY:
+        elif self.active_preset == DefaultCFG.CUSTOM_PRESET_KEY:
             # 「自定义」: 使用下方 presets 列表中的自定义配置
             base = DefaultCFG.DEFAULT_COLORS.copy()
             preset = self._get_custom_preset()
@@ -82,14 +89,26 @@ class AppearanceConfig:
 
         return base
 
+    def _get_enabled_preset(self) -> ThemePreset | None:
+        """获取列表中被「启用」开关标记的预设 (多个同时启用时取第一个)"""
+        for preset in self.presets.values():
+            if preset.enabled:
+                return preset
+        return None
+
     def _get_custom_preset(self) -> ThemePreset | None:
-        """获取自定义预设: 列表中第一个非内置条目, 无则回退第一个带配色的条目 (默认即 zhenxun)"""
-        # 1. 优先: 用户添加/改名的新条目
+        """获取自定义预设: 优先启用开关标记的条目 → 用户添加/改名的新条目 → 第一个带配色的条目 (默认即 zhenxun)"""
+        # 1. 优先: 被「启用」开关标记的条目
+        enabled_preset = self._get_enabled_preset()
+        if enabled_preset is not None:
+            return enabled_preset
+
+        # 2. 优先: 用户添加/改名的新条目
         for name, preset in self.presets.items():
             if name not in DefaultCFG.PRESETS and preset.colors:
                 return preset
 
-        # 2. 回退: 第一个带配色的列表条目 (默认提供 zhenxun)
+        # 3. 回退: 第一个带配色的列表条目 (默认提供 zhenxun)
         for preset in self.presets.values():
             if preset.colors:
                 return preset
@@ -206,8 +225,14 @@ class TypstPluginConfig:
                             str(raw_val) if raw_val is not None else ""
                         )
 
+                # 「启用」开关: 只有真正的 Python True 才算启用 (防御异常值)
+                p_enabled = p_data.get("enabled") is True
+
                 presets_dict[p_name] = ThemePreset(
-                    name=p_name, font_order=p_fonts, colors=p_colors
+                    name=p_name,
+                    font_order=p_fonts,
+                    colors=p_colors,
+                    enabled=p_enabled,
                 )
 
         appearance_cfg = AppearanceConfig(

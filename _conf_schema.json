@@ -15,7 +15,8 @@
       "session_controller",
       "builtin_commands",
       "astrbot-reminder",
-      "astrbot_plugin_help_typst"
+      "astrbot_plugin_help_typst",
+      "astrbot_plugin_help_panel_typst"
     ],
     "hint": "屏蔽不想展示、导致问题的插件菜单 (使用 name 字段)"
   },
@@ -104,7 +105,7 @@
       "active_preset": {
         "description": "当前使用的样式预设",
         "type": "string",
-        "default": "Ocean Blue",
+        "default": "zhenxun",
         "options": [
           "Ocean Blue",
           "Night Navy",
@@ -135,6 +136,7 @@
           {
             "__template_key": "standard_theme",
             "preset_name": "zhenxun",
+            "enabled": false,
             "brand_sky": "#F36F88",
             "brand_navy": "#3A3A3A",
             "brand_mint": "#F7C8D0",
@@ -187,13 +189,19 @@
         "templates": {
           "standard_theme": {
             "name": "自定义预设",
-            "hint": "自定义配色列表：在上方选择「自定义」时使用本列表配置；默认提供 zhenxun 预设作为模板，可改名或新增条目",
+            "hint": "自定义配色列表：在上方选择「自定义」或勾选条目内的「启用」开关时使用本列表配置；默认提供 zhenxun 预设作为模板，可改名或新增条目",
             "items": {
               "preset_name": {
                 "description": "预设名称 (ID)",
                 "type": "string",
                 "default": "my_theme",
                 "hint": "自定义预设的名称（显示于上方卡片标题）"
+              },
+              "enabled": {
+                "description": "启用此预设",
+                "type": "bool",
+                "default": false,
+                "hint": "勾选后立即使用此条目作为「自定义」配色，无需在上方下拉框切换；多个条目同时启用时取第一个"
               },
               "header_001": {
                 "description": "🎨 基础背景与文字",

@@ -957,9 +957,9 @@
 #if mode == "command" {
   // 指令模式: Header + 快捷操作 + 分类卡片
   render_header()
-  v(14pt)
+  v(8pt)
   render_quick_actions()
-  v(18pt)
+  v(10pt)
   render_categories()
 } else if mode == "plugin_detail" {
   // 插件详情页
