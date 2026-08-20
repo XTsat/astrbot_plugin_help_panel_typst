@@ -80,6 +80,8 @@
 1. **自定义背景目录**：配置 `background_dir` 为绝对路径（优先）。
 2. **默认背景目录**（推荐）：缺省 `.../data/plugin_data/astrbot_plugin_help_typst/backgrounds`，直接把图片放进去即可，无需配置。
 
+> 插件安装时，`resources/images/` 中的内置图片（`.png/.jpg/.jpeg/.webp/.bmp/.gif` 格式）**自动导入**到默认背景目录；已存在的文件不会被覆盖，用户后可自行替换或增删。
+
 可选配置：
 
 - `background_random`（**默认开启**）：每次渲染从背景目录**随机选一张**；关闭时取文件名排序第一张。
@@ -124,6 +126,7 @@ astrbot_plugin_typst_menu/
 ├── templates/             # Typst 模板文件
 │    └── base.typ              # 基础库文件 (类似 CSS Reset)
 └── resources/             # 静态资源
-     └── fonts/                # 内置开源中文字体
+     ├── fonts/                # 内置开源中文字体
+     └── images/               # 内置图片（安装时自动导入到 backgrounds 目录）
 
 ```

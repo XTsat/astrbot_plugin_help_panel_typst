@@ -13,7 +13,12 @@ from astrbot.api import logger
 from astrbot.api.star import Star
 
 from ..domain import InternalCFG, TypstPluginConfig
-from ..utils import calculate_hash, get_image_dimensions, verify_image_header
+from ..utils import (
+    calculate_hash,
+    get_image_dimensions,
+    verify_image_format_matches_extension,
+    verify_image_header,
+)
 from . import execute_render_task, RenderTask
 
 
@@ -55,6 +60,9 @@ class TypstRenderer:
         # 静态资源锁
         self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
 
+        # 当前渲染批次已解析的背景图 (由 render() 在批次开始时设置, 确保 random 只选一次)
+        self._current_bg_image: Path | None = None
+
     def _get_config_snapshot(self) -> dict[str, Any]:
         """渲染配置的快照字典"""
         snapshot = {}
@@ -78,7 +86,8 @@ class TypstRenderer:
             snapshot["effective_colors"] = self.cfg.appearance.get_active_colors()
 
         # 头部背景图指纹 (路径 + 大小 + mtime), 背景图变更时缓存失效
-        bg = self._resolve_background_image()
+        # 使用当前批次已解析的背景图 (self._current_bg_image), 确保 random 只选一次
+        bg = self._current_bg_image
         if bg is not None:
             try:
                 st = bg.stat()
@@ -109,8 +118,18 @@ class TypstRenderer:
         if cfg_path:
             p = Path(cfg_path)
             if p.is_file():
-                return p
-            logger.warning(f"[HelpTypst] 配置的背景图不存在: {cfg_path}, 回退目录扫描")
+                if not verify_image_header(p):
+                    logger.warning(
+                        f"[HelpTypst] 配置的背景图无法打开: {cfg_path}, 回退目录扫描"
+                    )
+                elif not verify_image_format_matches_extension(p):
+                    logger.warning(
+                        f"[HelpTypst] 配置的背景图格式与扩展名不匹配: {cfg_path}, 回退目录扫描"
+                    )
+                else:
+                    return p
+            else:
+                logger.warning(f"[HelpTypst] 配置的背景图不存在: {cfg_path}, 回退目录扫描")
 
         # 2. 目录扫描 (自定义目录 → 默认 backgrounds 目录)
         scan_dirs: list[Path] = []
@@ -147,12 +166,24 @@ class TypstRenderer:
         candidates: list[Path] = []
         for ext in InternalCFG.BACKGROUND_IMAGE_EXTS:
             candidates.extend(scan_dir.glob(f"*{ext}"))
-        candidates = [
+        # 先筛选出有效的基本候选 (文件存在 + 非排除前缀)
+        valid_basic = [
             c
             for c in candidates
             if c.is_file()
             and not c.name.startswith(InternalCFG.BACKGROUND_IMAGE_EXCLUDE_PREFIXES)
         ]
+        # 再进一步过滤格式不匹配或无法打开的图片
+        candidates = [
+            c
+            for c in valid_basic
+            if verify_image_header(c) and verify_image_format_matches_extension(c)
+        ]
+        skipped = len(valid_basic) - len(candidates)
+        if skipped > 0:
+            logger.warning(
+                f"[HelpTypst] 背景目录 {scan_dir} 中有 {skipped} 张图片格式不匹配或无法打开, 已跳过"
+            )
         candidates.sort(key=lambda c: c.name)
         return candidates
 
@@ -170,6 +201,9 @@ class TypstRenderer:
 
         # 2. 获取锁 (仅静态模式需要)
         lock = self._cache_locks.get(mode) if not is_temp else None
+
+        # 解析背景图: 在此批次开始时确定 (确保 random 只选一次, 快照与渲染一致)
+        self._current_bg_image = self._resolve_background_image()
 
         try:
             async with lock or AsyncNullContext():
@@ -213,8 +247,8 @@ class TypstRenderer:
 
                     font_paths_str = [str(p) for p in self.font_dirs]
 
-                    # 头部背景图: 解析路径/宽高比, 并计算沙箱 root (模板目录与数据目录的共同父目录)
-                    bg_image = self._resolve_background_image()
+                    # 头部背景图: 使用批次开始时已解析的背景图 (确保 random 只选一次)
+                    bg_image = self._current_bg_image
                     bg_image_path: str | None = None
                     bg_aspect: float | None = None
                     root_dir: str | None = None

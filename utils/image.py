@@ -3,6 +3,16 @@ from pathlib import Path
 
 from PIL import Image
 
+# PIL 格式名 → 合法的文件扩展名集合 (全小写, 不含点)
+_FORMAT_EXTENSIONS: dict[str, set[str]] = {
+    "JPEG": {"jpg", "jpeg"},
+    "PNG": {"png"},
+    "WEBP": {"webp"},
+    "BMP": {"bmp"},
+    "GIF": {"gif"},
+    "TIFF": {"tif", "tiff"},
+}
+
 
 def verify_image_header(path: Path) -> bool:
     """简单的图片完整性校验"""
@@ -10,6 +20,31 @@ def verify_image_header(path: Path) -> bool:
         with Image.open(path) as img:
             img.verify()
         return True
+    except Exception:
+        return False
+
+
+def verify_image_format_matches_extension(path: Path) -> bool:
+    """检查图片的实际格式是否与文件扩展名一致
+
+    Typst 根据文件扩展名决定解码器（如 .jpg → JPEG 解码器），
+    如果扩展名与实际格式不匹配（如实际为 WebP 但扩展名为 .jpg），
+    Typst 会解码失败。此函数用 PIL 检测实际格式并比对扩展名。
+    """
+    try:
+        with Image.open(path) as img:
+            # img.format 是 PIL 检测到的真实格式 (如 "JPEG", "WEBP", "PNG")
+            actual_format = img.format
+            if actual_format is None:
+                return False  # 无法检测格式
+
+            expected_exts = _FORMAT_EXTENSIONS.get(actual_format)
+            if expected_exts is None:
+                # 未知格式 (PIL 认识但不在此映射表中), 保守地放行
+                return True
+
+            ext = path.suffix.lower().lstrip(".")
+            return ext in expected_exts
     except Exception:
         return False
 

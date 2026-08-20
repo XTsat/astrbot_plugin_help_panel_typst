@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from pathlib import Path
 
 from astrbot.api import logger, AstrBotConfig
@@ -52,6 +53,12 @@ class HelpTypst(Star):
         except Exception as e:
             logger.warning(f"[HelpTypst] 无法创建默认背景图目录: {e}")
 
+        # 3.2 安装时导入内置图片到背景目录 (仅首次)
+        try:
+            self._import_default_backgrounds()
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 导入内置背景图失败: {e}")
+
         # 3. 初始化组件
         self.font_manager = FontManager(self.font_dirs)
         self.layout = TypstLayout(self.plugin_config)
@@ -93,6 +100,37 @@ class HelpTypst(Star):
 
         except Exception as e:
             logger.warning(f"[HelpTypst] 资源重载失败: {e}")
+
+    def _import_default_backgrounds(self):
+        """安装时从 resources/images 导入内置图片到默认背景图目录。
+
+        只复制背景扫描器支持的栅格格式 (.png/.jpg/.jpeg/.webp/.bmp/.gif)，
+        跳过已存在的文件，避免覆盖用户自行添加的背景图。
+        """
+        src_dir = self.plugin_dir / "resources" / "images"
+        if not src_dir.is_dir():
+            return
+        dst_dir = self.data_dir / InternalCFG.NAME_BACKGROUND_DIR
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        copied = 0
+        for f in src_dir.iterdir():
+            if not f.is_file():
+                continue
+            ext = f.suffix.lower()
+            if ext not in InternalCFG.BACKGROUND_IMAGE_EXTS:
+                continue
+            dst = dst_dir / f.name
+            if dst.exists():
+                continue
+            try:
+                shutil.copy2(f, dst)
+                copied += 1
+            except OSError as e:
+                logger.warning(f"[HelpTypst] 复制背景图失败 {f.name}: {e}")
+
+        if copied:
+            logger.info(f"[HelpTypst] 已导入 {copied} 张内置背景图到 {dst_dir}")
 
     async def terminate(self):
         """周期hook"""
