@@ -23,13 +23,13 @@
 
 ### 🖼️ 功能预览
 
-| `插件菜单` | `事件监听器` |
+| `插件菜单` | `搜索` |
 | :---: | :---: |
-| <img src="./preview/helps.jpg" width="400"> | <img src="./preview/events.jpg" width="400"> |
+| <img src="./preview/helps.jpg" width="400"> | <img src="./preview/search.jpg" width="300"><img src="./preview/id.jpg" width="300"> |
 
-| `过滤器` | `搜索` |
+| `过滤器` | `事件监听器` |
 | :---: | :---: |
-| <img src="./preview/filters.jpg" width="400"> | <img src="./preview/search.jpg" width="400"> |
+| <img src="./preview/filters.jpg" width="400"> | <img src="./preview/events.jpg" width="400"> |
 
 ## 📖 指令使用
 
