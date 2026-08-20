@@ -139,6 +139,10 @@ class TypstPluginConfig:
     enable_waiting_message: bool
     ignored_plugins: set[str]
     custom_font_path: str
+    header_background: str
+    background_dir: str
+    background_random: bool
+    hero_header: bool
 
     rendering: RenderingConfig
     appearance: AppearanceConfig
@@ -242,6 +246,10 @@ class TypstPluginConfig:
         )
 
         custom_font_path = raw_config.get("custom_font_path", "")
+        header_background = raw_config.get("header_background", "")
+        background_dir = raw_config.get("background_dir", "")
+        background_random = bool(raw_config.get("background_random", True))
+        hero_header = bool(raw_config.get("hero_header", True))
 
         logger.debug(
             f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}, 外观预设: {active_preset_name}"
@@ -251,6 +259,10 @@ class TypstPluginConfig:
             enable_waiting_message=enable_wait,
             ignored_plugins=ignored_set,
             custom_font_path=custom_font_path,
+            header_background=header_background,
+            background_dir=background_dir,
+            background_random=background_random,
+            hero_header=hero_header,
             rendering=render_cfg,
             appearance=appearance_cfg,
         )

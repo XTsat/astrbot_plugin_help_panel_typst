@@ -10,6 +10,15 @@
 #let query_regex_str = sys.inputs.at("query_regex", default: none)
 #let generated_time  = sys.inputs.at("timestamp", default: "Unknown Time")
 
+// === 🖼️ 头部 Hero 品牌模式 (可选, 默认开启) ===
+// 由 Python 侧注入: bg_image = 相对模板目录的图片路径, hero_header = "true"/"false"
+#let bg_image_path = sys.inputs.at("bg_image", default: "")
+#let has_header_bg = bg_image_path != ""
+#let hero_header_enabled = sys.inputs.at("hero_header", default: "true") != "false"
+
+// 统计卡片第三列显示名 (人格名称, 由 Python 侧注入; 空串则不渲染该列)
+#let system_name = data.at("system_name", default: "")
+
 // 颜色参数 (仅 event/filter/detail 视图使用, 默认已对齐新主题)
 #let c_map           = data.at("colors", default: (:))
 #let get_color(key, default_hex) = {
@@ -53,7 +62,7 @@
 
 // === 🖼️ 页面设置 ===
 #let page_fill = get_color("page_fill", "#F5FBFC")
-#set page(width: 900pt, height: auto, margin: (x: 32pt, y: 26pt), fill: page_fill)
+#set page(width: 830pt, height: auto, margin: (x: 28pt, y: 24pt), fill: page_fill)
 #set text(size: 10pt)
 // 字体: 数据驱动, 未提供时使用 Typst 默认字体 (系统自动回退渲染 CJK)
 #if user_fonts.len() > 0 {
@@ -140,6 +149,12 @@
   if is_light(c) { c_on_light } else { white }
 }
 
+// --- 头部背景横幅: 前景文字/统计统一压深以保证在浅色背景图上可读
+// (深色主题的浅色文字在浅色背景图上会看不清, 故不直接使用主题色)
+#let banner_text_color(c) = {
+  if is_light(c) { c.darken(45%) } else { c }
+}
+
 // --- 标题着色: 使用分类主题色, 按卡片明暗自动加深/加亮以保证可读性 ---
 #let readable_title_color(c) = {
   if is_light(c_card) {
@@ -188,6 +203,11 @@
 // --- 可断行 ID (下划线后插入零宽空格, 允许自然断行) ---
 #let breakable_id(text_str) = { text_str.replace("_", "_\u{200B}") }
 
+// --- 人格名自适应显示: 超长时等比缩小, 保证统计卡片内不溢出 ---
+#let adaptive_sys_name(name_str, size: 15pt) = {
+  adaptive_text(text(size: size, weight: "bold")[#name_str], 66pt)
+}
+
 // --- 自适应缩放 ---
 // 超宽内容一律等比缩放到容器宽度 (避免原样溢出导致 typst 0.15 布局收敛诊断)
 #let adaptive_text(content, max_width) = {
@@ -232,49 +252,109 @@
   let total = data.at("plugin_count", default: 0)
   let enabled = data.at("enabled_count", default: total)
 
-  let stat(value, label, color, divided: false) = box(
+  let stat(value, label, color, divided: false, label_color: c_gray) = box(
     inset: (left: if divided { 14pt } else { 0pt }, y: 0pt),
     stroke: if divided { (left: 0.8pt + c_soft) } else { none },
   )[
     #align(center + horizon)[
       #text(size: 18pt, weight: "bold", fill: color)[#value]
       #v(2pt)
-      #text(size: 7.5pt, fill: c_gray)[#label]
+      #text(size: 7.5pt, fill: label_color)[#label]
     ]
   ]
 
-  // 极轻阴影层 + 白色卡片
-  block(
-    width: 100%, breakable: false,
-    fill: luma(0, 4%), radius: 18pt,
-    inset: (bottom: 2pt, right: 2pt),
-  )[
-    #block(
-      width: 100%, fill: c_card, radius: 17pt, stroke: 1pt + c_border,
-      inset: (x: 22pt, y: 16pt),
+  // ===== Hero 品牌模式 (默认开启, 需检测到背景图) =====
+  // 布局: 左侧大号品牌徽标 + 左下统计卡片, 右侧为背景图角色主视觉
+  if has_header_bg and hero_header_enabled {
+    // 品牌主色: 主题主色自动压深 (浅色背景图上可读)
+    let hero_c = banner_text_color(c_sky)
+
+    // 等宽统计单元 (竖线分隔): 固定高度, 数字与标签整体垂直居中
+    let hero_stat(value, label, divided: false) = box(
+      width: 76pt,
+      height: 44pt,
+      inset: (x: 4pt, y: 0pt),
+      stroke: if divided { (left: 0.8pt + rgb(0, 0, 0, 30)) } else { none },
     )[
-      #grid(
-        columns: (1fr, auto), gutter: 16pt,
-        align(left + horizon)[
+      #align(center + horizon)[
+        #text(size: 15pt, weight: "bold", fill: hero_c)[#value]
+        #v(1pt)
+        #text(size: 7.5pt, fill: banner_text_color(c_gray))[#label]
+      ]
+    ]
+
+    // 背景图以原始宽高比铺满整卡 (块高度由图片自身决定, 右侧角色完整可见)
+    block(width: 100%, breakable: false)[
+      #image(bg_image_path, width: 100%)
+
+      // 品牌徽标: 官方 AstrBot 文字徽标 (内置资源, 相对模板目录)
+      #place(left + top, dx: 26pt, dy: 24pt)[
+        #stack(spacing: 4pt, align(left)[
+          #image("../resources/images/astrbot-logo-text.svg", height: 60pt)
+          #if (query_regex_str != none and query_regex_str != "") [
+            #v(6pt)
+            #text(size: 8.5pt, fill: banner_text_color(c_gray))[#data.title]
+          ]
+        ])
+      ]
+      // 左下统计卡片: 半透明白 + 圆角 + 等宽列 (bottom 对齐, 微抬进横幅内)
+      #place(left + bottom, dx: 26pt, dy: -10pt)[
+        #block(
+          fill: rgb(255, 255, 255, 205),
+          radius: 12pt,
+          stroke: 0.8pt + rgb(255, 255, 255, 160),
+          inset: (x: 10pt, y: 4pt),
+        )[
           #stack(
-            spacing: 4pt,
-            text(size: 22pt, weight: "bold", fill: c_navy)[Astrbot 插件面板],
-            if (query_regex_str != none and query_regex_str != "") [
-              #text(size: 9pt, fill: c_gray)[#data.title]
+            dir: ltr, spacing: 0pt,
+            hero_stat(str(total), "总插件"),
+            hero_stat(str(enabled), "已开启", divided: true),
+            // 第三列: 有人格名称时显示人格名, 否则不渲染 (已用徽标, 不再写 System AstrBot)
+            if system_name != "" [
+              hero_stat(adaptive_sys_name(system_name), "人格", divided: true)
             ],
           )
-        ],
-        align(right + horizon)[
-          #stack(
-            dir: ltr, spacing: 14pt,
-            stat(str(total), "总插件", c_sky),
-            stat(str(enabled), "已开启", c_cream, divided: true),
-            stat("AstrBot", "System", c_navy, divided: true),
-          )
-        ],
-      )
+        ]
+      ]
     ]
-  ]
+  } else {
+    // ===== 默认模式: 白色卡片 + 右侧统计 =====
+    // 极轻阴影层 + 白色卡片
+    block(
+      width: 100%, breakable: false,
+      fill: luma(0, 4%), radius: 18pt,
+      inset: (bottom: 2pt, right: 2pt),
+    )[
+      #block(
+        width: 100%, fill: c_card, radius: 17pt, stroke: 1pt + c_border,
+        inset: (x: 22pt, y: 16pt),
+      )[
+        #grid(
+          columns: (1fr, auto), gutter: 16pt,
+          align(left + horizon)[
+            #stack(
+              spacing: 4pt,
+              text(size: 22pt, weight: "bold", fill: c_navy)[Astrbot 插件面板],
+              if (query_regex_str != none and query_regex_str != "") [
+                #text(size: 9pt, fill: c_gray)[#data.title]
+              ],
+            )
+          ],
+          align(right + horizon)[
+            #stack(
+              dir: ltr, spacing: 12pt,
+              stat(str(total), "总插件", c_sky),
+              stat(str(enabled), "已开启", c_cream, divided: true),
+              // 第三列: 有人格名称时显示, 否则不渲染
+              if system_name != "" [
+                stat(adaptive_sys_name(system_name, size: 18pt), "人格", c_navy, divided: true),
+              ],
+            )
+          ],
+        )
+      ]
+    ]
+  }
 }
 
 // ============================================================
@@ -355,13 +435,13 @@
   box(
     width: 100%, fill: row_bg,
     stroke: 0.75pt + row_stroke, radius: 8pt,
-    inset: (x: 10pt, y: 7pt),
+    inset: (x: 8pt, y: 5pt),
   )[
     #grid(
-      columns: (auto, 1fr, auto, auto), gutter: 8pt,
+      columns: (auto, 1fr, auto, auto), gutter: 6pt,
       // ID 徽章
       align(center + horizon)[
-        #box(fill: badge_bg, radius: 10pt, inset: (x: 9pt, y: 2.5pt))[
+        #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 2pt))[
           #text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]
         ]
       ],
@@ -390,7 +470,6 @@
   } else {
     category_colors.at(name, default: c_gray)
   }
-  let title_fill = on_color(color)
 
   block(
     width: 100%, breakable: false,
@@ -400,25 +479,27 @@
     #block(
       width: 100%, fill: c_card, radius: 15pt, stroke: 1pt + c_border,
     )[
-      // 主题色标题栏
+      // 主题色标题栏: 白色居中加粗标题 + 右侧计数 (计数数字用分类色)
       #block(
         width: 100%, fill: color, radius: (top: 14pt),
-        inset: (x: 14pt, y: 10pt),
+        inset: (x: 12pt, y: 8pt),
       )[
         #grid(
           columns: (1fr, auto), gutter: 8pt,
-          align(left + horizon)[#text(fill: title_fill, weight: "bold", size: 15pt)[#hl(name)]],
+          align(center + horizon)[
+            #text(fill: white, weight: 800, size: 17pt)[#hl(name)]
+          ],
           align(right + horizon)[
             #box(fill: white, radius: 10pt, inset: (x: 9pt, y: 3pt))[
-              #text(fill: c_on_light, size: 9.5pt, weight: "bold")[#count]
+              #text(fill: color, size: 9.5pt, weight: "bold")[#count]
             ]
           ],
         )
       ]
       // 插件列表
-      #block(inset: (x: 10pt, y: 10pt), spacing: 0pt)[
+      #block(inset: (x: 8pt, y: 8pt), spacing: 0pt)[
         #stack(
-          spacing: 7pt,
+          spacing: 6pt,
           ..plugins.map(p => plugin_item(p, color))
         )
       ]
@@ -434,11 +515,11 @@
   if cols.len() > 0 {
     grid(
       columns: (1fr, 1fr),
-      column-gutter: 18pt,
-      row-gutter: 16pt,
+      column-gutter: 14pt,
+      row-gutter: 12pt,
       ..cols.map(col => {
         align(top)[
-          #stack(spacing: 16pt, ..col.map(cat => category_card(cat)))
+          #stack(spacing: 12pt, ..col.map(cat => category_card(cat)))
         ]
       })
     )
@@ -957,9 +1038,9 @@
 #if mode == "command" {
   // 指令模式: Header + 快捷操作 + 分类卡片
   render_header()
-  v(8pt)
+  v(6pt)
   render_quick_actions()
-  v(10pt)
+  v(8pt)
   render_categories()
 } else if mode == "plugin_detail" {
   // 插件详情页

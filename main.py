@@ -45,6 +45,13 @@ class HelpTypst(Star):
         )  # 内置
         self.font_dirs = [self.builtin_font_dir, self.user_font_dir]  # 汇总
 
+        # 3.1 默认背景图目录 (与字体目录一致, 只扫描该目录下的图片)
+        try:
+            default_bg_dir = self.data_dir / InternalCFG.NAME_BACKGROUND_DIR
+            default_bg_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 无法创建默认背景图目录: {e}")
+
         # 3. 初始化组件
         self.font_manager = FontManager(self.font_dirs)
         self.layout = TypstLayout(self.plugin_config)
@@ -157,6 +164,27 @@ class HelpTypst(Star):
         except Exception as e:
             logger.error(f"[HelpTypst] 自我重载异常: {e}")
 
+    async def _get_persona_name(self) -> str:
+        """获取当前默认人格名称, 用于 Hero 统计卡片第三列。
+
+        - 用户未自定义人格 (默认人格 "default") 或无 persona_manager 时返回空串,
+          模板将不渲染第三列 (已用徽标展示品牌)。
+        - 失败时返回空串, 不影响渲染。
+        """
+        try:
+            pm = getattr(self.context, "persona_manager", None)
+            if pm is None or not hasattr(pm, "get_default_persona_v3"):
+                return ""
+            persona = await pm.get_default_persona_v3()
+            name = str((persona or {}).get("name", "") or "").strip()
+            # 默认人格 (未自定义) 无展示意义
+            if not name or name == "default":
+                return ""
+            return name
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 获取人格名称失败: {e}")
+            return ""
+
     async def _handle_request(
         self,
         event: AstrMessageEvent,
@@ -177,6 +205,9 @@ class HelpTypst(Star):
                 else self.hint.msg_rendering(mode)
             )
             wait_msg_id = await self.msg.send_wait(event, hint_text)
+
+        # 提前获取人格名称 (async), 供 data_pipeline 闭包注入 (空串则第三列不渲染)
+        persona_name = await self._get_persona_name()
 
         def data_pipeline(save_path: Path) -> int:
             """数据流转"""
@@ -210,6 +241,7 @@ class HelpTypst(Star):
                 mode=layout_mode,
                 prefixes=self.prefixes,
                 font_list=final_font_list,
+                system_name=persona_name,
             )
 
             return len(plugins)

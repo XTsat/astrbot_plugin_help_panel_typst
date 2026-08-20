@@ -207,3 +207,7 @@ marimo/_lsp/
 __marimo__/
 /.history
 /.omo
+
+# DSH 工具临时目录
+.dsh-vision-router/
+.dsh-vision-toolkit/

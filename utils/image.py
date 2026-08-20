@@ -14,6 +14,15 @@ def verify_image_header(path: Path) -> bool:
         return False
 
 
+def get_image_dimensions(path: Path) -> tuple[int, int] | None:
+    """读取图片宽高 (px)。读取失败返回 None"""
+    try:
+        with Image.open(path) as img:
+            return img.size
+    except Exception:
+        return None
+
+
 def process_image_to_webp(
     source_path: str,
     output_dir: str,

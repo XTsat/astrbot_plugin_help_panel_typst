@@ -30,11 +30,29 @@ class InternalCFG:
         "ppi",
         "ignored_plugins",
         "effective_colors",
+        "header_background",
+        "background_dir",
+        "background_random",
+        "hero_header",
     ]
+
+    # 头部背景图候选扩展名 (扫描背景目录时使用, 缓存文件按前缀排除)
+    BACKGROUND_IMAGE_EXTS: tuple[str, ...] = (
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".bmp",
+        ".gif",
+    )
+    # 自动扫描时排除的缓存文件前缀
+    BACKGROUND_IMAGE_EXCLUDE_PREFIXES: tuple[str, ...] = ("cache_", "temp_")
 
     # 文件/文件夹名
     NAME_TEMPLATE: str = "base.typ"
     NAME_FONT_DIR: str = "fonts"
+    # 默认背景图目录 (数据目录下的子目录, 与字体目录一致)
+    NAME_BACKGROUND_DIR: str = "backgrounds"
 
     # 时序
     DELAY_SEND: float = 1

@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import random
 import time
 import uuid
 from collections.abc import Callable
@@ -11,7 +13,7 @@ from astrbot.api import logger
 from astrbot.api.star import Star
 
 from ..domain import InternalCFG, TypstPluginConfig
-from ..utils import calculate_hash, verify_image_header
+from ..utils import calculate_hash, get_image_dimensions, verify_image_header
 from . import execute_render_task, RenderTask
 
 
@@ -75,7 +77,84 @@ class TypstRenderer:
             snapshot["effective_fonts"] = self.cfg.appearance.get_active_font_order()
             snapshot["effective_colors"] = self.cfg.appearance.get_active_colors()
 
+        # 头部背景图指纹 (路径 + 大小 + mtime), 背景图变更时缓存失效
+        bg = self._resolve_background_image()
+        if bg is not None:
+            try:
+                st = bg.stat()
+                snapshot["background_image"] = {
+                    "path": str(bg),
+                    "size": st.st_size,
+                    "mtime": st.st_mtime,
+                }
+            except OSError:
+                snapshot["background_image"] = None
+        else:
+            snapshot["background_image"] = None
+
         return snapshot
+
+    def _resolve_background_image(self) -> Path | None:
+        """解析头部背景图
+
+        优先级:
+          1. header_background: 显式指定单个图片文件 (不使用随机)
+          2. background_dir:    自定义背景目录, 只扫描该目录内的图片
+          3. 默认背景目录:      数据目录下 backgrounds/ 子目录
+        目录扫描规则: 该目录根下的图片文件 (排除 cache_/temp_ 前缀), 多张时按
+        background_random 决定随机选一张或取文件名排序第一张。
+        """
+        # 1. 显式指定单个文件
+        cfg_path = (self.cfg.header_background or "").strip()
+        if cfg_path:
+            p = Path(cfg_path)
+            if p.is_file():
+                return p
+            logger.warning(f"[HelpTypst] 配置的背景图不存在: {cfg_path}, 回退目录扫描")
+
+        # 2. 目录扫描 (自定义目录 → 默认 backgrounds 目录)
+        scan_dirs: list[Path] = []
+        custom_dir = (self.cfg.background_dir or "").strip()
+        if custom_dir:
+            scan_dirs.append(Path(custom_dir))
+        scan_dirs.append(self.data_dir / InternalCFG.NAME_BACKGROUND_DIR)
+
+        for scan_dir in scan_dirs:
+            candidates = self._scan_background_dir(scan_dir)
+            if not candidates:
+                continue
+
+            if len(candidates) > 1 and self.cfg.background_random:
+                picked = random.choice(candidates)
+                logger.debug(
+                    f"[HelpTypst] 随机背景图: {picked.name} (共 {len(candidates)} 张)"
+                )
+                return picked
+
+            if len(candidates) > 1:
+                logger.warning(
+                    f"[HelpTypst] 背景目录 {scan_dir} 检测到 {len(candidates)} 张图片, "
+                    f"默认使用: {candidates[0].name} (可开启 background_random 随机选择)"
+                )
+            return candidates[0]
+
+        return None
+
+    def _scan_background_dir(self, scan_dir: Path) -> list[Path]:
+        """扫描单个目录内的背景图候选 (仅目录根, 排除 cache_/temp_ 前缀)"""
+        if not scan_dir.is_dir():
+            return []
+        candidates: list[Path] = []
+        for ext in InternalCFG.BACKGROUND_IMAGE_EXTS:
+            candidates.extend(scan_dir.glob(f"*{ext}"))
+        candidates = [
+            c
+            for c in candidates
+            if c.is_file()
+            and not c.name.startswith(InternalCFG.BACKGROUND_IMAGE_EXCLUDE_PREFIXES)
+        ]
+        candidates.sort(key=lambda c: c.name)
+        return candidates
 
     async def render(
         self,
@@ -134,6 +213,29 @@ class TypstRenderer:
 
                     font_paths_str = [str(p) for p in self.font_dirs]
 
+                    # 头部背景图: 解析路径/宽高比, 并计算沙箱 root (模板目录与数据目录的共同父目录)
+                    bg_image = self._resolve_background_image()
+                    bg_image_path: str | None = None
+                    bg_aspect: float | None = None
+                    root_dir: str | None = None
+                    if bg_image is not None:
+                        bg_image_path = str(bg_image)
+                        dims = get_image_dimensions(bg_image)
+                        if dims and dims[1] > 0:
+                            bg_aspect = dims[0] / dims[1]
+                        try:
+                            root_dir = os.path.commonpath(
+                                [str(self.template_path.parent), str(self.data_dir)]
+                            )
+                        except ValueError:
+                            # 模板与数据目录无共同父目录 (如跨盘符), 放弃背景图
+                            logger.warning(
+                                "[HelpTypst] 模板目录与数据目录无共同父目录, 头部背景图不可用"
+                            )
+                            bg_image_path = None
+                            bg_aspect = None
+                            root_dir = None
+
                     # 构造 DTO
                     task = RenderTask(
                         template_path=str(self.template_path),
@@ -148,6 +250,10 @@ class TypstRenderer:
                         webp_limit=self.cfg.rendering.webp_limit,
                         split_height=self.cfg.rendering.split_height,
                         ppi=self.cfg.rendering.ppi,
+                        bg_image_path=bg_image_path,
+                        root_dir=root_dir,
+                        bg_aspect=bg_aspect,
+                        hero_header=self.cfg.hero_header,
                     )
 
                     # 调度执行

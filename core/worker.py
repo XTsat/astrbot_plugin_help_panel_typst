@@ -1,5 +1,6 @@
 import ctypes
 import gc
+import os
 import platform
 import re
 import traceback
@@ -7,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import typst
+from astrbot.api import logger
 
 from ..domain import DefaultCFG
 from ..utils import process_image_to_webp
@@ -39,6 +41,12 @@ class RenderTask:
     webp_limit: int = DefaultCFG.LIMIT_WEBP
     split_height: int = DefaultCFG.LIMIT_SIDE
     ppi: float = DefaultCFG.LIMIT_PPI
+    # 头部背景图 (可选): 绝对路径 + 沙箱 root + 宽高比
+    bg_image_path: str | None = None
+    root_dir: str | None = None
+    bg_aspect: float | None = None
+    # Hero 品牌模式开关 (默认开启)
+    hero_header: bool = True
 
 
 def execute_render_task(task: RenderTask) -> list[str]:
@@ -52,7 +60,29 @@ def execute_render_task(task: RenderTask) -> list[str]:
         if task.query:
             sys_inputs["query_regex"] = re.escape(task.query)
 
-        # 2. 执行 Typst 编译
+        # 2. 背景图注入: 路径相对模板目录, 便于 Typst 在 root 内解析
+        compile_kwargs: dict = {}
+        if task.root_dir:
+            compile_kwargs["root"] = task.root_dir
+
+        if task.bg_image_path:
+            try:
+                rel = os.path.relpath(
+                    task.bg_image_path, Path(task.template_path).parent
+                )
+                sys_inputs["bg_image"] = rel
+            except ValueError:
+                # 跨盘符等无法计算相对路径的情况 (Windows), 放弃背景图
+                logger.warning(
+                    f"[HelpTypst] 无法计算背景图相对路径: {task.bg_image_path}"
+                )
+            if task.bg_aspect:
+                sys_inputs["bg_aspect"] = f"{task.bg_aspect:.6f}"
+
+        # Hero 品牌模式开关注入模板
+        sys_inputs["hero_header"] = "true" if task.hero_header else "false"
+
+        # 3. 执行 Typst 编译
         typst.compile(
             task.template_path,
             output=task.output_png_path,
@@ -60,6 +90,7 @@ def execute_render_task(task: RenderTask) -> list[str]:
             format="png",
             ppi=task.ppi,
             sys_inputs=sys_inputs,
+            **compile_kwargs,
         )
 
         # 3. 调用图片处理

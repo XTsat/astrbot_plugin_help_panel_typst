@@ -149,6 +149,7 @@ class TypstLayout:
         mode: str,
         prefixes: list[str],
         font_list: list[str],
+        system_name: str = "",
     ):
         """生成布局数据并写入文件"""
         payload = self._generate_balanced_payload(
@@ -158,6 +159,8 @@ class TypstLayout:
         colors = dict(self.cfg.appearance.get_active_colors())
         colors.update(InternalCFG.DISABLED_COLORS)
         payload["colors"] = colors
+        # 注入 Hero 统计卡片第三列显示名 (人格名称, 空串则不渲染该列)
+        payload["system_name"] = system_name
 
         save_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"

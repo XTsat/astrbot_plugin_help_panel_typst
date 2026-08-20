@@ -26,6 +26,30 @@
     "default": "",
     "hint": "绝对路径。缺省值 .../data/plugin_data/astrbot_plugin_help_typst/fonts"
   },
+  "header_background": {
+    "description": "顶部 Header 背景图 (单文件)",
+    "type": "string",
+    "default": "",
+    "hint": "绝对路径。设置后直接使用该图片作为 /helps 顶部横幅背景 (优先于背景目录)"
+  },
+  "background_dir": {
+    "description": "背景图目录",
+    "type": "string",
+    "default": "",
+    "hint": "绝对路径。只扫描该目录根下的图片作为背景；留空时使用缺省目录 .../data/plugin_data/astrbot_plugin_help_typst/backgrounds"
+  },
+  "background_random": {
+    "description": "背景图随机选择",
+    "type": "bool",
+    "default": true,
+    "hint": "默认开启。每次渲染从背景目录中随机选一张；关闭时取文件名排序第一张"
+  },
+  "hero_header": {
+    "description": "Hero 品牌模式 (顶部大标题)",
+    "type": "bool",
+    "default": true,
+    "hint": "默认开启。开启且存在背景图时，顶部变为 Hero 品牌横幅：左侧大号两行 Astrbot/Bot 标题 + 左下统计卡片，右侧预留给背景图角色；关闭后恢复经典白色卡片布局"
+  },
   "rendering": {
     "description": "渲染引擎设置",
     "type": "object",
