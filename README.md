@@ -25,11 +25,11 @@
 
 | `插件菜单` | `搜索` |
 | :---: | :---: |
-| <img src="./preview/helps.jpg" width="400"> | <img src="./preview/search.jpg" width="300"><img src="./preview/id.jpg" width="300"> |
+| <img src="./preview/helps.jpg" width="500"> | <img src="./preview/search.jpg" width="345"></br><img src="./preview/id.jpg" width="345"> |
 
 | `过滤器` | `事件监听器` |
 | :---: | :---: |
-| <img src="./preview/filters.jpg" width="400"> | <img src="./preview/events.jpg" width="400"> |
+| <img src="./preview/filters.jpg" width="500"> | <img src="./preview/events.jpg" width="430"> |
 
 ## 📖 指令使用
 
