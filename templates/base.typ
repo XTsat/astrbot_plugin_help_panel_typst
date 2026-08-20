@@ -203,11 +203,6 @@
 // --- 可断行 ID (下划线后插入零宽空格, 允许自然断行) ---
 #let breakable_id(text_str) = { text_str.replace("_", "_\u{200B}") }
 
-// --- 人格名自适应显示: 超长时等比缩小, 保证统计卡片内不溢出 ---
-#let adaptive_sys_name(name_str, size: 15pt) = {
-  adaptive_text(text(size: size, weight: "bold")[#name_str], 66pt)
-}
-
 // --- 自适应缩放 ---
 // 超宽内容一律等比缩放到容器宽度 (避免原样溢出导致 typst 0.15 布局收敛诊断)
 #let adaptive_text(content, max_width) = {
@@ -252,16 +247,40 @@
   let total = data.at("plugin_count", default: 0)
   let enabled = data.at("enabled_count", default: total)
 
-  let stat(value, label, color, divided: false, label_color: c_gray) = box(
+  let stat(value, label, color, divided: false, label_color: c_gray) = if value == "" {
+    none
+  } else {
+    box(
+    height: 44pt,
     inset: (left: if divided { 14pt } else { 0pt }, y: 0pt),
     stroke: if divided { (left: 0.8pt + c_soft) } else { none },
   )[
     #align(center + horizon)[
-      #text(size: 18pt, weight: "bold", fill: color)[#value]
-      #v(2pt)
-      #text(size: 7.5pt, fill: label_color)[#label]
+      #grid(
+        columns: (1fr),
+        rows: (22pt, 16pt),
+        row-gutter: 2pt,
+        // Row 1: value — fixed 22pt height, identical center line across all columns
+        align(center + horizon)[
+          #context {
+            let init_sz = 18pt
+            let test = text(size: init_sz, weight: "bold", fill: color)[#value]
+            let m = measure(test)
+            if m.width > 90pt {
+              text(size: init_sz * (90pt / m.width), weight: "bold", fill: color)[#value]
+            } else {
+              test
+            }
+          }
+        ],
+        // Row 2: label — fixed 16pt height, identical baseline across all columns
+        align(center + horizon)[
+          #text(size: 7.5pt, fill: label_color)[#label]
+        ],
+      )
     ]
   ]
+    }
 
   // ===== Hero 品牌模式 (默认开启, 需检测到背景图) =====
   // 布局: 左侧大号品牌徽标 + 左下统计卡片, 右侧为背景图角色主视觉
@@ -269,19 +288,44 @@
     // 品牌主色: 主题主色自动压深 (浅色背景图上可读)
     let hero_c = banner_text_color(c_sky)
 
-    // 等宽统计单元 (竖线分隔): 固定高度, 数字与标签整体垂直居中
-    let hero_stat(value, label, divided: false) = box(
+    // 等宽统计单元 (竖线分隔): 数字与标签整体垂直居中
+    // value 为纯文本字符串, 内部统一做自适应缩放 (超长等比缩小, 避免溢出)
+    // 值为空时返回 none, 便于 grid 跳过空列
+    let hero_stat(value, label, divided: false) = if value == "" {
+      none
+    } else {
+      box(
       width: 76pt,
       height: 44pt,
       inset: (x: 4pt, y: 0pt),
       stroke: if divided { (left: 0.8pt + rgb(0, 0, 0, 30)) } else { none },
     )[
       #align(center + horizon)[
-        #text(size: 15pt, weight: "bold", fill: hero_c)[#value]
-        #v(1pt)
-        #text(size: 7.5pt, fill: banner_text_color(c_gray))[#label]
+        #grid(
+          columns: (1fr),
+          rows: (22pt, 16pt),
+          row-gutter: 2pt,
+          // Row 1: value — fixed 22pt height, identical center line across all columns
+          align(center + horizon)[
+            #context {
+              let init_sz = 15pt
+              let test = text(size: init_sz, weight: "bold", fill: hero_c)[#value]
+              let m = measure(test)
+              if m.width > 66pt {
+                text(size: init_sz * (66pt / m.width), weight: "bold", fill: hero_c)[#value]
+              } else {
+                test
+              }
+            }
+          ],
+          // Row 2: label — fixed 16pt height, identical baseline across all columns
+          align(center + horizon)[
+            #text(size: 7.5pt, fill: banner_text_color(c_gray))[#label]
+          ],
+        )
       ]
     ]
+      }
 
     // 背景图以原始宽高比铺满整卡 (块高度由图片自身决定, 右侧角色完整可见)
     block(width: 100%, breakable: false)[
@@ -305,14 +349,12 @@
           stroke: 0.8pt + rgb(255, 255, 255, 160),
           inset: (x: 10pt, y: 4pt),
         )[
-          #stack(
-            dir: ltr, spacing: 0pt,
+          #grid(
+            columns: (auto, auto, auto),
+            column-gutter: 0pt,
             hero_stat(str(total), "总插件"),
             hero_stat(str(enabled), "已开启", divided: true),
-            // 第三列: 有人格名称时显示人格名, 否则不渲染 (已用徽标, 不再写 System AstrBot)
-            if system_name != "" [
-              hero_stat(adaptive_sys_name(system_name), "人格", divided: true)
-            ],
+            hero_stat(system_name, "人格", divided: true),
           )
         ]
       ]
@@ -341,14 +383,12 @@
             )
           ],
           align(right + horizon)[
-            #stack(
-              dir: ltr, spacing: 12pt,
+            #grid(
+              columns: (auto, auto, auto),
+              column-gutter: 12pt,
               stat(str(total), "总插件", c_sky),
               stat(str(enabled), "已开启", c_cream, divided: true),
-              // 第三列: 有人格名称时显示, 否则不渲染
-              if system_name != "" [
-                stat(adaptive_sys_name(system_name, size: 18pt), "人格", c_navy, divided: true),
-              ],
+              stat(system_name, "人格", c_navy, divided: true),
             )
           ],
         )

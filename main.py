@@ -173,10 +173,24 @@ class HelpTypst(Star):
         """
         try:
             pm = getattr(self.context, "persona_manager", None)
-            if pm is None or not hasattr(pm, "get_default_persona_v3"):
+            if pm is None:
                 return ""
-            persona = await pm.get_default_persona_v3()
-            name = str((persona or {}).get("name", "") or "").strip()
+            # 支持新旧两版方法名: v3 (Pydantic 模型) / 旧版 (dict)
+            method = (
+                getattr(pm, "get_default_persona_v3", None)
+                or getattr(pm, "get_default_persona", None)
+            )
+            if method is None:
+                return ""
+            persona = await method()
+            if persona is None:
+                return ""
+            # 兼容 dict 和 Pydantic 模型两种返回类型
+            if isinstance(persona, dict):
+                name = persona.get("name", "")
+            else:
+                name = getattr(persona, "name", "")
+            name = str(name or "").strip()
             # 默认人格 (未自定义) 无展示意义
             if not name or name == "default":
                 return ""
