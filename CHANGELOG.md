@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## v0.3.3 (2026-08-23)
+
+- 修复：修复 Windows 使用反斜杠导致 Typst 编译报错的问题
+
 ## v0.3.2 预置背景图片 (2026-08-21)
 
 - 新增：安装时自动将 `resources/images` 中的内置图片导入到默认背景图目录 (`backgrounds`)，仅复制栅格格式（.png/.jpg/.webp/.bmp/.gif），不覆盖已有文件

@@ -69,7 +69,7 @@ def execute_render_task(task: RenderTask) -> list[str]:
             try:
                 rel = os.path.relpath(
                     task.bg_image_path, Path(task.template_path).parent
-                )
+                ).replace("\\", "/")
                 sys_inputs["bg_image"] = rel
             except ValueError:
                 # 跨盘符等无法计算相对路径的情况 (Windows), 放弃背景图
