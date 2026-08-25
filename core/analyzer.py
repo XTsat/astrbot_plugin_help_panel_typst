@@ -260,48 +260,34 @@ class CommandAnalyzer(BaseAnalyzer):
             if safe_name in self.cfg.ignored_plugins:
                 continue
 
-            # 模块路径
-            if not raw_module:
-                logger.debug(
-                    f"[HelpTypst] 插件 {safe_name} 缺失 module_path，无法关联指令，已跳过。"
-                )
-                continue
-
-            # --- Handler 关联 ---
-            handlers = handlers_map.get(raw_module, [])
-
-            # Fallback: 模糊匹配
-            if not handlers:
-                for k, v in handlers_map.items():
-                    if k.startswith(raw_module) or raw_module.startswith(k):
-                        handlers = v
-                        break
-
-            if not handlers:
-                # 防御性跳过 + 提供调试
-                logger.debug(
-                    f"[HelpTypst] 插件 {safe_name} ({raw_module}) 未注册任何指令 Handler。"
-                )
-                continue
-
-            # --- 构建指令树 ---
+            # --- 构建指令树 (即使无指令也展示插件卡片) ---
             try:
-                nodes = self._build_plugin_command_tree(handlers)
-                if nodes:
-                    results.append(
-                        PluginMetadata(
-                            name=plugin_name,
-                            display_name=info["display_name"],
-                            version=info["version"],
-                            desc=info["desc"],
-                            author=info["author"],
-                            category=category,
-                            disabled=disabled,
-                            nodes=nodes,
-                        )
+                nodes: list[RenderNode] = []
+                if raw_module:
+                    handlers = handlers_map.get(raw_module, [])
+                    # Fallback: 模糊匹配
+                    if not handlers:
+                        for k, v in handlers_map.items():
+                            if k.startswith(raw_module) or raw_module.startswith(k):
+                                handlers = v
+                                break
+                    if handlers:
+                        nodes = self._build_plugin_command_tree(handlers)
+
+                results.append(
+                    PluginMetadata(
+                        name=plugin_name,
+                        display_name=info["display_name"],
+                        version=info["version"],
+                        desc=info["desc"],
+                        author=info["author"],
+                        category=category,
+                        disabled=disabled,
+                        nodes=nodes,
                     )
-                else:
-                    logger.debug(f"[HelpTypst] 插件 {safe_name} 指令树构建结果为空。")
+                )
+                if not nodes:
+                    logger.debug(f"[HelpTypst] 插件 {safe_name} 无注册指令，仅展示基本信息。")
             except Exception as e:
                 logger.warning(f"[HelpTypst] 处理插件 {safe_name} 时发生异常: {e}")
                 continue
@@ -309,7 +295,7 @@ class CommandAnalyzer(BaseAnalyzer):
         # 按分类分组排序, 并分配全局连续编号 (跨分类)
         results = self._assign_global_order(results)
 
-        logger.info(f"[HelpTypst] 指令分析完成。找到 {len(results)} 个有指令的插件。")
+        logger.info(f"[HelpTypst] 指令分析完成。共展示 {len(results)} 个插件。")
         return results
 
     def _assign_global_order(
