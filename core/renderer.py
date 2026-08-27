@@ -77,6 +77,9 @@ class TypstRenderer:
                 # set → list 并排序
                 if isinstance(val, set):
                     snapshot[key] = sorted(list(val))
+                # 分类规则 (dataclass 不可直接 JSON 序列化, 转为纯结构)
+                elif key == "category":
+                    snapshot[key] = val.to_plain()
                 else:
                     snapshot[key] = val
 

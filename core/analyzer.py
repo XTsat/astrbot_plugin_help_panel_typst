@@ -153,7 +153,11 @@ class BaseAnalyzer:
         raise NotImplementedError
 
     def _derive_category(self, info: dict[str, str | None]) -> str:
-        """根据插件元信息推断分类: 关键词命中 (desc/name/display_name/tags) → 兜底"""
+        """根据插件元信息推断分类: 关键词命中 (desc/name/display_name/tags) → 兜底
+
+        分类规则与兜底分类名来自设置面板 category 配置 (默认预置
+        DefaultCFG.DEFAULT_CATEGORY_KEYWORDS, 用户可自由增删改)。
+        """
         text_parts = []
         for key in ("desc", "name", "display_name", "tags"):
             val = info.get(key)
@@ -161,11 +165,7 @@ class BaseAnalyzer:
                 text_parts.append(str(val))
         text = " ".join(text_parts).lower()
 
-        for category, keywords in InternalCFG.CATEGORY_KEYWORDS.items():
-            for kw in keywords:
-                if kw.lower() in text:
-                    return category
-        return InternalCFG.CATEGORY_FALLBACK
+        return self.cfg.category.match(text)
 
     def _group_handlers_by_module(self) -> dict[str, list[StarHandlerMetadata]]:
         mapping = defaultdict(list)
@@ -302,17 +302,19 @@ class CommandAnalyzer(BaseAnalyzer):
         self, plugins: list[PluginMetadata]
     ) -> list[PluginMetadata]:
         """按分类分组排序, 为每个插件分配跨分类连续的全局编号 order"""
+        fallback = self.cfg.category.fallback
+
         # 按分类聚合
         grouped: dict[str, list[PluginMetadata]] = {}
         for p in plugins:
-            cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
+            cat = (p.category or "").strip() or fallback
             grouped.setdefault(cat, []).append(p)
 
         # 分类名升序, 兜底分类置底
         names = sorted(grouped.keys())
-        if InternalCFG.CATEGORY_FALLBACK in names:
-            names.remove(InternalCFG.CATEGORY_FALLBACK)
-            names.append(InternalCFG.CATEGORY_FALLBACK)
+        if fallback in names:
+            names.remove(fallback)
+            names.append(fallback)
 
         # 分类内插件排序, 展平为全局序列
         ordered: list[PluginMetadata] = []

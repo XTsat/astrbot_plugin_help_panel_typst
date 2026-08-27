@@ -48,18 +48,6 @@
 #let c_dis_cmd         = get_color("disabled_cmd", "#C8C8C8")  // 禁用命令名称/次级文本
 #let c_dis_icon        = get_color("disabled_icon", "#B9A5A8")  // 禁用图标 (圆圈 + 斜杠, 左下→右上)
 
-// === 🗂️ 分类主题色 (按分类名固定匹配, 随预设切换, 兜底灰蓝) ===
-#let category_colors = (
-  "AI":   get_color("cat_AI", "#57CDE3"),
-  "工具": get_color("cat_工具", "#2E9BB8"),
-  "管理": get_color("cat_管理", "#355A81"),
-  "娱乐": get_color("cat_娱乐", "#8AE6E1"),
-  "查询": get_color("cat_查询", "#FADE86"),
-  "其他": get_color("cat_其他", "#808E9D"),
-  "资讯": get_color("cat_资讯", "#A8E9F2"),
-  "调试": get_color("cat_调试", "#6C8CA8"),
-)
-
 // === 🖼️ 页面设置 ===
 #let page_fill = get_color("page_fill", "#F5FBFC")
 #set page(width: 830pt, height: auto, margin: (x: 28pt, y: 24pt), fill: page_fill)
@@ -717,12 +705,12 @@
   let count = cat.at("count", default: 0)
   let plugins = cat.at("plugins", default: ())
 
-  // 主题色: 优先数据传入的 color, 否则按名称固定映射, 最后兜底灰蓝
+  // 主题色: 优先数据传入的 color (Python 侧按主题色槽解析), 兜底灰蓝
   let raw_color = cat.at("color", default: "")
   let color = if raw_color != "" {
     rgb(raw_color)
   } else {
-    category_colors.at(name, default: c_gray)
+    c_gray
   }
 
   block(

@@ -35,6 +35,7 @@ class InternalCFG:
         "background_dir",
         "background_random",
         "hero_header",
+        "category",
     ]
 
     # 头部背景图候选扩展名 (扫描背景目录时使用, 缓存文件按前缀排除)
@@ -59,112 +60,10 @@ class InternalCFG:
     DELAY_SEND: float = 1
 
     # 分类 (指令模式 /helps) 相关
-    # 兜底分类名, 匹配不到任何关键词时使用
+    # 兜底分类名: 配置缺失/异常时的最终保底 (正常运行时使用 DefaultCFG.DEFAULT_CATEGORY_FALLBACK,
+    # 用户可在设置面板通过 category.fallback 自定义, 详见 domain/config.py 的 CategoryConfig)
     CATEGORY_FALLBACK: str = "其他"
-    # 分类关键词映射: 插入顺序即匹配优先级, 命中即返回
-    CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
-        "查询": (
-            "查询",
-            "搜索",
-            "百科",
-            "词典",
-            "翻译",
-            "天气",
-            "汇率",
-            "快递",
-            "新闻",
-            "热搜",
-            "日历",
-            "黄历",
-            "search",
-            "query",
-            "wiki",
-            "translate",
-            "weather",
-        ),
-        "娱乐": (
-            "娱乐",
-            "游戏",
-            "抽奖",
-            "点歌",
-            "音乐",
-            "笑话",
-            "梗图",
-            "表情包",
-            "随机",
-            "运势",
-            "签到",
-            "塔罗",
-            "占卜",
-            "骰子",
-            "game",
-            "music",
-        ),
-        "工具": (
-            "工具",
-            "计算",
-            "转换",
-            "二维码",
-            "短链",
-            "短网址",
-            "解析",
-            "压缩",
-            "编码",
-            "tool",
-            "qrcode",
-        ),
-        "管理": (
-            "管理",
-            "群管",
-            "禁言",
-            "踢人",
-            "审核",
-            "权限",
-            "撤回",
-            "违禁词",
-            "黑名单",
-            "风控",
-            "admin",
-            "ban",
-        ),
-        "资讯": (
-            "资讯",
-            "订阅",
-            "推送",
-            "通知",
-            "提醒",
-            "播报",
-            "监控",
-            "rss",
-            "news",
-            "feed",
-        ),
-        "AI": (
-            "ai",
-            "llm",
-            "模型",
-            "gpt",
-            "大模型",
-            "对话",
-            "智能",
-            "画图",
-            "绘图",
-            "文生图",
-            "图像",
-            "绘画",
-            "image",
-            "diffusion",
-        ),
-        "调试": (
-            "调试",
-            "开发",
-            "测试",
-            "日志",
-            "诊断",
-            "debug",
-            "dev",
-        ),
-    }
+    # 默认分类关键词映射已迁移至 DefaultCFG.DEFAULT_CATEGORY_KEYWORDS (设置面板 category.rules 的预置默认值)
     # 分类卡片布局估算 (pt): 仅用于 2 列平衡, 与模板 category_card 的 spacing 保持近似
     # 每张卡片在列内占用的高度 ≈ HEADER + ROW * 插件数 (HEADER 已含彩色头部、列表 padding、边框阴影与卡片间距)
     CATEGORY_HEADER_HEIGHT: int = 70
@@ -232,9 +131,9 @@ class DefaultCFG:
 
     # 5. 内置主题预设 (preset_name → 完整配色)
     # 每个配色字典含三类键:
-    #   brand_* : 品牌色板 (主色/结构色/背景/边框等, 13 个, 供指令菜单使用)
-    #   cat_*   : 分类主题色 (按分类名, 供分类卡片标题栏使用)
-    #   c_*     : 通用颜色 (event/filter/detail 视图使用)
+    #   brand_*    : 品牌色板 (主色/结构色/背景/边框等, 13 个, 供指令菜单使用)
+    #   cat_slot_N : 通用分类色槽 (0~9, 分类卡片标题栏取色, 分类规则按槽位绑定; 0 为兜底)
+    #   c_*        : 通用颜色 (event/filter/detail 视图使用)
 
     # --- Ocean Blue 主题: 明亮清爽 (天蓝青 × 深海蓝 × 浅青蓝 × 奶油黄) ---
     OCEAN_BLUE_COLORS: dict[str, str] = {
@@ -251,15 +150,18 @@ class DefaultCFG:
         "brand_border": "#DCEFF1",  # 卡片边框
         "brand_soft": "#E7EFF1",  # 插件行边框 (更浅)
         "brand_ghost": "#F3F6F7",  # disabled 行背景
-        # 分类主题色
-        "cat_AI": "#57CDE3",
-        "cat_工具": "#2E9BB8",
-        "cat_管理": "#355A81",
-        "cat_娱乐": "#8AE6E1",
-        "cat_查询": "#FADE86",
-        "cat_其他": "#808E9D",
-        "cat_资讯": "#A8E9F2",
-        "cat_调试": "#6C8CA8",
+        # 通用分类色槽 (cat_slot_0~9): 分类卡片标题栏统一取色源, 随主题切换变化
+        # 槽位 0 = 兜底分类(其他) 默认色; 1~7 = AI/查询/工具/管理/娱乐/资讯/调试; 8~9 备用
+        "cat_slot_0": "#808E9D",
+        "cat_slot_1": "#57CDE3",
+        "cat_slot_2": "#FADE86",
+        "cat_slot_3": "#2E9BB8",
+        "cat_slot_4": "#355A81",
+        "cat_slot_5": "#8AE6E1",
+        "cat_slot_6": "#A8E9F2",
+        "cat_slot_7": "#6C8CA8",
+        "cat_slot_8": "#F0C14B",
+        "cat_slot_9": "#2E2E35",
         # 通用颜色
         "page_fill": "#F5FBFC",
         "c_plugin_name": "#355A81",
@@ -305,15 +207,17 @@ class DefaultCFG:
         "brand_border": "#2E4560",  # 卡片边框
         "brand_soft": "#243C54",  # 插件行边框
         "brand_ghost": "#16283E",  # disabled 行背景
-        # 分类主题色
-        "cat_AI": "#57CDE3",
-        "cat_工具": "#4A7FB5",
-        "cat_管理": "#1F3A5F",
-        "cat_娱乐": "#8AE6E1",
-        "cat_查询": "#FFE08A",
-        "cat_其他": "#6B88A3",
-        "cat_资讯": "#A8D8F0",
-        "cat_调试": "#5B7EA3",
+        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底, 1~7=默认分类, 8~9 备用
+        "cat_slot_0": "#6B88A3",
+        "cat_slot_1": "#57CDE3",
+        "cat_slot_2": "#FFE08A",
+        "cat_slot_3": "#4A7FB5",
+        "cat_slot_4": "#1F3A5F",
+        "cat_slot_5": "#8AE6E1",
+        "cat_slot_6": "#A8D8F0",
+        "cat_slot_7": "#5B7EA3",
+        "cat_slot_8": "#FFD54A",
+        "cat_slot_9": "#C084FC",
         # 通用颜色
         "page_fill": "#0E1E31",
         "c_plugin_name": "#D8E6F5",
@@ -359,15 +263,17 @@ class DefaultCFG:
         "brand_border": "#D7E6EC",  # 卡片边框
         "brand_soft": "#E2EBEF",  # 插件行边框
         "brand_ghost": "#EEF2F4",  # disabled 行背景
-        # 分类主题色
-        "cat_AI": "#8FC6D8",
-        "cat_工具": "#6FA3B8",
-        "cat_管理": "#5C7086",
-        "cat_娱乐": "#A8DCD8",
-        "cat_查询": "#E5D3A8",
-        "cat_其他": "#8A98A6",
-        "cat_资讯": "#B0C6D4",
-        "cat_调试": "#7A8FA6",
+        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底, 1~7=默认分类, 8~9 备用
+        "cat_slot_0": "#8A98A6",
+        "cat_slot_1": "#8FC6D8",
+        "cat_slot_2": "#E5D3A8",
+        "cat_slot_3": "#6FA3B8",
+        "cat_slot_4": "#5C7086",
+        "cat_slot_5": "#A8DCD8",
+        "cat_slot_6": "#B0C6D4",
+        "cat_slot_7": "#7A8FA6",
+        "cat_slot_8": "#D9BE7E",
+        "cat_slot_9": "#3C4652",
         # 通用颜色
         "page_fill": "#F2F7F9",
         "c_plugin_name": "#5C7086",
@@ -413,15 +319,17 @@ class DefaultCFG:
         "brand_border": "#D8F0F8",  # 卡片边框
         "brand_soft": "#E3F3F9",  # 插件行边框
         "brand_ghost": "#F1F8FB",  # disabled 行背景
-        # 分类主题色
-        "cat_AI": "#22C8E8",
-        "cat_工具": "#4A90E2",
-        "cat_管理": "#1E3A7A",
-        "cat_娱乐": "#2FE0D0",
-        "cat_查询": "#FFD54A",
-        "cat_其他": "#7C8AA0",
-        "cat_资讯": "#B3F0FA",
-        "cat_调试": "#5B7DB5",
+        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底, 1~7=默认分类, 8~9 备用
+        "cat_slot_0": "#7C8AA0",
+        "cat_slot_1": "#22C8E8",
+        "cat_slot_2": "#FFD54A",
+        "cat_slot_3": "#4A90E2",
+        "cat_slot_4": "#1E3A7A",
+        "cat_slot_5": "#2FE0D0",
+        "cat_slot_6": "#B3F0FA",
+        "cat_slot_7": "#5B7DB5",
+        "cat_slot_8": "#FF5252",
+        "cat_slot_9": "#1A2438",
         # 通用颜色
         "page_fill": "#F2FBFF",
         "c_plugin_name": "#1E3A7A",
@@ -467,15 +375,17 @@ class DefaultCFG:
         "brand_border": "#ECE9E4",  # 卡片边框
         "brand_soft": "#F0EDE8",  # 插件行边框
         "brand_ghost": "#F6F5F3",  # disabled 行背景
-        # 分类主题色
-        "cat_AI": "#F16B86",
-        "cat_工具": "#FFB84D",
-        "cat_管理": "#B45BC5",
-        "cat_娱乐": "#4DBCE8",
-        "cat_查询": "#A8D77A",
-        "cat_其他": "#4DB5AD",
-        "cat_资讯": "#E97878",
-        "cat_调试": "#F36F88",
+        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底, 1~7=默认分类, 8~9 备用
+        "cat_slot_0": "#4DB5AD",
+        "cat_slot_1": "#F16B86",
+        "cat_slot_2": "#A8D77A",
+        "cat_slot_3": "#FFB84D",
+        "cat_slot_4": "#B45BC5",
+        "cat_slot_5": "#4DBCE8",
+        "cat_slot_6": "#E97878",
+        "cat_slot_7": "#F36F88",
+        "cat_slot_8": "#E1BEE7",
+        "cat_slot_9": "#FADE86",
         # 通用颜色
         "page_fill": "#FAF9F7",
         "c_plugin_name": "#0d47a1",
@@ -514,6 +424,138 @@ class DefaultCFG:
         "Vivid Pop": VIVID_POP_COLORS,
         "zhenxun": ZHENXUN_COLORS,
     }
+
+    # 6. 插件分类规则 (指令模式 /helps 分类卡片)
+    # 默认分类关键词映射: 作为设置面板 category.rules 的预置默认值导入, 用户可自由增删改。
+    # 列表顺序即匹配优先级 (命中第一个匹配的分类即归入), 全部未命中时归入兜底分类。
+    DEFAULT_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+        "AI": [
+            "ai",
+            "llm",
+            "模型",
+            "gpt",
+            "大模型",
+            "对话",
+            "智能",
+            "画图",
+            "绘图",
+            "文生图",
+            "图像",
+            "绘画",
+            "image",
+            "diffusion",
+        ],
+        "查询": [
+            "查询",
+            "搜索",
+            "百科",
+            "词典",
+            "翻译",
+            "天气",
+            "汇率",
+            "快递",
+            "新闻",
+            "热搜",
+            "日历",
+            "黄历",
+            "search",
+            "query",
+            "wiki",
+            "translate",
+            "weather",
+        ],
+        "工具": [
+            "工具",
+            "计算",
+            "转换",
+            "二维码",
+            "短链",
+            "短网址",
+            "解析",
+            "压缩",
+            "编码",
+            "tool",
+            "qrcode",
+        ],
+        "管理": [
+            "管理",
+            "群管",
+            "禁言",
+            "踢人",
+            "审核",
+            "权限",
+            "撤回",
+            "违禁词",
+            "黑名单",
+            "风控",
+            "admin",
+            "ban",
+        ],
+        "娱乐": [
+            "娱乐",
+            "游戏",
+            "抽奖",
+            "点歌",
+            "音乐",
+            "笑话",
+            "梗图",
+            "表情包",
+            "随机",
+            "运势",
+            "签到",
+            "塔罗",
+            "占卜",
+            "骰子",
+            "game",
+            "music",
+        ],
+        "资讯": [
+            "资讯",
+            "订阅",
+            "推送",
+            "通知",
+            "提醒",
+            "播报",
+            "监控",
+            "rss",
+            "news",
+            "feed",
+        ],
+        "调试": [
+            "调试",
+            "开发",
+            "测试",
+            "日志",
+            "诊断",
+            "debug",
+            "dev",
+        ],
+    }
+
+    # 兜底分类名 (设置面板 category.fallback 的缺省值; 与 InternalCFG.CATEGORY_FALLBACK 保持一致)
+    DEFAULT_CATEGORY_FALLBACK: str = InternalCFG.CATEGORY_FALLBACK
+
+    # 兜底分类颜色 (设置面板 category.fallback_color 的缺省值): 绑定主题色槽 slot_0
+    # (槽位 0 即原「其他」分类色, 随主题切换变化; 用户可改为其它 slot_N 或固定 #RRGGBB)
+    DEFAULT_CATEGORY_FALLBACK_COLOR: str = "slot_0"
+
+    # 默认分类 → 主题色槽绑定 (预置规则随默认配置导入, 用户可自由修改):
+    # 与各主题 cat_slot_1~7 的槽位顺序一致, 保证 zhenxun 主题下默认分类保持原配色
+    DEFAULT_CATEGORY_SLOT_BINDINGS: dict[str, str] = {
+        "AI": "slot_1",
+        "查询": "slot_2",
+        "工具": "slot_3",
+        "管理": "slot_4",
+        "娱乐": "slot_5",
+        "资讯": "slot_6",
+        "调试": "slot_7",
+    }
+
+    # 默认主题色槽 (zhenxun 的 cat_slot_0~9): 主题未定义任何色槽时的兜底色板
+    # (类体内不能用推导式引用类属性, 故用普通循环)
+    DEFAULT_CATEGORY_SLOTS: list[str] = []
+    for _slot_i in range(0, 10):
+        DEFAULT_CATEGORY_SLOTS.append(ZHENXUN_COLORS[f"cat_slot_{_slot_i}"])
 
     # 默认激活的预设名
     DEFAULT_PRESET: str = "zhenxun"

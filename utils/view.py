@@ -386,28 +386,100 @@ class TypstLayout:
                 )
         return cmds
 
+    def _category_color(self, name: str) -> str:
+        """解析分类卡片主题色 (统一走主题色槽, 降级链):
+
+        1. 规则内固定色 (#RRGGBB, 不随主题变化)
+        2. 规则内主题色槽绑定 (slot_N → 主题 cat_slot_N, 随主题切换自动变化)
+        3. 兜底分类 (名称等于 category.fallback): 使用兜底分类颜色 (fallback_color)
+        4. 自动分配: 未配置颜色的规则按列表顺序循环取主题色槽 (随主题切换)
+        5. 灰蓝 #808E9D
+        """
+        rule = self.cfg.category.get_rule(name)
+
+        # 1. 固定色覆盖
+        if rule and rule.color.startswith("#"):
+            return rule.color
+
+        # 2. 主题色槽绑定 (无效/越界 → 继续降级, 最终灰蓝)
+        if rule and rule.color.startswith("slot_"):
+            idx_str = rule.color[5:]
+            if idx_str.isdigit():
+                slots = self.cfg.appearance.get_category_slots()
+                n = int(idx_str)
+                if 0 <= n < len(slots):
+                    return slots[n]
+
+        # 3. 兜底分类: 使用兜底分类颜色
+        if name in (self.cfg.category.fallback, InternalCFG.CATEGORY_FALLBACK):
+            return self._fallback_color()
+
+        # 4. 自动分配主题色槽 (仅未配置颜色的规则)
+        auto = self._auto_category_slot(name)
+        if auto:
+            return auto
+
+        # 5. 灰蓝兜底
+        return "#808E9D"
+
+    def _fallback_color(self) -> str:
+        """兜底分类卡片颜色: 优先 category.fallback_color (hex 固定 / slot_N 随主题), 缺省灰蓝"""
+        fc = self.cfg.category.fallback_color
+        if fc.startswith("#"):
+            return fc
+        if fc.startswith("slot_"):
+            idx_str = fc[5:]
+            if idx_str.isdigit():
+                slots = self.cfg.appearance.get_category_slots()
+                n = int(idx_str)
+                if 0 <= n < len(slots):
+                    return slots[n]
+        return "#808E9D"
+
+    def _auto_category_slot(self, name: str) -> str:
+        """自动分配主题色槽: 按规则列表顺序, 仅计「未配置颜色且非兜底分类」的启用规则
+
+        主题色槽随激活预设切换变化, 分类因此能自动跟随主题换色。
+        """
+        slots = self.cfg.appearance.get_category_slots()
+        if not slots:
+            return ""
+        fallback = self.cfg.category.fallback
+
+        order_idx = 0
+        for rule in self.cfg.category.rules:
+            if not rule.enabled:
+                continue  # 停用规则不参与
+            if rule.color:
+                continue  # 固定色/槽位绑定不占自动序号
+            if rule.name in (fallback, InternalCFG.CATEGORY_FALLBACK):
+                continue  # 兜底分类不占自动序号 (使用兜底分类颜色)
+            if rule.name == name:
+                return slots[order_idx % len(slots)]
+            order_idx += 1
+        return ""
+
     def _group_by_category_detail(
         self, plugins: list[PluginMetadata]
     ) -> list[dict[str, Any]]:
         """将插件按分类聚合, 输出分类卡片数据, 每个插件附带能力树信息。"""
+        fallback = self.cfg.category.fallback
+
         grouped: dict[str, list[PluginMetadata]] = {}
         for p in plugins:
-            cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
+            cat = (p.category or "").strip() or fallback
             grouped.setdefault(cat, []).append(p)
 
         # 分类排序: 名称升序, 兜底分类置底
         names = sorted(grouped.keys())
-        if InternalCFG.CATEGORY_FALLBACK in names:
-            names.remove(InternalCFG.CATEGORY_FALLBACK)
-            names.append(InternalCFG.CATEGORY_FALLBACK)
+        if fallback in names:
+            names.remove(fallback)
+            names.append(fallback)
 
         categories = []
-        cat_colors = self.cfg.appearance.get_active_category_colors()
         for name in names:
             plist = sorted(grouped[name], key=lambda x: x.order)
-            theme_color = cat_colors.get(
-                name, cat_colors.get(InternalCFG.CATEGORY_FALLBACK, "#808E9D")
-            )
+            theme_color = self._category_color(name)
             categories.append(
                 {
                     "name": name,
@@ -451,11 +523,8 @@ class TypstLayout:
         admin_commands, normal_commands = self._flatten_commands(p.nodes)
 
         # 插件分类主题色 (与 /helps 分类卡片一致, 供详情页标题着色)
-        cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
-        cat_colors = self.cfg.appearance.get_active_category_colors()
-        category_color = cat_colors.get(
-            cat, cat_colors.get(InternalCFG.CATEGORY_FALLBACK, "#808E9D")
-        )
+        cat = (p.category or "").strip() or self.cfg.category.fallback
+        category_color = self._category_color(cat)
 
         return {
             "title": title,
@@ -520,27 +589,25 @@ class TypstLayout:
 
     def _group_by_category(self, plugins: list[PluginMetadata]) -> list[dict[str, Any]]:
         """将插件按分类聚合, 输出分类卡片数据 (含主题色与全局序号徽章)"""
+        fallback = self.cfg.category.fallback
+
         grouped: dict[str, list[PluginMetadata]] = {}
         for p in plugins:
-            cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
+            cat = (p.category or "").strip() or fallback
             grouped.setdefault(cat, []).append(p)
 
         # 分类排序: 名称升序, 兜底分类置底
         names = sorted(grouped.keys())
-        if InternalCFG.CATEGORY_FALLBACK in names:
-            names.remove(InternalCFG.CATEGORY_FALLBACK)
-            names.append(InternalCFG.CATEGORY_FALLBACK)
+        if fallback in names:
+            names.remove(fallback)
+            names.append(fallback)
 
         categories = []
-        # 分类色板随激活预设切换 (cat_* 键)
-        cat_colors = self.cfg.appearance.get_active_category_colors()
         for name in names:
             # 插件按全局编号排序, 保持与全量列表一致的展示顺序
             plist = sorted(grouped[name], key=lambda x: x.order)
-            # 分类色按名称固定映射 (来自激活预设的 cat_* 配色)
-            theme_color = cat_colors.get(
-                name, cat_colors.get(InternalCFG.CATEGORY_FALLBACK, "#808E9D")
-            )
+            # 分类色解析: 规则自带颜色 → 激活预设 cat_* 色板 → 灰蓝兜底
+            theme_color = self._category_color(name)
             categories.append(
                 {
                     "name": name,

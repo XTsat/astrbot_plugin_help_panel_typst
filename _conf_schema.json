@@ -50,6 +50,205 @@
     "default": true,
     "hint": "默认开启。开启且存在背景图时，顶部变为 Hero 品牌横幅：左侧大号两行 Astrbot/Bot 标题 + 左下统计卡片，右侧预留给背景图角色；关闭后恢复经典白色卡片布局"
   },
+  "category": {
+    "description": "插件分类规则",
+    "type": "object",
+    "items": {
+      "fallback": {
+        "description": "兜底分类名",
+        "type": "string",
+        "default": "其他",
+        "hint": "未命中任何关键词的插件统一归入此分类；独立于规则列表单独配置，始终存在（保底），可自由改名"
+      },
+      "fallback_color": {
+        "description": "兜底分类颜色",
+        "type": "string",
+        "default": "slot_0",
+        "hint": "兜底分类卡片标题栏颜色：留空为默认值 slot_0（绑定主题色槽，随主题切换变化）；填 slot_N 绑定其它主题色槽；填 #RRGGBB 固定颜色（不随主题）；非法值回退灰蓝"
+      },
+      "rules": {
+        "description": "分类规则列表",
+        "type": "template_list",
+        "default": [
+          {
+            "__template_key": "standard_category",
+            "category_name": "AI",
+            "enabled": true,
+            "color": "slot_1",
+            "keywords": [
+              "ai",
+              "llm",
+              "模型",
+              "gpt",
+              "大模型",
+              "对话",
+              "智能",
+              "画图",
+              "绘图",
+              "文生图",
+              "图像",
+              "绘画",
+              "image",
+              "diffusion"
+            ]
+          },
+          {
+            "__template_key": "standard_category",
+            "category_name": "查询",
+            "enabled": true,
+            "color": "slot_2",
+            "keywords": [
+              "查询",
+              "搜索",
+              "百科",
+              "词典",
+              "翻译",
+              "天气",
+              "汇率",
+              "快递",
+              "新闻",
+              "热搜",
+              "日历",
+              "黄历",
+              "search",
+              "query",
+              "wiki",
+              "translate",
+              "weather"
+            ]
+          },
+          {
+            "__template_key": "standard_category",
+            "category_name": "工具",
+            "enabled": true,
+            "color": "slot_3",
+            "keywords": [
+              "工具",
+              "计算",
+              "转换",
+              "二维码",
+              "短链",
+              "短网址",
+              "解析",
+              "压缩",
+              "编码",
+              "tool",
+              "qrcode"
+            ]
+          },
+          {
+            "__template_key": "standard_category",
+            "category_name": "管理",
+            "enabled": true,
+            "color": "slot_4",
+            "keywords": [
+              "管理",
+              "群管",
+              "禁言",
+              "踢人",
+              "审核",
+              "权限",
+              "撤回",
+              "违禁词",
+              "黑名单",
+              "风控",
+              "admin",
+              "ban"
+            ]
+          },
+          {
+            "__template_key": "standard_category",
+            "category_name": "娱乐",
+            "enabled": true,
+            "color": "slot_5",
+            "keywords": [
+              "娱乐",
+              "游戏",
+              "抽奖",
+              "点歌",
+              "音乐",
+              "笑话",
+              "梗图",
+              "表情包",
+              "随机",
+              "运势",
+              "签到",
+              "塔罗",
+              "占卜",
+              "骰子",
+              "game",
+              "music"
+            ]
+          },
+          {
+            "__template_key": "standard_category",
+            "category_name": "资讯",
+            "enabled": true,
+            "color": "slot_6",
+            "keywords": [
+              "资讯",
+              "订阅",
+              "推送",
+              "通知",
+              "提醒",
+              "播报",
+              "监控",
+              "rss",
+              "news",
+              "feed"
+            ]
+          },
+          {
+            "__template_key": "standard_category",
+            "category_name": "调试",
+            "enabled": true,
+            "color": "slot_7",
+            "keywords": [
+              "调试",
+              "开发",
+              "测试",
+              "日志",
+              "诊断",
+              "debug",
+              "dev"
+            ]
+          }
+        ],
+        "templates": {
+          "standard_category": {
+            "name": "自定义分类",
+            "items": {
+              "category_name": {
+                "description": "分类名称 (ID)",
+                "type": "string",
+                "default": "新分类",
+                "hint": "分类卡片标题，也是插件归类的分组名"
+              },
+              "enabled": {
+                "description": "启用此规则",
+                "type": "bool",
+                "default": true,
+                "hint": "关闭后该规则不参与匹配（临时停用无需删除）"
+              },
+              "keywords": {
+                "description": "匹配关键词",
+                "type": "list",
+                "default": [],
+                "hint": "插件描述/名称/展示名/标签中出现任一关键词即归入本分类（大小写不敏感，支持中英文）"
+              },
+              "color": {
+                "description": "分类主题色",
+                "type": "string",
+                "default": "slot_8",
+                "hint": "默认绑定备用色槽 slot_8（随主题换色）；可改其它 slot_0~slot_9 或固定 #RRGGBB；留空则按列表顺序自动分配"
+              }
+            },
+            "display_item": "category_name"
+          }
+        }
+      }
+    }
+  },
   "rendering": {
     "description": "渲染引擎设置",
     "type": "object",
@@ -173,14 +372,16 @@
             "brand_border": "#ECE9E4",
             "brand_soft": "#F0EDE8",
             "brand_ghost": "#F6F5F3",
-            "cat_AI": "#F16B86",
-            "cat_工具": "#FFB84D",
-            "cat_管理": "#B45BC5",
-            "cat_娱乐": "#4DBCE8",
-            "cat_查询": "#A8D77A",
-            "cat_其他": "#4DB5AD",
-            "cat_资讯": "#E97878",
-            "cat_调试": "#F36F88",
+            "cat_slot_0": "#4DB5AD",
+            "cat_slot_1": "#F16B86",
+            "cat_slot_2": "#A8D77A",
+            "cat_slot_3": "#FFB84D",
+            "cat_slot_4": "#B45BC5",
+            "cat_slot_5": "#4DBCE8",
+            "cat_slot_6": "#E97878",
+            "cat_slot_7": "#F36F88",
+            "cat_slot_8": "#E1BEE7",
+            "cat_slot_9": "#FADE86",
             "page_fill": "#FAF9F7",
             "c_plugin_name": "#0d47a1",
             "c_plugin_id": "#546e7a",
@@ -309,51 +510,61 @@
                 "type": "string",
                 "default": "#F3F6F7"
               },
-              "header_cat": {
-                "description": "🗂️ 分类主题色",
+              "header_cat_slot": {
+                "description": "🎨 通用分类色槽",
                 "type": "string",
                 "default": "---",
                 "read_only": true
               },
-              "cat_AI": {
-                "description": "分类「AI」主题色",
-                "type": "string",
-                "default": "#57CDE3"
-              },
-              "cat_工具": {
-                "description": "分类「工具」主题色",
-                "type": "string",
-                "default": "#2E9BB8"
-              },
-              "cat_管理": {
-                "description": "分类「管理」主题色",
-                "type": "string",
-                "default": "#355A81"
-              },
-              "cat_娱乐": {
-                "description": "分类「娱乐」主题色",
-                "type": "string",
-                "default": "#8AE6E1"
-              },
-              "cat_查询": {
-                "description": "分类「查询」主题色",
-                "type": "string",
-                "default": "#FADE86"
-              },
-              "cat_其他": {
-                "description": "分类「其他」主题色",
+              "cat_slot_0": {
+                "description": "色槽 0",
                 "type": "string",
                 "default": "#808E9D"
               },
-              "cat_资讯": {
-                "description": "分类「资讯」主题色",
+              "cat_slot_1": {
+                "description": "色槽 1",
+                "type": "string",
+                "default": "#57CDE3"
+              },
+              "cat_slot_2": {
+                "description": "色槽 2",
+                "type": "string",
+                "default": "#FADE86"
+              },
+              "cat_slot_3": {
+                "description": "色槽 3",
+                "type": "string",
+                "default": "#2E9BB8"
+              },
+              "cat_slot_4": {
+                "description": "色槽 4",
+                "type": "string",
+                "default": "#355A81"
+              },
+              "cat_slot_5": {
+                "description": "色槽 5",
+                "type": "string",
+                "default": "#8AE6E1"
+              },
+              "cat_slot_6": {
+                "description": "色槽 6",
                 "type": "string",
                 "default": "#A8E9F2"
               },
-              "cat_调试": {
-                "description": "分类「调试」主题色",
+              "cat_slot_7": {
+                "description": "色槽 7",
                 "type": "string",
                 "default": "#6C8CA8"
+              },
+              "cat_slot_8": {
+                "description": "色槽 8",
+                "type": "string",
+                "default": "#F0C14B"
+              },
+              "cat_slot_9": {
+                "description": "色槽 9",
+                "type": "string",
+                "default": "#2E2E35"
               },
               "header_002": {
                 "description": "🧩 插件卡片样式",

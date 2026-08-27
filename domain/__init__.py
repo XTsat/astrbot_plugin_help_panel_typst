@@ -4,6 +4,8 @@ from .config import (
     RenderingConfig,
     ThemePreset,
     AppearanceConfig,
+    CategoryRule,
+    CategoryConfig,
     TypstPluginConfig,
 )
 
@@ -16,5 +18,7 @@ __all__ = [
     "RenderingConfig",
     "ThemePreset",
     "AppearanceConfig",
+    "CategoryRule",
+    "CategoryConfig",
     "TypstPluginConfig",
 ]
