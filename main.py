@@ -280,6 +280,15 @@ class HelpTypst(Star):
             else:
                 display_title = f'搜索结果: "{query}"' if query else title
                 layout_mode = mode
+                # 详细指令模式: 为每个插件附加事件监听器
+                if layout_mode == "command_detail":
+                    for p in plugins:
+                        try:
+                            p.event_nodes = (
+                                self.evt_analyzer.get_plugin_event_listeners(p.name)
+                            )
+                        except Exception:
+                            p.event_nodes = []
 
             user_fonts = (
                 self.plugin_config.appearance.get_active_font_order()
@@ -372,6 +381,20 @@ class HelpTypst(Star):
         keyword, is_detail = self._parse_menu_query(query)
         async for r in self._handle_request(
             event, self.cmd_analyzer, "AstrBot 指令菜单", "command", keyword, is_detail
+        ):
+            yield r
+
+    @filter.command("helpss", alias={"详细帮助", "详细功能", "详细菜单"})
+    async def show_menu_detail(self, event: AstrMessageEvent, query: GreedyStr):
+        """显示详细指令菜单 (含指令标签组)"""
+        keyword, is_detail = self._parse_menu_query(query)
+        async for r in self._handle_request(
+            event,
+            self.cmd_analyzer,
+            "AstrBot 指令菜单(详细)",
+            "command_detail",
+            keyword,
+            is_detail,
         ):
             yield r
 

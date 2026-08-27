@@ -42,6 +42,12 @@ class RenderNode(BaseModel):
     is_group: bool = Field(default=False, description="是否为容器/分组")
     tag: str = Field(default="normal", description="标记类型: normal/admin/event")
     priority: int | None = Field(default=None, description="事件监听优先级")
+    aliases: list[str] = Field(
+        default_factory=list, description="指令别名列表 (来自 CommandFilter.alias)"
+    )
+    params: str = Field(
+        default="", description="指令参数占位符 (如 '?' 表示 GreedyStr)"
+    )
 
     # 事件监听器命令提取 (插件详情页展示命令关键词)
     commands: list[str] = Field(

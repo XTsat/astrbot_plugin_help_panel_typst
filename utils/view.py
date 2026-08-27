@@ -183,6 +183,11 @@ class TypstLayout:
         # 指令模式: 按分类分组, 渲染为分类卡片 (Zhenxun 风格)
         if mode == "command":
             return self._generate_command_payload(plugins, title, prefixes, font_list)
+        # 详细指令模式: 分类卡片 + 每个插件下方展示指令标签组
+        if mode == "command_detail":
+            return self._generate_command_detail_payload(
+                plugins, title, prefixes, font_list
+            )
 
         giants = []
         complex_plugins = []
@@ -276,6 +281,154 @@ class TypstLayout:
             "category_count": len(categories),
             "category_columns": cols,
         }
+
+    def _generate_command_detail_payload(
+        self,
+        plugins: list[PluginMetadata],
+        title: str,
+        prefixes: list[str],
+        font_list: list[str],
+    ) -> dict[str, Any]:
+        """详细指令模式: 分类卡片 + 每个插件展示能力树 (指令/指令组/监听器)"""
+        categories = self._group_by_category_detail(plugins)
+        cols = self._balance_categories(categories, detail=True)
+
+        return {
+            "title": title,
+            "mode": "command_detail",
+            "prefixes": prefixes,
+            "fonts": font_list,
+            "plugin_count": len(plugins),
+            "enabled_count": sum(1 for p in plugins if not p.disabled),
+            "category_count": len(categories),
+            "category_columns": cols,
+        }
+
+    def _build_plugin_capabilities(
+        self, plugin: PluginMetadata
+    ) -> dict[str, Any]:
+        """构建插件能力树。
+
+        返回:
+          {
+            "commands": [{"name", "aliases", "params"}],  # 顶层独立指令
+            "groups": [{"name", "commands": [...]}],        # 指令组
+            "listeners": [str, ...]                         # 监听器提取的指令关键词
+          }
+        """
+        commands: list[dict[str, Any]] = []
+        groups: list[dict[str, Any]] = []
+        for node in plugin.nodes:
+            if node.is_group:
+                # 指令组: 递归收集所有子指令
+                group_cmds = self._collect_group_commands(
+                    node.children, prefix=""
+                )
+                if group_cmds:
+                    groups.append(
+                        {
+                            "name": node.name,
+                            "desc": node.desc or "",
+                            "commands": group_cmds,
+                        }
+                    )
+            else:
+                # 顶层独立指令
+                params = node.params or ""
+                chip_name = f"{node.name} {params}".strip() if params else node.name
+                commands.append(
+                    {
+                        "name": chip_name,
+                        "aliases": list(node.aliases or []),
+                        "params": params,
+                        "desc": node.desc or "",
+                    }
+                )
+
+        # 监听器: 只提取指令关键词 (来自事件监听器 desc 中的命令列表)
+        listeners: list[str] = []
+        for en in plugin.event_nodes:
+            for cmd in list(en.commands or []):
+                if cmd not in listeners:
+                    listeners.append(cmd)
+
+        # 排除空字段
+        result: dict[str, Any] = {}
+        if commands:
+            result["commands"] = commands
+        if groups:
+            result["groups"] = groups
+        if listeners:
+            result["listeners"] = listeners
+        return result
+
+    def _collect_group_commands(
+        self, nodes: list[RenderNode], prefix: str = ""
+    ) -> list[dict[str, Any]]:
+        """递归收集指令组内的所有子指令 (扁平列表, 不含嵌套组)。"""
+        cmds: list[dict[str, Any]] = []
+        for node in nodes:
+            if node.is_group:
+                # 嵌套组: 递归, 用组名作为前缀
+                child_prefix = f"{prefix} {node.name}".strip() if prefix else node.name
+                cmds.extend(self._collect_group_commands(node.children, child_prefix))
+            else:
+                full_name = f"{prefix} {node.name}".strip() if prefix else node.name
+                params = node.params or ""
+                chip_name = f"{full_name} {params}".strip() if params else full_name
+                cmds.append(
+                    {
+                        "name": chip_name,
+                        "aliases": list(node.aliases or []),
+                        "params": params,
+                        "desc": node.desc or "",
+                    }
+                )
+        return cmds
+
+    def _group_by_category_detail(
+        self, plugins: list[PluginMetadata]
+    ) -> list[dict[str, Any]]:
+        """将插件按分类聚合, 输出分类卡片数据, 每个插件附带能力树信息。"""
+        grouped: dict[str, list[PluginMetadata]] = {}
+        for p in plugins:
+            cat = (p.category or "").strip() or InternalCFG.CATEGORY_FALLBACK
+            grouped.setdefault(cat, []).append(p)
+
+        # 分类排序: 名称升序, 兜底分类置底
+        names = sorted(grouped.keys())
+        if InternalCFG.CATEGORY_FALLBACK in names:
+            names.remove(InternalCFG.CATEGORY_FALLBACK)
+            names.append(InternalCFG.CATEGORY_FALLBACK)
+
+        categories = []
+        cat_colors = self.cfg.appearance.get_active_category_colors()
+        for name in names:
+            plist = sorted(grouped[name], key=lambda x: x.order)
+            theme_color = cat_colors.get(
+                name, cat_colors.get(InternalCFG.CATEGORY_FALLBACK, "#808E9D")
+            )
+            categories.append(
+                {
+                    "name": name,
+                    "count": len(plist),
+                    "color": theme_color,
+                    "text_color": "#355A81",
+                    "plugins": [
+                        {
+                            "id": p.order,
+                            "name": p.name,
+                            "display_name": p.display_name,
+                            "version": p.version,
+                            "disabled": p.disabled,
+                            "desc": p.desc,
+                            "capabilities": self._build_plugin_capabilities(p),
+                        }
+                        for p in plist
+                    ],
+                }
+            )
+        return categories
 
     def _generate_plugin_detail_payload(
         self,
@@ -410,15 +563,16 @@ class TypstLayout:
         return categories
 
     def _balance_categories(
-        self, categories: list[dict[str, Any]]
+        self, categories: list[dict[str, Any]], detail: bool = False
     ) -> list[list[dict[str, Any]]]:
         """将分类卡片按估算高度分配到 2 列, 使两列高度接近
 
         分类数量通常很少 (<20), 采用子集和 DP 求最接近等高的一列, 而非贪心。
         估算高度已计入卡片固定开销、插件盒子与卡片间距, 见 _estimate_category_height。
+        detail=True 时使用更激进的高度估算, 为详细指令模式的指令标签组预留空间。
         """
         n = len(categories)
-        heights = [self._estimate_category_height(c) for c in categories]
+        heights = [self._estimate_category_height(c, detail) for c in categories]
         total = sum(heights)
         target = total // 2
 
@@ -457,23 +611,28 @@ class TypstLayout:
         col2 = [categories[i] for i in range(n) if i not in col1_idx]
 
         # 保证较高的列放在左侧, 视觉更稳定
-        h1 = sum(self._estimate_category_height(c) for c in col1)
-        h2 = sum(self._estimate_category_height(c) for c in col2)
+        h1 = sum(self._estimate_category_height(c, detail) for c in col1)
+        h2 = sum(self._estimate_category_height(c, detail) for c in col2)
         if h1 >= h2:
             return [col1, col2]
         return [col2, col1]
 
-    def _estimate_category_height(self, cat: dict[str, Any]) -> int:
+    def _estimate_category_height(self, cat: dict[str, Any], detail: bool = False) -> int:
         """估算单个分类卡片在列内占用的高度 (pt)
 
         与模板 category_card 的 spacing 保持近似:
           固定开销 = 彩色头部 + 列表 padding + 边框/阴影 + 卡片间距
           每插件   = 独立边框盒子 + 盒子间距 (最后一个盒子无间距, 误差忽略)
+
+        detail=True 时指令标签组使每个插件条目变高, 估算值随之放大。
         """
         count = int(cat.get("count", 0))
-        return (
-            InternalCFG.CATEGORY_HEADER_HEIGHT + count * InternalCFG.CATEGORY_ROW_HEIGHT
+        row_height = (
+            InternalCFG.CATEGORY_ROW_HEIGHT_DETAIL
+            if detail
+            else InternalCFG.CATEGORY_ROW_HEIGHT
         )
+        return InternalCFG.CATEGORY_HEADER_HEIGHT + count * row_height
 
     def _estimate_height(self, nodes: list[RenderNode]) -> int:
         """高度估算器(暂硬编码，等待完善模板逻辑)"""

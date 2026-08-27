@@ -9,6 +9,7 @@ class InternalCFG:
     # 映射
     CACHE_FILES: dict[str, str] = {
         "command": "cache_menu_command",
+        "command_detail": "cache_menu_command_detail",
         "event": "cache_menu_event",
         "filter": "cache_menu_filter",
     }
@@ -169,6 +170,8 @@ class InternalCFG:
     CATEGORY_HEADER_HEIGHT: int = 70
     # 单个插件盒子(含盒子间距 8pt) 的高度
     CATEGORY_ROW_HEIGHT: int = 36
+    # 详细指令模式: 单个插件盒子的估算高度 (含指令标签组, 约 2-3 行)
+    CATEGORY_ROW_HEIGHT_DETAIL: int = 80
 
     # 禁用插件灰化色板 (主题无关的固定值, 供 /helps 指令菜单灰化展示)
     DISABLED_COLORS: dict[str, str] = {

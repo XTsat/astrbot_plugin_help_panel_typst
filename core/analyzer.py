@@ -423,7 +423,12 @@ class CommandAnalyzer(BaseAnalyzer):
 
         if isinstance(filter_obj, CommandFilter):
             return RenderNode(
-                name=filter_obj.command_name, desc=desc, is_group=False, tag=tag
+                name=filter_obj.command_name,
+                desc=desc,
+                is_group=False,
+                tag=tag,
+                aliases=self._get_command_aliases(filter_obj),
+                params=self._get_command_params(handler),
             )
 
         elif isinstance(filter_obj, CommandGroupFilter):
@@ -452,6 +457,8 @@ class CommandAnalyzer(BaseAnalyzer):
             desc=desc,
             is_group=False,
             tag=self._check_permission(handler),
+            aliases=self._get_command_aliases(cmd_filter),
+            params=self._get_command_params(handler),
         )
 
     def _sort_nodes(self, nodes: list[RenderNode]):
@@ -482,6 +489,48 @@ class CommandAnalyzer(BaseAnalyzer):
             return ""
         raw = getattr(handler, "desc", "") or ""
         return raw.split("\n")[0].strip()
+
+    def _get_command_aliases(self, cmd_filter: CommandFilter) -> list[str]:
+        """安全地从 CommandFilter 中提取别名列表。
+
+        AstrBot 的 @filter.command("name", alias={...}) 将别名集存储在
+        CommandFilter.alias 属性中。使用 getattr 兜底兼容旧版本。
+        """
+        raw = getattr(cmd_filter, "alias", None)
+        if raw is None:
+            return []
+        if isinstance(raw, (set, tuple, list)):
+            return [str(a) for a in raw if a]
+        if isinstance(raw, str):
+            return [raw]
+        return []
+
+    def _get_command_params(self, handler: Any) -> str:
+        """从 handler 签名中提取指令参数占位符。
+
+        支持 AstrBot 常见参数类型注解:
+          GreedyStr / Str → "?" (可跟任意参数)
+        其余类型或无注解 → "" (无参数占位提示)
+
+        参数顺序: 方法签名一般为 (self, event, *args), 从第 3 个参数开始检查。
+        """
+        func = getattr(handler, "handler", None)
+        if func is None:
+            return ""
+        try:
+            import inspect
+
+            sig = inspect.signature(func)
+            params = list(sig.parameters.values())
+            for p in params[2:]:
+                ann = p.annotation
+                ann_name = getattr(ann, "__name__", None)
+                if ann_name in ("GreedyStr", "Str"):
+                    return "?"
+            return ""
+        except (ValueError, TypeError):
+            # 某些内置 handler 无法解析签名, 忽略参数提取
+            return ""
 
 
 class EventAnalyzer(BaseAnalyzer):

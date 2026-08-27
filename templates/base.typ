@@ -496,9 +496,223 @@
 }
 
 // ============================================================
-// 分类卡片
+// 详细指令模式: 能力树组件
 // ============================================================
-#let category_card(cat) = {
+
+// --- 能力分区标题 ---
+#let section_label(icon, text_str) = {
+  block(inset: (bottom: 2pt))[
+    #grid(
+      columns: (auto, 1fr), gutter: 4pt,
+      align(left + horizon)[
+        #text(size: 9pt, fill: c_gray, weight: "bold")[#icon #text_str]
+      ],
+      align(left + horizon)[
+        #line(length: 100%, stroke: 0.5pt + c_soft)
+      ],
+    )
+  ]
+}
+
+// --- 指令 Chip (主指令, 带强调色) ---
+#let cmd_chip_detail(name, accent, disabled: false) = {
+  let is_light_theme = is_light(c_card)
+  let chip_bg = if disabled {
+    c_dis_card_bg
+  } else if is_light_theme {
+    accent.lighten(80%)
+  } else {
+    accent.darken(45%)
+  }
+  let chip_text = if disabled {
+    c_dis_cmd
+  } else if is_light_theme {
+    accent.darken(30%)
+  } else {
+    accent.lighten(20%)
+  }
+  let chip_stroke = if disabled { c_dis_card_border } else { accent.lighten(65%) }
+
+  box(
+    fill: chip_bg, radius: 4pt,
+    stroke: 0.5pt + chip_stroke,
+    inset: (x: 5.5pt, y: 1.5pt),
+    baseline: 1pt,
+  )[
+    #text(size: 8.5pt, weight: "bold", fill: chip_text, spacing: 0.5pt)[#hl(name)]
+  ]
+}
+
+// --- 别名 Chip (浅色, ↳ 前缀) ---
+#let alias_chip_detail(name, disabled: false) = {
+  let chip_bg = if disabled { c_dis_card_bg } else { c_ghost }
+  let chip_text = if disabled { c_dis_cmd } else { c_gray }
+  let chip_stroke = if disabled { c_dis_card_border } else { c_soft }
+
+  box(
+    fill: chip_bg, radius: 4pt,
+    stroke: 0.5pt + chip_stroke,
+    inset: (x: 5.5pt, y: 1.5pt),
+    baseline: 1pt,
+  )[
+    #text(size: 8pt, fill: chip_text)[↳ #hl(name)]
+  ]
+}
+
+// --- 监听器 Chip (中性灰) ---
+#let listener_chip_detail(name, disabled: false) = {
+  let chip_bg = if disabled { c_dis_card_bg } else { c_box_bg }
+  let chip_text = if disabled { c_dis_cmd } else { c_gray }
+  let chip_stroke = if disabled { c_dis_card_border } else { c_box_stroke }
+
+  box(
+    fill: chip_bg, radius: 4pt,
+    stroke: 0.5pt + chip_stroke,
+    inset: (x: 5.5pt, y: 1.5pt),
+    baseline: 1pt,
+  )[
+    #text(size: 8pt, fill: chip_text, weight: "medium")[#hl(name)]
+  ]
+}
+
+// --- 指令行 (⚡ Commands) ---
+#let commands_section(cmds, accent, disabled: false) = {
+  if cmds.len() == 0 { return none }
+  section_label("⚡", "Commands")
+  v(3pt)
+  par(justify: false, leading: 0.55em)[
+    #for cmd in cmds {
+      // 主指令 Chip
+      cmd_chip_detail(cmd.at("name", default: ""), accent, disabled: disabled)
+      h(3pt)
+      // 别名 Chip
+      for alias in cmd.at("aliases", default: ()) {
+        alias_chip_detail(alias, disabled: disabled)
+        h(3pt)
+      }
+    }
+  ]
+  v(6pt)
+}
+
+// --- 指令组容器 (📂 Command Group) ---
+#let group_section(group, accent, disabled: false) = {
+  let cmds = group.at("commands", default: ())
+  if cmds.len() == 0 { return none }
+  let group_name = group.at("name", default: "")
+  let group_bg = if disabled { c_dis_card_bg } else { c_box_bg }
+  let group_stroke = if disabled { c_dis_card_border } else { c_box_stroke }
+
+  block(
+    width: 100%, fill: group_bg,
+    stroke: 0.5pt + group_stroke, radius: 6pt,
+    inset: (x: 7pt, y: 6pt),
+  )[
+    #text(size: 8.5pt, weight: "bold", fill: c_gray)[📂 #hl(group_name)]
+    #v(3pt)
+    #par(justify: false, leading: 0.55em)[
+      #for cmd in cmds {
+        cmd_chip_detail(cmd.at("name", default: ""), accent, disabled: disabled)
+        h(3pt)
+        for alias in cmd.at("aliases", default: ()) {
+          alias_chip_detail(alias, disabled: disabled)
+          h(3pt)
+        }
+      }
+    ]
+  ]
+  v(6pt)
+}
+
+// --- 监听器行 (◉ Listeners) 监听器提取的指令关键词 ---
+#let listeners_section(cmd_names, disabled: false) = {
+  if cmd_names.len() == 0 { return none }
+  section_label("🔔", "Listeners")
+  v(3pt)
+  par(justify: false, leading: 0.55em)[
+    #for name in cmd_names {
+      listener_chip_detail(name, disabled: disabled)
+      h(3pt)
+    }
+  ]
+  v(6pt)
+}
+
+// ============================================================
+// 详细指令模式: 插件 Item (能力树)
+// ============================================================
+#let plugin_item_detail(p, theme_color) = {
+  let pidx = p.at("id", default: 0)
+  let pname = p.at("name", default: "")
+  let pdisp = p.at("display_name", default: "")
+  let pdisabled = p.at("disabled", default: false)
+  let capabilities = p.at("capabilities", default: (:))
+
+  // 禁用色
+  let name_fill  = if pdisabled { c_dis_name } else { theme_color.darken(30%) }
+  let badge_bg   = if pdisabled { c_dis_badge_bg } else { theme_color.lighten(82%) }
+  let badge_num  = if pdisabled { c_dis_badge_text } else { c_on_light }
+  let row_bg     = if pdisabled { c_dis_card_bg } else { c_ghost }
+  let row_stroke = if pdisabled { c_dis_card_border } else { c_soft }
+
+  // 插件名称 (优先 display_name) — 直接内联在 grid 中
+
+  // 插件内部 ID (右侧, 极小灰字)
+  let id_content = if pdisp != none and pdisp != "" {
+    text(size: 7pt, fill: c_gray)[@#hl(breakable_id(pname))]
+  } else {
+    none
+  }
+
+  // 处理能力数据
+  let cmds = capabilities.at("commands", default: ())
+  let groups = capabilities.at("groups", default: ())
+  let listeners = capabilities.at("listeners", default: ())
+
+  // 确定是否有任何能力内容
+  let has_capabilities = cmds.len() > 0 or groups.len() > 0 or listeners.len() > 0
+
+  block(
+    width: 100%, fill: row_bg,
+    stroke: 0.5pt + row_stroke, radius: 8pt,
+    inset: (x: 10pt, y: 7pt),
+  )[
+    // 头部: 编号 + 名称 + @id
+    #grid(
+      columns: (auto, 1fr, auto), gutter: 6pt,
+      align(top + left)[
+        #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 2pt), baseline: 2pt)[
+          #text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]
+        ]
+      ],
+      align(top + left)[
+        #if pdisp != none and pdisp != "" {
+          text(size: 10.5pt, weight: "bold", fill: name_fill)[#hl(pdisp)]
+        } else {
+          text(size: 10.5pt, weight: "bold", fill: name_fill)[#hl(breakable_id(pname))]
+        }
+      ],
+      align(top + right)[#id_content],
+    )
+
+    // 能力内容
+    #if has_capabilities {
+      v(5pt)
+      line(length: 100%, stroke: 0.5pt + c_soft)
+      v(4pt)
+      commands_section(cmds, theme_color, disabled: pdisabled)
+      for g in groups {
+        group_section(g, theme_color, disabled: pdisabled)
+      }
+      listeners_section(listeners, disabled: pdisabled)
+    }
+  ]
+}
+
+// ============================================================
+// 分类卡片 (支持 detail 模式: 指令标签组)
+// ============================================================
+#let category_card(cat, detail: false) = {
   let name = cat.at("name", default: "")
   let count = cat.at("count", default: 0)
   let plugins = cat.at("plugins", default: ())
@@ -540,7 +754,7 @@
       #block(inset: (x: 8pt, y: 8pt), spacing: 0pt)[
         #stack(
           spacing: 6pt,
-          ..plugins.map(p => plugin_item(p, color))
+          ..plugins.map(p => if detail { plugin_item_detail(p, color) } else { plugin_item(p, color) })
         )
       ]
     ]
@@ -548,9 +762,9 @@
 }
 
 // ============================================================
-// 双栏分类布局
+// 双栏分类布局 (支持 detail 模式)
 // ============================================================
-#let render_categories() = {
+#let render_categories(detail: false) = {
   let cols = data.at("category_columns", default: ())
   if cols.len() > 0 {
     grid(
@@ -559,7 +773,7 @@
       row-gutter: 12pt,
       ..cols.map(col => {
         align(top)[
-          #stack(spacing: 12pt, ..col.map(cat => category_card(cat)))
+          #stack(spacing: 12pt, ..col.map(cat => category_card(cat, detail: detail)))
         ]
       })
     )
@@ -982,7 +1196,7 @@
   let cmds = listener.at("commands", default: ())
   block(breakable: false, inset: (bottom: 5pt))[
     #grid(columns: (auto, 1fr), gutter: 6pt,
-      align(top + left)[#event_icon],
+      align(top + left)[#bullet_icon],
       align(left)[
         #text(size: 10.5pt, weight: "bold", fill: c_leaf_text)[#hl(breakable_id(listener.at("name", default: "")))]
         #if listener.at("priority", default: none) != none {
@@ -1044,7 +1258,7 @@
       }
 
       #if normal_cmds.len() > 0 {
-        section_header(text(size: 0.9em)[📋], "指令", "COMMANDS")
+        section_header(text(size: 0.9em)[⚡], "指令", "COMMANDS")
         stack(spacing: 0pt, ..normal_cmds.map(cmd => command_row(cmd)))
         v(6pt)
       }
@@ -1056,7 +1270,7 @@
       }
 
       #if event_listeners.len() > 0 {
-        section_header(text(size: 0.9em)[⚡], "事件监听", "EVENT LISTENERS")
+        section_header(text(size: 0.9em)[🔔], "事件监听", "EVENT LISTENERS")
         stack(spacing: 0pt, ..event_listeners.map(listener => event_listener_row(listener)))
         v(4pt)
       }
@@ -1075,13 +1289,13 @@
 
 #let mode = data.at("mode", default: "command")
 
-#if mode == "command" {
+#if mode == "command" or mode == "command_detail" {
   // 指令模式: Header + 快捷操作 + 分类卡片
   render_header()
   v(6pt)
   render_quick_actions()
   v(8pt)
-  render_categories()
+  render_categories(detail: mode == "command_detail")
 } else if mode == "plugin_detail" {
   // 插件详情页
   align(center)[
