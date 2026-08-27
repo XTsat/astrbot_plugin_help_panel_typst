@@ -76,7 +76,6 @@
             "enabled": true,
             "color": "slot_1",
             "keywords": [
-              "ai",
               "llm",
               "模型",
               "gpt",
@@ -133,7 +132,9 @@
               "压缩",
               "编码",
               "tool",
-              "qrcode"
+              "qrcode",
+              "聚合",
+              "网盘"
             ]
           },
           {
@@ -152,8 +153,7 @@
               "违禁词",
               "黑名单",
               "风控",
-              "admin",
-              "ban"
+              "admin"
             ]
           },
           {

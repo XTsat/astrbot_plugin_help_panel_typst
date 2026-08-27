@@ -430,7 +430,6 @@ class DefaultCFG:
     # 列表顺序即匹配优先级 (命中第一个匹配的分类即归入), 全部未命中时归入兜底分类。
     DEFAULT_CATEGORY_KEYWORDS: dict[str, list[str]] = {
         "AI": [
-            "ai",
             "llm",
             "模型",
             "gpt",
@@ -476,6 +475,8 @@ class DefaultCFG:
             "编码",
             "tool",
             "qrcode",
+            "聚合",
+            "网盘",
         ],
         "管理": [
             "管理",
@@ -489,7 +490,6 @@ class DefaultCFG:
             "黑名单",
             "风控",
             "admin",
-            "ban",
         ],
         "娱乐": [
             "娱乐",
