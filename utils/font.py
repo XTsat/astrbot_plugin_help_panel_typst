@@ -27,20 +27,29 @@ class FontManager:
 
         return [d for d in dirs if d.is_dir()]
 
+    def get_search_paths(self) -> list[Path]:
+        """合并项目目录与系统目录, 去重后返回实际存在的字体目录 (Path)
+
+        扫描与渲染共用同一份路径集合, 保证「扫描到的字体」在编译时一定可用
+        (系统字体库也一并传入, 修复系统内置字体选择后不生效的问题)。
+        """
+        search_paths: list[Path] = []
+        seen: set[str] = set()
+        for p in [*self.font_dirs, *self.get_system_font_dirs()]:
+            if not p.exists():
+                continue
+            resolved = p.resolve()
+            if str(resolved) not in seen:
+                seen.add(str(resolved))
+                search_paths.append(resolved)
+        return search_paths
+
     def scan_fonts(self):
         """扫描本地字体(.ttf .otf .woff2) —— 项目目录 + 系统字体目录"""
         self.available_families.clear()
 
         # 合并项目目录与系统目录, 去重后转换为 Typst 期望的字符串列表
-        search_paths: list[str] = []
-        seen: set[str] = set()
-        for p in [*self.font_dirs, *self.get_system_font_dirs()]:
-            if not p.exists():
-                continue
-            resolved = str(p.resolve())
-            if resolved not in seen:
-                seen.add(resolved)
-                search_paths.append(resolved)
+        search_paths: list[str] = [str(p) for p in self.get_search_paths()]
 
         if not search_paths:
             logger.warning("[HelpTypst] 没有有效的字体目录，跳过扫描")
@@ -57,8 +66,25 @@ class FontManager:
         except Exception as e:
             logger.error(f"[HelpTypst] Typst 字体扫描失败: {e}", exc_info=True)
 
-    def update_json_schema(self, schema_path: Path):
-        """更新 Schema options (内置样式下拉项 & 全局字体选项)"""
+    def get_selectable_families(self) -> list[str]:
+        """供配置面板选择的可选字体家族 (排除固定表情字体, 按名称排序)
+
+        表情字体由系统固定追加到渲染字体列表末尾, 用户无需也不应在面板中选择,
+        故从 `font_order` 下拉项中隐藏。
+        """
+        return sorted(f for f in self.available_families if f != DefaultCFG.EMOJI_FONT)
+
+    def update_json_schema(
+        self, schema_path: Path, live_schema: dict[str, Any] | None = None
+    ):
+        """更新 Schema options (内置样式下拉项 & 全局字体选项)
+
+        Args:
+            schema_path: `_conf_schema.json` 的磁盘路径。
+            live_schema: AstrBot 启动时从磁盘加载、当前内存中存活的 schema 字典
+                (即 `config.schema`, 配置面板实时读取它)。若提供则同步更新,
+                使新扫描的字体无需重载插件即可立即出现在配置面板下拉框中。
+        """
         if not schema_path.exists():
             return
         try:
@@ -79,10 +105,10 @@ class FontManager:
             except KeyError:
                 pass
 
-            # 2. 全局字体优先级选项 (扫描到的字体)
+            # 2. 全局字体优先级选项 (扫描到的字体, 排除固定表情字体)
             try:
                 target = schema["appearance"]["items"]["font_order"]
-                options = sorted(list(self.available_families))
+                options = self.get_selectable_families()
                 if target.get("options") != options:
                     target["options"] = options
                     changed = True
@@ -93,7 +119,20 @@ class FontManager:
                 with open(schema_path, "w", encoding="utf-8") as f:
                     json.dump(schema, f, indent=2, ensure_ascii=False)
 
-                logger.info("[HelpTypst] 已更新 Schema 选项，可能重载插件后列表变化才可见")
+                logger.info(
+                    "[HelpTypst] 已更新 Schema 选项，配置面板无需重载即可看到新字体"
+                )
+
+            # 同步内存中的 live schema, 立即应用到配置面板 (无需重载插件)
+            if live_schema is not None and isinstance(live_schema, dict):
+                try:
+                    live_items = live_schema["appearance"]["items"]
+                    live_font = live_items["font_order"]
+                    new_options = self.get_selectable_families()
+                    if live_font.get("options") != new_options:
+                        live_font["options"] = new_options
+                except (KeyError, TypeError):
+                    pass
         except Exception as e:
             logger.warning(f"[HelpTypst] Schema 更新失败: {e}")
 
@@ -109,8 +148,12 @@ class FontManager:
         if not isinstance(current_order, list):
             return
 
-        # 只保留本地存在的字体
-        valid_order = [f for f in current_order if f in self.available_families]
+        # 只保留本地存在且非固定表情字体的项 (表情字体由系统固定追加, 无需用户配置)
+        valid_order = [
+            f
+            for f in current_order
+            if f in self.available_families and f != DefaultCFG.EMOJI_FONT
+        ]
 
         # 长度变短 → 有无效项被剔除
         if len(valid_order) != len(current_order):
@@ -123,20 +166,28 @@ class FontManager:
                 logger.warning(f"[HelpTypst] 字体配置保存失败: {e}")
 
     def get_render_font_list(self, user_config_order: list[str]) -> list[str]:
-        """生成传给 Typst 的最终字体列表"""
+        """生成传给 Typst 的最终字体列表
+
+        表情字体 (DefaultCFG.EMOJI_FONT) 始终固定在列表末尾, 无论用户配置顺序如何:
+        即便旧配置中用户曾手动选择过它, 也只会出现在末尾, 不会抢占正文优先回退位。
+        """
         final = []
         seen = set()
 
-        # 1. 用户配置
+        # 1. 用户配置 (排除固定表情字体, 由末尾统一追加)
         for f in user_config_order:
-            if f in self.available_families and f not in seen:
+            if (
+                f in self.available_families
+                and f != DefaultCFG.EMOJI_FONT
+                and f not in seen
+            ):
                 final.append(f)
                 seen.add(f)
 
-        # 2. 兜底
-        defaults = ["LXGW Neo XiHei", "Noto Color Emoji"]
-        for f in defaults:
+        # 2. 兜底字体 (默认字体顺序 + 固定表情字体), 始终保证列表非空
+        for f in [*DefaultCFG.DEFAULT_FONT_ORDER, DefaultCFG.EMOJI_FONT]:
             if f not in seen:
                 final.append(f)
                 seen.add(f)
+
         return final

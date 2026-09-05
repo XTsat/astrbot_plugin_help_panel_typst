@@ -53,9 +53,9 @@
 #set page(width: 830pt, height: auto, margin: (x: 28pt, y: 24pt), fill: page_fill)
 #set text(size: 10pt)
 // 字体: 数据驱动, 未提供时使用 Typst 默认字体 (系统自动回退渲染 CJK)
-#if user_fonts.len() > 0 {
-  set text(font: user_fonts)
-}
+// 注意: set 规则必须放在顶层 (不能包在 #if 块内), 否则只作用于块内内容, 全局不生效
+#let eff_fonts = if user_fonts.len() > 0 { user_fonts } else { ("LXGW Neo XiHei",) }
+#set text(font: eff_fonts)
 
 // === 🎨 可配置颜色 (event/filter/detail 视图) ===
 

@@ -46,6 +46,8 @@ class AppearanceConfig:
     active_preset: str
     font_order: list[str]
     presets: dict[str, ThemePreset]  # 内置预设注册 (兼容旧配置中的自定义预设)
+    # 一次性「重新扫描字体」开关: 勾选保存后, 插件重载时自动扫描一次字体并自动关闭
+    rescan_fonts: bool = False
     # 内部缓存字段
     _color_cache: dict[str, str] | None = field(init=False, default=None, repr=False)
 
@@ -328,6 +330,7 @@ class TypstPluginConfig:
             active_preset=active_preset_name,
             font_order=font_order,
             presets=presets_dict,
+            rescan_fonts=bool(raw_appearance.get("rescan_fonts", False)),
         )
 
         # Category (插件分类规则)

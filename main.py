@@ -66,11 +66,13 @@ class HelpTypst(Star):
         self.msg = MsgRecall()
 
         # 4. 渲染器
+        # 编译时字体目录 = 项目目录 + 系统字体库 (与扫描保持一致, 否则系统内置字体
+        # 虽被扫描进选项, 编译时却未加载而不生效)
         self.renderer = TypstRenderer(
             star=self,
             data_dir=self.data_dir,
             template_path=self.template_path,
-            font_dirs=self.font_dirs,
+            font_dirs=self.font_manager.get_search_paths(),
             config=self.plugin_config,
         )
 
@@ -85,15 +87,39 @@ class HelpTypst(Star):
         """异步初始化"""
         self._init_prefixes(self.context)
         await asyncio.to_thread(self._refresh_resources)
+        await asyncio.to_thread(self._auto_close_rescan_flag)
         logger.info("[HelpTypst] 初始化完成")
+
+    def _auto_close_rescan_flag(self):
+        """「重新扫描字体」一次性开关: 勾选保存后自动关闭
+
+        扫描本体由 _refresh_resources 无条件执行 (initialize / terminate 均会触发),
+        这里只负责在扫描完成后把开关复位, 避免每次重载都重复扫描。
+        """
+        try:
+            appearance = self.config.get("appearance", {})
+            if not isinstance(appearance, dict):
+                return
+            if not appearance.get("rescan_fonts"):
+                return
+            # 自动关闭开关
+            appearance["rescan_fonts"] = False
+            if hasattr(self.config, "save_config"):
+                self.config.save_config()
+            logger.info("[HelpTypst] 已按「重新扫描字体」开关完成扫描并自动关闭该开关")
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 自动关闭「重新扫描字体」开关失败: {e}")
 
     def _refresh_resources(self):
         try:
             # 1. 扫描
             self.font_manager.scan_fonts()
 
-            # 2. 更新 Schema
-            self.font_manager.update_json_schema(self.schema_path)
+            # 2. 更新 Schema (磁盘文件 + 内存存活 schema, 使新字体无需重载即可出现在配置面板)
+            live_schema = getattr(self.config, "schema", None)
+            self.font_manager.update_json_schema(
+                self.schema_path, live_schema=live_schema
+            )
 
             # 3. 清洗 Config
             self.font_manager.prune_invalid_config_items(self.config)
@@ -145,6 +171,10 @@ class HelpTypst(Star):
             self._refresh_resources()
         except Exception:
             pass
+
+        # 3. 「重新扫描字体」一次性开关: 勾选保存后自动扫描一次并自动关闭
+        # 扫描本体已在上面 _refresh_resources 中完成, 这里只复位开关
+        self._auto_close_rescan_flag()
 
     async def _perform_cleanup(self):
         try:
@@ -214,9 +244,8 @@ class HelpTypst(Star):
             if pm is None:
                 return ""
             # 支持新旧两版方法名: v3 (Pydantic 模型) / 旧版 (dict)
-            method = (
-                getattr(pm, "get_default_persona_v3", None)
-                or getattr(pm, "get_default_persona", None)
+            method = getattr(pm, "get_default_persona_v3", None) or getattr(
+                pm, "get_default_persona", None
             )
             if method is None:
                 return ""

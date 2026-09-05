@@ -343,14 +343,39 @@
         "description": "字体优先级排序",
         "type": "list",
         "default": [
-          "LXGW Neo XiHei",
-          "Noto Color Emoji"
+          "LXGW Neo XiHei"
         ],
         "options": [
+          "C059",
+          "Cantarell",
+          "D050000L",
+          "DejaVu Sans",
+          "DejaVu Sans Mono",
+          "DejaVu Serif",
+          "Droid Sans Fallback",
+          "Hack",
           "LXGW Neo XiHei",
-          "Noto Color Emoji"
+          "Libertinus Serif",
+          "New Computer Modern",
+          "New Computer Modern Math",
+          "Nimbus Mono PS",
+          "Nimbus Roman",
+          "Nimbus Sans",
+          "Noto Mono",
+          "Noto Sans Mono",
+          "P052",
+          "Standard Symbols PS",
+          "URW Bookman",
+          "URW Gothic",
+          "Z003"
         ],
         "hint": "全局字体使用顺序（按选择顺序生效）。选项自动收录：内置字体 + 自定义目录字体 + 系统字体库；也支持直接输入字体名（需存在于系统中）。扫描不到的字体会被自动剔除"
+      },
+      "rescan_fonts": {
+        "description": "重新扫描字体",
+        "type": "bool",
+        "default": false,
+        "hint": "勾选并保存后，插件重载时会自动扫描一次字体（内置 + 自定义目录 + 系统字体库），刷新下方字体选项，随后自动关闭本开关。也可以手动执行指令 /typst font"
       },
       "presets": {
         "description": "主题预设列表",

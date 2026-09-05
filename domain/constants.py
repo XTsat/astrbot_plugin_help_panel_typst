@@ -99,7 +99,12 @@ class DefaultCFG:
     TIMEOUT_COMPILE: float = 30.0
 
     # 3. 全局字体优先级 (appearance.font_order 缺省值)
-    DEFAULT_FONT_ORDER: list[str] = ["LXGW Neo XiHei", "Noto Color Emoji"]
+    # 注意: 表情字体 (EMOJI_FONT) 不在此列, 由渲染时固定追加, 无需用户选择
+    DEFAULT_FONT_ORDER: list[str] = ["LXGW Neo XiHei"]
+
+    # 固定表情字体: 始终追加到最终字体列表末尾, 用于渲染 emoji 字形
+    # 不出现在配置面板的字体选择项中 (用户无需也不应选择它)
+    EMOJI_FONT: str = "Noto Color Emoji"
 
     # 系统字体目录映射 (扫描时并入选择框选项; ~ 在代码中展开)
     SYSTEM_FONT_DIRS: tuple[str, ...] = (

@@ -132,7 +132,9 @@ class TypstRenderer:
                 else:
                     return p
             else:
-                logger.warning(f"[HelpTypst] 配置的背景图不存在: {cfg_path}, 回退目录扫描")
+                logger.warning(
+                    f"[HelpTypst] 配置的背景图不存在: {cfg_path}, 回退目录扫描"
+                )
 
         # 2. 目录扫描 (自定义目录 → 默认 backgrounds 目录)
         scan_dirs: list[Path] = []
@@ -248,6 +250,8 @@ class TypstRenderer:
                         json_path.read_text, encoding="utf-8"
                     )
 
+                    # 编译时字体目录 = 项目目录 + 系统字体库 (由 main 注入的搜索路径,
+                    # 与扫描保持一致, 否则系统内置字体虽被扫描进选项, 编译时却未加载而不生效)
                     font_paths_str = [str(p) for p in self.font_dirs]
 
                     # 头部背景图: 使用批次开始时已解析的背景图 (确保 random 只选一次)
