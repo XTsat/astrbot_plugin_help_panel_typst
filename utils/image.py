@@ -3,6 +3,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from ..domain import DefaultCFG
+
 # PIL 格式名 → 合法的文件扩展名集合 (全小写, 不含点)
 _FORMAT_EXTENSIONS: dict[str, set[str]] = {
     "JPEG": {"jpg", "jpeg"},
@@ -73,6 +75,10 @@ def process_image_to_webp(
     if not src_path_obj.exists():
         return []
     try:
+        # 与 domain/config 的收敛区间保持一致: 非法值回落到下限,
+        # split_height 为 0 会在下面的除法里抛零除错误
+        webp_limit = max(DefaultCFG.MIN_WEBP_LIMIT, int(webp_limit))
+        split_height = max(DefaultCFG.MIN_SPLIT_HEIGHT, int(split_height))
         with Image.open(src_path_obj) as img:
             if img.height <= webp_limit:
                 # 不切分
@@ -96,6 +102,6 @@ def process_image_to_webp(
 
     except Exception as e:
         # 抛出异常让上层捕获
-        raise RuntimeError(f"图片处理失败: {e}")
+        raise RuntimeError(f"图片处理失败 ({src_path_obj.name}): {e}")
 
     return images

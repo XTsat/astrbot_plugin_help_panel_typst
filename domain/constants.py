@@ -3,6 +3,51 @@ from enum import Enum
 from astrbot.core.star.star_handler import EventType
 
 
+class _EventTypeLabelMap(dict[EventType, str]):
+    """EventType → 事件监听分组标题
+
+    未知事件类型统一回落「其他事件」: 上游会随版本新增 EventType (Agent/Tool 类),
+    把英文枚举名直接展示给用户没有意义。覆盖 get() 的默认值, 消费方无需改动。
+    """
+
+    FALLBACK: str = "其他事件"
+
+    def get(self, key: object, default: str | None = None) -> str:
+        return super().get(key, self.FALLBACK)
+
+
+# 事件类型映射表: (EventType 成员名, 中文分组标题)
+# 按成员名动态取值, 低版本 AstrBot 缺失的成员自动跳过, 避免 import 期 AttributeError
+_EVENT_TYPE_LABELS: tuple[tuple[str, str], ...] = (
+    ("OnAstrBotLoadedEvent", "系统启动 (Loaded)"),
+    ("OnPlatformLoadedEvent", "平台就绪 (Platform)"),
+    ("AdapterMessageEvent", "消息监听 (Message)"),
+    ("OnWaitingLLMRequestEvent", "等待 LLM 请求 (Wait-LLM)"),
+    ("OnLLMRequestEvent", "LLM 请求前 (Pre-LLM)"),
+    ("OnLLMResponseEvent", "LLM 响应后 (Post-LLM)"),
+    ("OnAgentBeginEvent", "Agent 开始 (Agent)"),
+    ("OnAgentDoneEvent", "Agent 完成 (Agent-Done)"),
+    ("OnDecoratingResultEvent", "消息修饰 (Decorate)"),
+    ("OnCallingFuncToolEvent", "函数工具调用 (Calling-Tool)"),
+    ("OnUsingLLMToolEvent", "工具调用请求 (Using-Tool)"),
+    ("OnLLMToolRespondEvent", "工具返回 (Tool-Respond)"),
+    ("OnAfterMessageSentEvent", "发送回执 (Sent)"),
+    ("OnPluginErrorEvent", "插件异常 (Plugin-Error)"),
+    ("OnPluginLoadedEvent", "插件加载 (Plugin-Loaded)"),
+    ("OnPluginUnloadedEvent", "插件卸载 (Plugin-Unloaded)"),
+)
+
+
+def _build_event_type_map() -> _EventTypeLabelMap:
+    """构建事件类型映射 (成员缺失时跳过, 兼容低版本 AstrBot)"""
+    mapping = _EventTypeLabelMap()
+    for attr_name, label in _EVENT_TYPE_LABELS:
+        event_type = getattr(EventType, attr_name, None)
+        if isinstance(event_type, EventType):
+            mapping[event_type] = label
+    return mapping
+
+
 class InternalCFG:
     """内部常量"""
 
@@ -14,20 +59,14 @@ class InternalCFG:
         "filter": "cache_menu_filter",
     }
 
-    EVENT_TYPE_MAP: dict[EventType, str] = {
-        EventType.OnAstrBotLoadedEvent: "系统启动 (Loaded)",
-        EventType.OnPlatformLoadedEvent: "平台就绪 (Platform)",
-        EventType.AdapterMessageEvent: "消息监听 (Message)",
-        EventType.OnLLMRequestEvent: "LLM 请求前 (Pre-LLM)",
-        EventType.OnLLMResponseEvent: "LLM 响应后 (Post-LLM)",
-        EventType.OnDecoratingResultEvent: "消息修饰 (Decorate)",
-        EventType.OnAfterMessageSentEvent: "发送回执 (Sent)",
-    }
+    EVENT_TYPE_MAP: _EventTypeLabelMap = _build_event_type_map()
 
     # 会引起布局变动的配置项 → 缓存失效
     CACHE_SENSITIVE_CONFIGS: list[str] = [
         "giant_threshold",
         "split_height",
+        # 直接决定长图切片结果 (是否切、切成几张), 改动后必须重编
+        "webp_limit",
         "ppi",
         "ignored_plugins",
         "effective_colors",
@@ -64,13 +103,24 @@ class InternalCFG:
     # 用户可在设置面板通过 category.fallback 自定义, 详见 domain/config.py 的 CategoryConfig)
     CATEGORY_FALLBACK: str = "其他"
     # 默认分类关键词映射已迁移至 DefaultCFG.DEFAULT_CATEGORY_KEYWORDS (设置面板 category.rules 的预置默认值)
-    # 分类卡片布局估算 (pt): 仅用于 2 列平衡, 与模板 category_card 的 spacing 保持近似
-    # 每张卡片在列内占用的高度 ≈ HEADER + ROW * 插件数 (HEADER 已含彩色头部、列表 padding、边框阴影与卡片间距)
-    CATEGORY_HEADER_HEIGHT: int = 70
-    # 单个插件盒子(含盒子间距 8pt) 的高度
-    CATEGORY_ROW_HEIGHT: int = 36
-    # 详细指令模式: 单个插件盒子的估算高度 (含指令标签组, 约 2-3 行)
-    CATEGORY_ROW_HEIGHT_DETAIL: int = 80
+    # 两列高度估算系数 (pt): 只参与 utils/view.py 的分列决策, 不参与渲染。
+    # 按 base.typ 的排版 (830pt 页宽、分类卡内边距、chip 字号) 折算, 并用真实渲染结果校准;
+    # 页宽 / 字号 / 模板结构变化后需重新校准 (详见 utils/view.py 的 _estimate_category_height)。
+    EST_CATEGORY_BASE: float = 42.0  # 指令模式: 分类卡片头部 + 列表内边距
+    EST_CATEGORY_STACK_GAP: float = 12.0  # 分类卡片之间的 stack spacing
+    EST_PLUGIN_ROW: float = 26.0  # 指令模式: 单个插件行 (含行距)
+    EST_PLUGIN_NAME_WIDTH: float = 200.0  # 指令模式: 插件名可用宽度, 超出折行
+    EST_PLUGIN_NAME_LINE: float = 14.0  # 插件名每多折一行的增量
+    EST_DETAIL_CATEGORY_BASE: float = 50.0  # 详细模式: 分类卡片固定开销
+    EST_DETAIL_PLUGIN_ROW: float = 40.0  # 详细模式: 插件条目头部行
+    EST_DETAIL_CAPABILITY_BLOCK: float = 14.0  # 能力区: 分割线上下的留白
+    EST_DETAIL_SECTION_LABEL: float = 20.0  # Commands / Listeners 小节标题
+    EST_DETAIL_GROUP_OVERHEAD: float = 24.0  # 指令组容器: 内边距 + 组名
+    EST_DETAIL_CHIP_ROW: float = 19.0  # 单行 chip 高度 (含行距)
+    EST_DETAIL_CHIP_WIDTH: float = 356.0  # 插件条目内 chip 可用行宽
+    EST_DETAIL_GROUP_CHIP_WIDTH: float = 350.0  # 指令组内 chip 可用行宽
+    EST_CHIP_PADDING: float = 12.0  # chip 左右内边距 + 边框
+    EST_CHIP_GAP: float = 3.0  # 相邻 chip 间距
 
     # 禁用插件灰化色板 (主题无关的固定值, 供 /helps 指令菜单灰化展示)
     DISABLED_COLORS: dict[str, str] = {
@@ -92,7 +142,22 @@ class DefaultCFG:
     LIMIT_GIANT: int = 1500
     LIMIT_WEBP: int = 16383
     LIMIT_SIDE: int = 16000
-    LIMIT_PPI: float = 144.0
+    # 与 _conf_schema.json 的 ppi 默认值一致: 144 是开放配置前的硬编码残留,
+    # 面板自 v0.3.x 起默认 180, 已保存的配置也是 180, 兜底值必须跟上
+    LIMIT_PPI: float = 180.0
+
+    # 1.1 配置值收敛区间 (防御手工改坏的配置; 与设置面板 slider 范围对齐)
+    MIN_PPI: float = 72.0
+    MAX_PPI: float = 256.0
+    MIN_SPLIT_HEIGHT: int = 200  # image.py 按此高度切片, 过小无意义, 0 会除零
+    MIN_WEBP_LIMIT: int = 1000
+    MIN_GIANT: int = 100
+    MAX_GIANT: int = 3000
+    MIN_TIMEOUT_ANALYSIS: float = 1.0
+    MIN_TIMEOUT_COMPILE: float = 3.0  # 与面板 slider min 一致
+    MAX_TIMEOUT: float = 60.0
+    MIN_CONCURRENCY: int = 1
+    MAX_CONCURRENCY: int = 10
 
     # 2. 超时设置 (秒)
     TIMEOUT_ANALYSIS: float = 10.0
@@ -573,8 +638,13 @@ class DefaultCFG:
 
 
 class RenderMode(str, Enum):
-    """枚举"""
+    """历史遗留枚举
+
+    当前调度使用字符串 mode, 以 InternalCFG.CACHE_FILES 为准; 本枚举仅作旧代码兼容,
+    新增渲染模式不要只改这里 (还需登记 CACHE_FILES 等, 见 AGENTS §5.4)。
+    """
 
     COMMAND = "command"
+    COMMAND_DETAIL = "command_detail"
     EVENT = "event"
     FILTER = "filter"

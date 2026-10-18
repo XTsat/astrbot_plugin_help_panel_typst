@@ -11,13 +11,42 @@
 #let generated_time  = sys.inputs.at("timestamp", default: "Unknown Time")
 
 // === 🖼️ 头部 Hero 品牌模式 (可选, 默认开启) ===
-// 由 Python 侧注入: bg_image = 相对模板目录的图片路径, hero_header = "true"/"false"
+// 由 Python 侧注入: bg_image = 相对模板目录的图片路径;
+// hero_header 历史上传字符串 "true"/"false", 后续可能直接传 bool, 两种表示都要吃
 #let bg_image_path = sys.inputs.at("bg_image", default: "")
 #let has_header_bg = bg_image_path != ""
-#let hero_header_enabled = sys.inputs.at("hero_header", default: "true") != "false"
+#let raw_hero_header = sys.inputs.at("hero_header", default: true)
+#let hero_header_enabled = if type(raw_hero_header) == bool {
+  raw_hero_header
+} else {
+  str(raw_hero_header) != "false"
+}
+
+// 品牌徽标路径: Typst 没有文件系统探测, 也没有异常捕获, 缺图只能由 Python 侧判断后注入;
+// 未注入 (none) 时沿用内置资源, 注入空串表示文件缺失 → 不画徽标, 保证整页仍能编译
+#let logo_image = sys.inputs.at("logo_image", default: none)
+#let logo_path = if logo_image == none {
+  "../resources/images/astrbot-logo-text.svg"
+} else {
+  str(logo_image)
+}
 
 // 统计卡片第三列显示名 (人格名称, 由 Python 侧注入; 空串则不渲染该列)
 #let system_name = data.at("system_name", default: "")
+// 页面标题: Hero 搜索提示与 detail/event 视图头部共用, 新模式漏写该键时不至于整页失败
+#let panel_title = data.at("title", default: "帮助面板")
+// 指令前缀: Python 侧按 wake_prefix 写字符串列表 (如 ["/"]) 供快捷操作文案使用
+#let primary_prefix = {
+  let raw = data.at("prefixes", default: ())
+  let first = if type(raw) == array {
+    raw.at(0, default: "")
+  } else if type(raw) == str {
+    raw
+  } else {
+    ""
+  }
+  if first == "" { "/" } else { str(first) }
+}
 
 // 颜色参数 (仅 event/filter/detail 视图使用, 默认已对齐新主题)
 #let c_map           = data.at("colors", default: (:))
@@ -321,13 +350,15 @@
     block(width: 100%, breakable: false)[
       #image(bg_image_path, width: 100%)
 
-      // 品牌徽标: 官方 AstrBot 文字徽标 (内置资源, 相对模板目录)
+      // 品牌徽标: 官方 AstrBot 文字徽标; 路径为空 (Python 侧判定缺图) 时留白
       #place(left + top, dx: 26pt, dy: 24pt)[
         #stack(spacing: 4pt, align(left)[
-          #image("../resources/images/astrbot-logo-text.svg", height: 60pt)
+          #if logo_path != "" {
+            image(logo_path, height: 60pt)
+          }
           #if (query_regex_str != none and query_regex_str != "") [
             #v(6pt)
-            #text(size: 8.5pt, fill: banner_text_color(c_gray))[#data.title]
+            #text(size: 8.5pt, fill: banner_text_color(c_gray))[#panel_title]
           ]
         ])
       ]
@@ -368,7 +399,7 @@
               spacing: 4pt,
               text(size: 22pt, weight: "bold", fill: c_navy)[Astrbot 插件面板],
               if (query_regex_str != none and query_regex_str != "") [
-                #text(size: 9pt, fill: c_gray)[#data.title]
+                #text(size: 9pt, fill: c_gray)[#panel_title]
               ],
             )
           ],
@@ -407,9 +438,9 @@
 
   grid(
     columns: (1fr, 1fr, 1fr), column-gutter: 10pt,
-    action("📌", c_sky, "发送 /helps <编号> 查看插件详情"),
-    action("📋", c_mint, "发送 /helps s <关键词> 搜索指令"),
-    action("👑", c_cream, "发送 /events /filters 查看事件与过滤器"),
+    action("📌", c_sky, "发送 " + primary_prefix + "helps <编号> 查看插件详情"),
+    action("📋", c_mint, "发送 " + primary_prefix + "helps s <关键词> 搜索指令"),
+    action("👑", c_cream, "发送 " + primary_prefix + "events " + primary_prefix + "filters 查看事件与过滤器"),
   )
 }
 
@@ -639,11 +670,19 @@
   let capabilities = p.at("capabilities", default: (:))
 
   // 禁用色
-  let name_fill  = if pdisabled { c_dis_name } else { theme_color.darken(30%) }
-  let badge_bg   = if pdisabled { c_dis_badge_bg } else { theme_color.lighten(82%) }
-  let badge_num  = if pdisabled { c_dis_badge_text } else { c_on_light }
   let row_bg     = if pdisabled { c_dis_card_bg } else { c_ghost }
   let row_stroke = if pdisabled { c_dis_card_border } else { c_soft }
+  // 插件名: 深色主题下卡片底本身是深色, 再 darken 会让文字几乎不可见 (Night Navy
+  // 的 cat_slot_4 只剩约 1.1:1), 因此底色偏深时改为提亮主题色
+  let name_fill  = if pdisabled {
+    c_dis_name
+  } else if is_light(row_bg) {
+    theme_color.darken(30%)
+  } else {
+    theme_color.lighten(80%)
+  }
+  let badge_bg   = if pdisabled { c_dis_badge_bg } else { theme_color.lighten(82%) }
+  let badge_num  = if pdisabled { c_dis_badge_text } else { c_on_light }
 
   // 插件名称 (优先 display_name) — 直接内联在 grid 中
 
@@ -780,35 +819,6 @@
 // ============================================================
 // 事件/过滤器视图组件
 // ============================================================
-
-// --- 语法指引 ---
-#let render_syntax_guide() = {
-  let prefixes = data.at("prefixes", default: ("/"))
-  let prefix_str = if type(prefixes) == array { prefixes.join(" 或 ") } else { prefixes }
-
-  let pill(content, bg, color) = box(
-    fill: bg, radius: 4pt, inset: (x: 6pt, y: 3pt), baseline: 2pt,
-    text(weight: "bold", fill: color, size: 10pt)[#content]
-  )
-
-  let joint = text(fill: c_gray, size: 10pt, baseline: 2pt)[(空格)]
-
-  align(center)[
-    #block(
-      fill: c_card, stroke: 1pt + c_box_stroke, radius: 6pt, inset: 10pt, below: 15pt
-    )[
-      #stack(dir: ltr, spacing: 8pt,
-        text(size: 10pt, fill: c_desc_text, baseline: 2pt)[指令格式:],
-        pill(prefix_str, c_ver_bg, c_ver_text),
-        pill("父指令", c_group_bg, c_group_title),
-        joint,
-        pill("子指令", c_box_bg, c_leaf_text),
-        joint,
-        pill("<参数>", c_prio_bg, c_gold)
-      )
-    ]
-  ]
-}
 
 // --- 单行模式 ---
 #let render_single_row(node) = {
@@ -1002,6 +1012,8 @@
   let display = plugin.display_name
   let name = plugin.name
   let ver = plugin.version
+  // 卡片头只用数据层给的展示名, 不再给内部 name 拼 "@": 事件/过滤器分组卡片的 name 是
+  // event_group / filter_regex 这类容器标识, 拼出来对用户毫无意义
   grid(
     columns: (1fr, auto), gutter: 10pt,
     align(left + horizon)[
@@ -1009,10 +1021,6 @@
         let avail_w = size.width
         if display != none and display != "" {
           text(weight: "black", size: 15pt, fill: c_plugin_name)[#hl(display)]
-          linebreak()
-          v(0pt)
-          let safe_id = breakable_id(name)
-          text(weight: "medium", size: 9pt, fill: c_plugin_id)[@#hl(safe_id)]
         } else {
           let safe_name = breakable_id(name)
           let name_content = text(weight: "black", size: 14pt, fill: c_plugin_name)[#hl(safe_name)]
@@ -1297,7 +1305,7 @@
   // 插件详情页
   align(center)[
     #block(inset: (top: 16pt, bottom: 8pt))[
-      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#data.title] \
+      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#panel_title] \
       #v(5pt)
       #text(size: 9.5pt, fill: c_desc_text)[
         插件详情  ·  #generated_time
@@ -1309,7 +1317,7 @@
   // 事件/过滤器模式
   align(center)[
     #block(inset: (top: 16pt, bottom: 8pt))[
-      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#data.title] \
+      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#panel_title] \
       #v(5pt)
       #text(size: 9.5pt, fill: c_desc_text)[
         已加载 #data.at("plugin_count", default: 0) 个插件/监听组  ·  #generated_time

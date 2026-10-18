@@ -44,10 +44,9 @@ class RenderTask:
     webp_limit: int = DefaultCFG.LIMIT_WEBP
     split_height: int = DefaultCFG.LIMIT_SIDE
     ppi: float = DefaultCFG.LIMIT_PPI
-    # 头部背景图 (可选): 绝对路径 + 沙箱 root + 宽高比
+    # 头部背景图 (可选): 绝对路径 + 沙箱 root
     bg_image_path: str | None = None
     root_dir: str | None = None
-    bg_aspect: float | None = None
     # Hero 品牌模式开关 (默认开启)
     hero_header: bool = True
 
@@ -79,11 +78,29 @@ def execute_render_task(task: RenderTask) -> list[str]:
                 logger.warning(
                     f"[HelpTypst] 无法计算背景图相对路径: {task.bg_image_path}"
                 )
-            if task.bg_aspect:
-                sys_inputs["bg_aspect"] = f"{task.bg_aspect:.6f}"
 
-        # Hero 品牌模式开关注入模板
+        # Hero 品牌模式开关: sys_inputs 的值统一以字符串传递, 由模板集中解析成 bool
         sys_inputs["hero_header"] = "true" if task.hero_header else "false"
+
+        # 品牌徽标: Typst 无法判断文件是否存在 (image 缺文件 = 硬编译错误),
+        # 因此由 Python 侧探测并把结果以「相对路径 / 空串」告给模板, 缺图时跳过徽标
+        logo_path = (
+            Path(task.template_path).parent.parent
+            / "resources"
+            / "images"
+            / "astrbot-logo-text.svg"
+        )
+        try:
+            sys_inputs["logo_image"] = (
+                os.path.relpath(logo_path, Path(task.template_path).parent).replace(
+                    "\\", "/"
+                )
+                if logo_path.is_file()
+                else ""
+            )
+        except ValueError:
+            # 跨盘符等无法计算相对路径的情况: 当作缺图处理, 不影响整页
+            sys_inputs["logo_image"] = ""
 
         # 3. 执行 Typst 编译
         typst.compile(

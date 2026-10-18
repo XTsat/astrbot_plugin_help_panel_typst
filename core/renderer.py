@@ -16,11 +16,19 @@ from astrbot.api.star import Star
 from ..domain import InternalCFG, TypstPluginConfig
 from ..utils import (
     calculate_hash,
-    get_image_dimensions,
     verify_image_format_matches_extension,
     verify_image_header,
 )
 from . import execute_render_task, RenderTask
+
+
+def _part_index(path: Path) -> int:
+    """按 `_partN` 里的 N 排序
+
+    字典序会把 `_part10` 排到 `_part2` 之前, 长图发送顺序就乱了。
+    """
+    match = re.search(r"_part(\d+)\.webp$", path.name)
+    return int(match.group(1)) if match else 0
 
 
 class AsyncNullContext:  # 异步空上下文
@@ -75,9 +83,9 @@ class TypstRenderer:
             # 顶层 ignored_plugins
             elif hasattr(self.cfg, key):
                 val = getattr(self.cfg, key)
-                # set → list 并排序
+                # set → list 并排序 (统一转 str: 配置被手工改成混合类型时不能让快照抛 TypeError)
                 if isinstance(val, set):
-                    snapshot[key] = sorted(list(val))
+                    snapshot[key] = sorted(str(v) for v in val)
                 # 分类规则 (dataclass 不可直接 JSON 序列化, 转为纯结构)
                 elif key == "category":
                     snapshot[key] = val.to_plain()
@@ -184,9 +192,17 @@ class TypstRenderer:
         """扫描单个目录内的背景图候选 (仅目录根, 排除 cache_/temp_ 前缀)"""
         if not scan_dir.is_dir():
             return []
-        candidates: list[Path] = []
-        for ext in InternalCFG.BACKGROUND_IMAGE_EXTS:
-            candidates.extend(scan_dir.glob(f"*{ext}"))
+        # 用 suffix 小写比较而非 glob: Linux 文件系统区分大小写, *.PNG / *.JPG
+        # 用 glob("*{ext}") 会漏掉
+        try:
+            candidates: list[Path] = [
+                p
+                for p in scan_dir.iterdir()
+                if p.suffix.lower() in InternalCFG.BACKGROUND_IMAGE_EXTS
+            ]
+        except OSError as e:
+            logger.warning(f"[HelpTypst] 背景目录无法读取 {scan_dir}: {e}")
+            return []
         # 先筛选出有效的基本候选 (文件存在 + 非排除前缀)
         valid_basic = [
             c
@@ -279,33 +295,29 @@ class TypstRenderer:
                     font_paths_str = [str(p) for p in self.font_dirs]
 
                     # 头部背景图: 使用批次开始时已解析的背景图 (确保 random 只选一次)
-                    bg_image_path: str | None = None
-                    bg_aspect: float | None = None
-                    root_dir: str | None = None
-                    if bg_image is not None:
-                        bg_image_path = str(bg_image)
-                        dims = get_image_dimensions(bg_image)
-                        if dims and dims[1] > 0:
-                            bg_aspect = dims[0] / dims[1]
-                        try:
-                            # root 必须同时覆盖模板与背景图: 背景图放在数据目录之外
-                            # (自定义 background_dir / header_background) 时, 只按
-                            # 「模板 + 数据目录」算 root 会让 Typst 拒绝读取 → 整页编译失败
-                            root_dir = os.path.commonpath(
-                                [
-                                    str(self.template_path.parent),
-                                    str(self.data_dir),
-                                    str(bg_image),
-                                ]
-                            )
-                        except ValueError:
-                            # 跨盘符等无共同父目录的情况: 放弃背景图, 而不是放弃整页
+                    bg_image_path: str | None = str(bg_image) if bg_image is not None else None
+                    # 插件根目录: root 必须覆盖它, 否则模板里的 ../resources 徽标读不到
+                    plugin_root = str(self.template_path.parent.parent)
+                    root_paths = [
+                        str(self.template_path.parent),
+                        str(self.data_dir),
+                        plugin_root,
+                    ]
+                    if bg_image_path is not None:
+                        # 背景图放在数据目录之外 (自定义 background_dir / header_background)
+                        # 时, 只按「模板 + 数据目录」算 root 会让 Typst 拒绝读取 → 整页编译失败
+                        root_paths.append(bg_image_path)
+                    try:
+                        root_dir: str | None = os.path.commonpath(root_paths)
+                    except ValueError:
+                        # 跨盘符等无共同父目录的情况: 放弃背景图, 而不是放弃整页;
+                        # root 回落到插件目录, 保证模板与内置资源仍可读取
+                        if bg_image_path is not None:
                             logger.warning(
                                 "[HelpTypst] 背景图与模板/数据目录无共同父目录, 头部背景图不可用"
                             )
-                            bg_image_path = None
-                            bg_aspect = None
-                            root_dir = None
+                        bg_image_path = None
+                        root_dir = plugin_root
 
                     # 构造 DTO
                     task = RenderTask(
@@ -324,7 +336,6 @@ class TypstRenderer:
                         ppi=self.cfg.rendering.ppi,
                         bg_image_path=bg_image_path,
                         root_dir=root_dir,
-                        bg_aspect=bg_aspect,
                         hero_header=self.cfg.hero_header,
                     )
 
@@ -354,9 +365,12 @@ class TypstRenderer:
                         # wait=False: 超时/取消时不能阻塞事件循环等待子进程退出
                         pool.shutdown(wait=False, cancel_futures=True)
 
-                    # 错误检查
+                    # 错误检查: 子进程把 typst 诊断/内部路径都塞在 ERROR: 后面,
+                    # 这些只适合进日志; 回给群里的一律是简短提示, 避免泄露部署路径
                     if final_images and final_images[0].startswith("ERROR:"):
-                        raise RuntimeError(final_images[0])
+                        detail = final_images[0][len("ERROR:") :].strip()
+                        logger.error(f"[HelpTypst] Typst 编译失败: {detail}")
+                        raise RuntimeError("Typst 编译失败，请检查模板与字体配置（详见日志）")
 
                     if not final_images:
                         return None, "渲染未生成图片文件"
@@ -397,8 +411,9 @@ class TypstRenderer:
             if is_temp:
                 try:
                     json_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                except OSError as clean_err:
+                    # 清理失败不该掩盖真正的取消原因 (磁盘只读等), 记 warning 后继续抛
+                    logger.warning(f"[HelpTypst] 清理临时 JSON 失败: {clean_err}")
             self._discard_artifacts(artifact_stem)
             raise
 
@@ -409,8 +424,9 @@ class TypstRenderer:
             if is_temp:
                 try:
                     json_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                except OSError as clean_err:
+                    # 同 CancelledError 分支: 清理失败只告警, 不覆盖主异常 e
+                    logger.warning(f"[HelpTypst] 清理临时 JSON 失败: {clean_err}")
             self._discard_artifacts(artifact_stem)
 
             # 清理 KV 缓存
@@ -524,7 +540,7 @@ class TypstRenderer:
         if p1.exists():
             return [str(p1)]
 
-        parts = sorted(self.data_dir.glob(f"{stem}_part*.webp"), key=lambda x: x.name)
+        parts = sorted(self.data_dir.glob(f"{stem}_part*.webp"), key=_part_index)
         return [str(p) for p in parts] if parts else []
 
     async def _check_cache(

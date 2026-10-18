@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +18,40 @@ def _is_valid_hex(color_str: Any) -> bool:
     return bool(HEX_COLOR_REGEX.match(color_str))
 
 
+def _as_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    """整数配置收敛: 类型异常回落默认值, 超界截断 (防御手工改坏的配置)"""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return min(maximum, max(minimum, parsed))
+
+
+def _as_float(value: Any, default: float, minimum: float, maximum: float) -> float:
+    """浮点配置收敛: 类型异常回落默认值, 超界截断"""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(maximum, max(minimum, parsed))
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    """布尔配置解析: 兼容面板/手工配置写入的 "true"/"false"/"1"/"0" 字符串
+
+    直接用 bool("false") 会得到 True, 所以只认明确取值, 其它类型回落默认值。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "1"):
+            return True
+        if normalized in ("false", "0"):
+            return False
+    return default
+
+
 @dataclass
 class RenderingConfig:
     timeout_analysis: float
@@ -30,10 +65,9 @@ class RenderingConfig:
 
 @dataclass
 class ThemePreset:
-    """单个外观预设"""
+    """单个外观预设 (仅配色; 字体优先级已迁移为全局 appearance.font_order)"""
 
     name: str
-    font_order: list[str]
     colors: dict[str, str] = field(default_factory=dict)
     # 条目内「启用」开关: 勾选后无论 active_preset 选什么, 都使用此条目作为自定义配色
     enabled: bool = False
@@ -237,35 +271,78 @@ class TypstPluginConfig:
     @classmethod
     def load(cls, raw_config: AstrBotConfig) -> "TypstPluginConfig":
         """工厂方法：从 AstrBotConfig 加载配置，未配置项回退到 DefaultCFG"""
-        enable_wait = raw_config.get("enable_waiting_message", False)
+        enable_wait = _as_bool(raw_config.get("enable_waiting_message"), False)
 
-        ignored_list = raw_config.get("ignored_plugins", None)
-        ignored_set = (
-            set(ignored_list)
-            if ignored_list is not None
-            else DefaultCFG.IGNORED_PLUGINS.copy()
+        # 黑名单: 字符串按单个插件名处理 (面板误存/手工配置 → 不能被 set() 拆成字符集),
+        # 混入的非字符串项过滤掉, 否则缓存快照的 sorted() 会抛 TypeError
+        raw_ignored = raw_config.get("ignored_plugins")
+        if isinstance(raw_ignored, str):
+            raw_ignored = [raw_ignored]
+        if isinstance(raw_ignored, list):
+            ignored_set = {
+                name.strip()
+                for name in raw_ignored
+                if isinstance(name, str) and name.strip()
+            }
+        else:
+            ignored_set = set(DefaultCFG.IGNORED_PLUGINS)
+
+        # Rendering (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)
+        raw_render = raw_config.get("rendering")
+        if not isinstance(raw_render, dict):
+            raw_render = {}
+
+        webp_limit = _as_int(
+            raw_render.get("webp_limit"),
+            DefaultCFG.LIMIT_WEBP,
+            DefaultCFG.MIN_WEBP_LIMIT,
+            DefaultCFG.LIMIT_WEBP,
         )
-
-        # Rendering
-        raw_render = raw_config.get("rendering", {})
         render_cfg = RenderingConfig(
-            timeout_analysis=raw_render.get(
-                "timeout_analysis", DefaultCFG.TIMEOUT_ANALYSIS
+            timeout_analysis=_as_float(
+                raw_render.get("timeout_analysis"),
+                DefaultCFG.TIMEOUT_ANALYSIS,
+                DefaultCFG.MIN_TIMEOUT_ANALYSIS,
+                DefaultCFG.MAX_TIMEOUT,
             ),
-            timeout_compile=raw_render.get(
-                "timeout_compile", DefaultCFG.TIMEOUT_COMPILE
+            timeout_compile=_as_float(
+                raw_render.get("timeout_compile"),
+                DefaultCFG.TIMEOUT_COMPILE,
+                DefaultCFG.MIN_TIMEOUT_COMPILE,
+                DefaultCFG.MAX_TIMEOUT,
             ),
-            max_concurrent_tasks=int(
-                raw_render.get("max_concurrent_tasks", DefaultCFG.LIMIT_TASK)
+            max_concurrent_tasks=_as_int(
+                raw_render.get("max_concurrent_tasks"),
+                DefaultCFG.LIMIT_TASK,
+                DefaultCFG.MIN_CONCURRENCY,
+                DefaultCFG.MAX_CONCURRENCY,
             ),
-            giant_threshold=raw_render.get("giant_threshold", DefaultCFG.LIMIT_GIANT),
-            webp_limit=raw_render.get("webp_limit", DefaultCFG.LIMIT_WEBP),
-            split_height=raw_render.get("split_height", DefaultCFG.LIMIT_SIDE),
-            ppi=float(raw_render.get("ppi", DefaultCFG.LIMIT_PPI)),
+            giant_threshold=_as_int(
+                raw_render.get("giant_threshold"),
+                DefaultCFG.LIMIT_GIANT,
+                DefaultCFG.MIN_GIANT,
+                DefaultCFG.MAX_GIANT,
+            ),
+            webp_limit=webp_limit,
+            # 单个分片高度不能超过 WebP 单图上限, 否则切片后仍然写不进 WebP
+            split_height=_as_int(
+                raw_render.get("split_height"),
+                DefaultCFG.LIMIT_SIDE,
+                DefaultCFG.MIN_SPLIT_HEIGHT,
+                min(DefaultCFG.LIMIT_SIDE, webp_limit),
+            ),
+            ppi=_as_float(
+                raw_render.get("ppi"),
+                DefaultCFG.LIMIT_PPI,
+                DefaultCFG.MIN_PPI,
+                DefaultCFG.MAX_PPI,
+            ),
         )
 
-        # Appearance
-        raw_appearance = raw_config.get("appearance", {})
+        # Appearance (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)
+        raw_appearance = raw_config.get("appearance")
+        if not isinstance(raw_appearance, dict):
+            raw_appearance = {}
         active_preset_name = raw_appearance.get(
             "active_preset", DefaultCFG.DEFAULT_PRESET
         )
@@ -277,6 +354,8 @@ class TypstPluginConfig:
             legacy_presets = raw_appearance.get("presets", [])
             if isinstance(legacy_presets, list):
                 for p_data in legacy_presets:
+                    if not isinstance(p_data, dict):
+                        continue
                     if p_data.get("preset_name") == active_preset_name:
                         legacy_fonts = p_data.get("font_order", [])
                         break
@@ -293,19 +372,16 @@ class TypstPluginConfig:
         raw_presets_list = raw_appearance.get("presets", [])  # 旧配置兼容
         presets_dict = {}
 
-        # 内置预设注册 (配色由 DefaultCFG.PRESETS 提供, 此处仅登记名称与字体)
+        # 内置预设注册 (配色由 DefaultCFG.PRESETS 提供, 此处仅登记名称)
         for preset_name in DefaultCFG.PRESETS:
-            presets_dict[preset_name] = ThemePreset(
-                name=preset_name,
-                font_order=font_order.copy(),
-                colors={},
-            )
+            presets_dict[preset_name] = ThemePreset(name=preset_name, colors={})
 
         if isinstance(raw_presets_list, list):
             for p_data in raw_presets_list:
+                if not isinstance(p_data, dict):
+                    continue
                 # 解析旧配置的列表 (仅用于颜色覆盖兼容)
                 p_name = p_data.get("preset_name", "custom")
-                p_fonts = p_data.get("font_order", [])
 
                 # 解析颜色配置 (旧配置中微调过的内置预设颜色覆盖仍生效)
                 p_colors = {}
@@ -321,7 +397,6 @@ class TypstPluginConfig:
 
                 presets_dict[p_name] = ThemePreset(
                     name=p_name,
-                    font_order=p_fonts,
                     colors=p_colors,
                     enabled=p_enabled,
                 )
@@ -330,7 +405,7 @@ class TypstPluginConfig:
             active_preset=active_preset_name,
             font_order=font_order,
             presets=presets_dict,
-            rescan_fonts=bool(raw_appearance.get("rescan_fonts", False)),
+            rescan_fonts=_as_bool(raw_appearance.get("rescan_fonts"), False),
         )
 
         # Category (插件分类规则)
@@ -423,11 +498,17 @@ class TypstPluginConfig:
             rules=rules, fallback=fallback, fallback_color=fallback_color
         )
 
-        custom_font_path = raw_config.get("custom_font_path", "")
+        # 路径项: 展开 ~ (否则 "~/fonts" 会被当成相对路径), 非字符串回落默认
+        raw_custom_font_path = raw_config.get("custom_font_path", "")
+        custom_font_path = (
+            os.path.expanduser(raw_custom_font_path.strip())
+            if isinstance(raw_custom_font_path, str)
+            else ""
+        )
         header_background = raw_config.get("header_background", "")
         background_dir = raw_config.get("background_dir", "")
-        background_random = bool(raw_config.get("background_random", True))
-        hero_header = bool(raw_config.get("hero_header", True))
+        background_random = _as_bool(raw_config.get("background_random"), True)
+        hero_header = _as_bool(raw_config.get("hero_header"), True)
 
         logger.debug(
             f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}, 外观预设: {active_preset_name}"

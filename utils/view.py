@@ -1,8 +1,10 @@
 import asyncio
 import json
 import math
+import os
+import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
@@ -150,7 +152,7 @@ class TypstLayout:
         prefixes: list[str],
         font_list: list[str],
         system_name: str = "",
-    ):
+    ) -> None:
         """生成布局数据并写入文件"""
         payload = self._generate_balanced_payload(
             plugins, title, mode, prefixes, font_list
@@ -162,9 +164,17 @@ class TypstLayout:
         # 注入 Hero 统计卡片第三列显示名 (人格名称, 空串则不渲染该列)
         payload["system_name"] = system_name
 
-        save_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        # 先写同目录临时文件再原子替换: 渲染子进程会并发读取该 JSON,
+        # 直接覆盖可能让它读到半截内容
+        tmp_path = save_path.with_name(f"{save_path.name}.tmp")
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            os.replace(tmp_path, save_path)
+        except OSError as exc:
+            tmp_path.unlink(missing_ok=True)
+            logger.warning(f"[HelpTypst] 布局 JSON 写入失败: {exc}")
+            raise
 
     def _generate_balanced_payload(
         self,
@@ -201,8 +211,6 @@ class TypstLayout:
                 return p.command_nodes
             return []
 
-        extract_singles = mode == "command"
-
         # 1. 预分类
         for p in plugins:
             nodes = get_nodes(p)
@@ -212,11 +220,6 @@ class TypstLayout:
                 nodes[0].tag == "tool" or nodes[0].tag == "mcp"
             )
             if is_tool:
-                single_node_plugins.append(p.model_dump())
-                continue
-
-            # B: 单指令 -> Singles (Command 模式)
-            if extract_singles and len(nodes) == 1 and not nodes[0].is_group:
                 single_node_plugins.append(p.model_dump())
                 continue
 
@@ -278,7 +281,6 @@ class TypstLayout:
             "fonts": font_list,
             "plugin_count": len(plugins),
             "enabled_count": sum(1 for p in plugins if not p.disabled),
-            "category_count": len(categories),
             "category_columns": cols,
         }
 
@@ -300,7 +302,6 @@ class TypstLayout:
             "fonts": font_list,
             "plugin_count": len(plugins),
             "enabled_count": sum(1 for p in plugins if not p.disabled),
-            "category_count": len(categories),
             "category_columns": cols,
         }
 
@@ -309,11 +310,12 @@ class TypstLayout:
     ) -> dict[str, Any]:
         """构建插件能力树。
 
+        参数占位已并入 chip 显示名, 模板只消费指令名/别名与分组名, 因此不再单独输出。
         返回:
           {
-            "commands": [{"name", "aliases", "params"}],  # 顶层独立指令
-            "groups": [{"name", "commands": [...]}],        # 指令组
-            "listeners": [str, ...]                         # 监听器提取的指令关键词
+            "commands": [{"name", "aliases"}],          # 顶层独立指令
+            "groups": [{"name", "commands": [...]}],    # 指令组
+            "listeners": [str, ...]                     # 监听器提取的指令关键词
           }
         """
         commands: list[dict[str, Any]] = []
@@ -328,7 +330,6 @@ class TypstLayout:
                     groups.append(
                         {
                             "name": node.name,
-                            "desc": node.desc or "",
                             "commands": group_cmds,
                         }
                     )
@@ -340,8 +341,6 @@ class TypstLayout:
                     {
                         "name": chip_name,
                         "aliases": list(node.aliases or []),
-                        "params": params,
-                        "desc": node.desc or "",
                     }
                 )
 
@@ -380,8 +379,6 @@ class TypstLayout:
                     {
                         "name": chip_name,
                         "aliases": list(node.aliases or []),
-                        "params": params,
-                        "desc": node.desc or "",
                     }
                 )
         return cmds
@@ -485,7 +482,6 @@ class TypstLayout:
                     "name": name,
                     "count": len(plist),
                     "color": theme_color,
-                    "text_color": "#355A81",
                     "plugins": [
                         {
                             "id": p.order,
@@ -538,7 +534,6 @@ class TypstLayout:
                 "desc": p.desc,
                 "author": p.author,
                 "order": p.order,
-                "category": cat,
                 "category_color": category_color,
             },
             "admin_commands": admin_commands,
@@ -613,8 +608,6 @@ class TypstLayout:
                     "name": name,
                     "count": len(plist),
                     "color": theme_color,
-                    # 标题文字对比度由模板自动计算, 保留该字段以兼容旧模板
-                    "text_color": "#355A81",
                     "plugins": [
                         {
                             "id": p.order,
@@ -635,8 +628,7 @@ class TypstLayout:
         """将分类卡片按估算高度分配到 2 列, 使两列高度接近
 
         分类数量通常很少 (<20), 采用子集和 DP 求最接近等高的一列, 而非贪心。
-        估算高度已计入卡片固定开销、插件盒子与卡片间距, 见 _estimate_category_height。
-        detail=True 时使用更激进的高度估算, 为详细指令模式的指令标签组预留空间。
+        估算高度按模板的实际排版参数折算, 见 _estimate_category_height。
         """
         n = len(categories)
         heights = [self._estimate_category_height(c, detail) for c in categories]
@@ -687,19 +679,20 @@ class TypstLayout:
     def _estimate_category_height(self, cat: dict[str, Any], detail: bool = False) -> int:
         """估算单个分类卡片在列内占用的高度 (pt)
 
-        与模板 category_card 的 spacing 保持近似:
-          固定开销 = 彩色头部 + 列表 padding + 边框/阴影 + 卡片间距
-          每插件   = 独立边框盒子 + 盒子间距 (最后一个盒子无间距, 误差忽略)
-
-        detail=True 时指令标签组使每个插件条目变高, 估算值随之放大。
+        按模板 category_card 的真实排版折算: 固定头部/内边距 + 每个插件条目的实际高度。
+        detail=True 时按能力区 chip 的折行数累加指令/指令组/监听器的高度。
         """
-        count = int(cat.get("count", 0))
-        row_height = (
-            InternalCFG.CATEGORY_ROW_HEIGHT_DETAIL
-            if detail
-            else InternalCFG.CATEGORY_ROW_HEIGHT
-        )
-        return InternalCFG.CATEGORY_HEADER_HEIGHT + count * row_height
+        plugins = cat.get("plugins") or []
+        if detail:
+            height = InternalCFG.EST_DETAIL_CATEGORY_BASE + sum(
+                _estimate_plugin_detail_height(p) for p in plugins
+            )
+        else:
+            height = InternalCFG.EST_CATEGORY_BASE + sum(
+                _estimate_plugin_row_height(p) for p in plugins
+            )
+        # 分类卡片之间的 stack spacing: 两列卡片数不同时, 列高差主要差在这里
+        return int(round(height + InternalCFG.EST_CATEGORY_STACK_GAP))
 
     def _estimate_height(self, nodes: list[RenderNode]) -> int:
         """高度估算器(暂硬编码，等待完善模板逻辑)"""
@@ -720,3 +713,116 @@ class TypstLayout:
             total_h += rows * 30 + 10
 
         return total_h
+
+
+# ---- 两列高度估算 ----
+# 系数统一维护在 InternalCFG.EST_* (domain/constants.py 的「两列高度估算系数」),
+# 它们只影响左右分列的平衡, 不参与渲染; 校准说明见那边注释。
+
+
+class _CommandPayload(TypedDict, total=False):
+    """能力区指令 chip 的数据形状 (模板只读 name/aliases)"""
+
+    name: str
+    aliases: list[str]
+
+
+class _GroupPayload(TypedDict, total=False):
+    """能力区指令组的数据形状"""
+
+    name: str
+    commands: list[_CommandPayload]
+
+
+class _CapabilitiesPayload(TypedDict, total=False):
+    """插件能力树的数据形状"""
+
+    commands: list[_CommandPayload]
+    groups: list[_GroupPayload]
+    listeners: list[str]
+
+
+def _estimate_text_width(text: str, size: float) -> float:
+    """按全宽/半宽比例估算一段文本的排版宽度 (pt)"""
+    width = 0.0
+    for char in text:
+        wide = unicodedata.east_asian_width(char) in ("W", "F")
+        width += size if wide else size * 0.52
+    return width
+
+
+def _estimate_chip_rows(widths: list[float], line_width: float) -> int:
+    """按模板 par 的折行行为估算 chip 占用的行数"""
+    rows = 1
+    used = 0.0
+    for width in widths:
+        chunk = width + InternalCFG.EST_CHIP_GAP
+        if used and used + chunk > line_width:
+            rows += 1
+            used = chunk
+        else:
+            used += chunk
+    return rows
+
+
+def _estimate_command_chip_widths(commands: list[_CommandPayload]) -> list[float]:
+    """指令 chip 及其别名 chip 的宽度序列 (字号与字距取自模板)"""
+    widths: list[float] = []
+    for command in commands:
+        name = command.get("name") or ""
+        # 主指令 chip: 8.5pt 粗体 + 0.5pt 字距; 别名 chip: 8pt 带 ↳ 前缀
+        widths.append(
+            _estimate_text_width(name, 8.5) * 1.02
+            + 0.5 * max(0, len(name) - 1)
+            + InternalCFG.EST_CHIP_PADDING
+        )
+        for alias in command.get("aliases") or []:
+            widths.append(_estimate_text_width(f"↳ {alias}", 8.0) + InternalCFG.EST_CHIP_PADDING)
+    return widths
+
+
+def _estimate_listener_chip_widths(listeners: list[str]) -> list[float]:
+    """监听器 chip 的宽度序列 (8pt 常规字重)"""
+    return [
+        _estimate_text_width(name, 8.0) + InternalCFG.EST_CHIP_PADDING for name in listeners
+    ]
+
+
+def _estimate_plugin_row_height(plugin: dict[str, Any]) -> float:
+    """估算指令模式下一个插件行的高度 (pt)"""
+    name = plugin.get("display_name") or plugin.get("name") or ""
+    lines = max(1, math.ceil(_estimate_text_width(name, 10.0) / InternalCFG.EST_PLUGIN_NAME_WIDTH))
+    return InternalCFG.EST_PLUGIN_ROW + (lines - 1) * InternalCFG.EST_PLUGIN_NAME_LINE
+
+
+def _estimate_plugin_detail_height(plugin: dict[str, Any]) -> float:
+    """估算详细模式下一个插件条目 (含能力区) 的高度 (pt)"""
+    capabilities: _CapabilitiesPayload = plugin.get("capabilities") or {}
+    commands = capabilities.get("commands") or []
+    groups = capabilities.get("groups") or []
+    listeners = capabilities.get("listeners") or []
+    if not (commands or groups or listeners):
+        return InternalCFG.EST_DETAIL_PLUGIN_ROW
+
+    height = InternalCFG.EST_DETAIL_PLUGIN_ROW + InternalCFG.EST_DETAIL_CAPABILITY_BLOCK
+    if commands:
+        height += InternalCFG.EST_DETAIL_SECTION_LABEL
+        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
+            _estimate_command_chip_widths(commands), InternalCFG.EST_DETAIL_CHIP_WIDTH
+        )
+    for group in groups:
+        group_commands = group.get("commands") or []
+        # 空指令组模板不渲染, 不占高度
+        if not group_commands:
+            continue
+        height += InternalCFG.EST_DETAIL_GROUP_OVERHEAD
+        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
+            _estimate_command_chip_widths(group_commands),
+            InternalCFG.EST_DETAIL_GROUP_CHIP_WIDTH,
+        )
+    if listeners:
+        height += InternalCFG.EST_DETAIL_SECTION_LABEL
+        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
+            _estimate_listener_chip_widths(listeners), InternalCFG.EST_DETAIL_CHIP_WIDTH
+        )
+    return height

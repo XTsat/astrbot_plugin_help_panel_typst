@@ -1,5 +1,6 @@
 import re
 from collections import defaultdict
+from enum import Enum
 from typing import Any
 
 from astrbot.api import logger
@@ -79,9 +80,7 @@ class BaseAnalyzer:
             for p in structured_plugins:
                 p_copy = p.model_copy(deep=True)
                 # 检查插件(容器)本身是否匹配: 在Command模式下，p是插件；在Event/Filter模式下，p是分类组(如 OnMessage)
-                is_container_match = self._is_match(
-                    p_copy.name, p_copy.display_name, p_copy.desc, q_lower
-                )
+                is_container_match = self._is_container_match(p_copy, q_lower)
 
                 if is_container_match:
                     # 容器匹配 -> 保留整个容器及其所有内容
@@ -118,14 +117,49 @@ class BaseAnalyzer:
             logger.error(f"[HelpTypst] 按编号 {order} 分析失败: {e}", exc_info=True)
             return []
 
-    def _is_match(self, name: str, display: str | None, desc: str, query: str) -> bool:
-        """基础匹配检查"""
+    def _is_container_match(self, plugin: PluginMetadata, query: str) -> bool:
+        """容器匹配: 可见标题 (display_name, 无则回落 name) + 描述
+
+        事件分组 / 过滤器卡片过去把内部标识 (event_group / filter_regex) 写进 name 并参与
+        搜索, 命中后会把整棵树带出来; 现在这些容器的 name 已改为可读标题, 只有「真实插件」
+        (category 非空) 与工具卡才额外允许按插件 ID / MCP 服务名 搜索。
+        """
+        title = plugin.display_name or plugin.name
+        if self._is_match(title, None, plugin.desc, query):
+            return True
+        is_tool_card = bool(plugin.nodes) and plugin.nodes[0].tag in ("tool", "mcp")
+        if plugin.category or is_tool_card:
+            return self._is_match(plugin.name, None, "", query)
+        return False
+
+    @staticmethod
+    def _node_search_extras(node: RenderNode) -> list[str]:
+        """节点可搜索的附加可见文本: 别名 / 参数占位 / 事件监听器提取的命令关键词"""
+        extras = list(node.aliases or [])
+        if node.params:
+            extras.append(node.params)
+        extras.extend(node.commands or [])
+        return extras
+
+    def _is_match(
+        self,
+        name: str,
+        display: str | None,
+        desc: str,
+        query: str,
+        extras: list[str] | None = None,
+    ) -> bool:
+        """基础匹配检查 (大小写不敏感子串, 不做正则拼接)"""
         if query in name.lower():
             return True
         if display and query in display.lower():
             return True
         if desc and query in desc.lower():
             return True
+        if extras:
+            for extra in extras:
+                if extra and query in extra.lower():
+                    return True
         return False
 
     def _filter_nodes_recursively(
@@ -135,7 +169,9 @@ class BaseAnalyzer:
         result = []
         for node in nodes:
             # 1. 检查自身匹配
-            self_match = self._is_match(node.name, None, node.desc, query)
+            self_match = self._is_match(
+                node.name, None, node.desc, query, self._node_search_extras(node)
+            )
 
             # 2. 递归检查子节点
             if self_match:
@@ -157,13 +193,13 @@ class BaseAnalyzer:
         raise NotImplementedError
 
     def _derive_category(self, info: dict[str, str | None]) -> str:
-        """根据插件元信息推断分类: 关键词命中 (desc/name/display_name/tags) → 兜底
+        """根据插件元信息推断分类: 关键词命中 (desc/name/display_name) → 兜底
 
         分类规则与兜底分类名来自设置面板 category 配置 (默认预置
         DefaultCFG.DEFAULT_CATEGORY_KEYWORDS, 用户可自由增删改)。
         """
         text_parts = []
-        for key in ("desc", "name", "display_name", "tags"):
+        for key in ("desc", "name", "display_name"):
             val = info.get(key)
             if val:
                 text_parts.append(str(val))
@@ -178,6 +214,82 @@ class BaseAnalyzer:
                 mapping[handler.handler_module_path].append(handler)
         return mapping
 
+    def _module_to_plugin_map(self) -> dict[str, Any]:
+        """插件模块路径 → 插件对象 (只做精确索引, 模糊归属交给 _resolve_plugin)"""
+        mapping: dict[str, Any] = {}
+        for star in self.context.get_all_stars():
+            module_path = getattr(star, "module_path", None)
+            if module_path:
+                mapping[str(module_path)] = star
+        return mapping
+
+    @staticmethod
+    def _module_relation(target: str, candidate: str) -> int:
+        """target 相对 candidate 的归属强度: 3 相等 / 2 同插件包 / 1 candidate 是祖先 / 0 无关
+
+        以 `.` 为边界判断, 避免 `astrbot_plugin_help` 误匹配 `astrbot_plugin_help_panel_typst`。
+        插件的 handler 常定义在与 main 同级的子模块 (handlers.py 等), 单靠前缀判断会漏;
+        而按「共同父包」判断同插件, 又不会把相邻插件的模块算进来。
+        """
+        if target == candidate:
+            return 3
+        if target.rsplit(".", 1)[0] == candidate.rsplit(".", 1)[0]:
+            return 2
+        if candidate.startswith(target + "."):
+            return 2
+        if target.startswith(candidate + "."):
+            return 1
+        return 0
+
+    def _resolve_handlers(
+        self, raw_module: str | None, handlers_map: dict[str, list[StarHandlerMetadata]]
+    ) -> list[StarHandlerMetadata]:
+        """按插件模块路径取 handler 列表: 精确优先, 否则在全部候选里选归属最强的
+
+        不能「首个前缀命中即 break」: 那样结果取决于 handlers_map 的插入顺序, 会把前缀
+        相近的其它插件的 handler 整包挂过来。多候选时比较 归属强度 → handler 数 → 路径长度。
+        """
+        if not raw_module:
+            return []
+        exact = handlers_map.get(raw_module)
+        if exact:
+            return exact
+
+        best_handlers: list[StarHandlerMetadata] = []
+        best_score = (0, 0, 0)
+        for key, handlers in handlers_map.items():
+            relation = self._module_relation(raw_module, key)
+            if relation == 0:
+                continue
+            score = (relation, len(handlers), len(key))
+            if score > best_score:
+                best_score = score
+                best_handlers = handlers
+        return best_handlers
+
+    def _resolve_plugin(
+        self, handler_module: str, module_to_plugin: dict[str, Any]
+    ) -> Any | None:
+        """按 handler 模块路径反查插件对象: 精确优先, 否则取归属最强的插件模块
+
+        与 _resolve_handlers 共用 _module_relation, 保证指令 / 事件 / 过滤器三种面板口径一致。
+        """
+        plugin = module_to_plugin.get(handler_module)
+        if plugin is not None:
+            return plugin
+
+        best_plugin: Any | None = None
+        best_score = (0, 0)
+        for key, star in module_to_plugin.items():
+            relation = self._module_relation(handler_module, key)
+            if relation == 0:
+                continue
+            score = (relation, len(key))
+            if score > best_score:
+                best_score = score
+                best_plugin = star
+        return best_plugin
+
     def _get_safe_plugin_info(self, star_meta: Any) -> dict[str, str | None]:
         """针对不规范的插件元信息进行防御性编程"""
         if not star_meta:
@@ -187,6 +299,7 @@ class BaseAnalyzer:
                 "version": "",
                 "desc": "",
                 "author": "",
+                "raw_module": None,  # handler 查找, 与正常分支保持同键
             }
 
         # 智能名称
@@ -218,20 +331,12 @@ class BaseAnalyzer:
         desc = str(getattr(star_meta, "desc", "")) or ""
         author = str(getattr(star_meta, "author", "")) or ""
 
-        # tags 为可选字段 (metadata.yaml 中用于插件市场分类), 缺失时兜底为空字符串
-        raw_tags = getattr(star_meta, "tags", None)
-        if isinstance(raw_tags, list):
-            tags_str = " ".join(str(t) for t in raw_tags)
-        else:
-            tags_str = ""
-
         return {
             "name": safe_name,
             "display_name": display,
             "version": version,
             "desc": desc,
             "author": author,
-            "tags": tags_str,
             "raw_module": raw_module,  # handler 查找
         }
 
@@ -244,7 +349,7 @@ class CommandAnalyzer(BaseAnalyzer):
         results = []
         all_stars = self.context.get_all_stars()
 
-        logger.info(
+        logger.debug(
             f"[HelpTypst] 开始分析指令。共扫描到 {len(all_stars)} 个已加载插件。"
         )
 
@@ -265,16 +370,9 @@ class CommandAnalyzer(BaseAnalyzer):
             # --- 构建指令树 (即使无指令也展示插件卡片) ---
             try:
                 nodes: list[RenderNode] = []
-                if raw_module:
-                    handlers = handlers_map.get(raw_module, [])
-                    # Fallback: 模糊匹配
-                    if not handlers:
-                        for k, v in handlers_map.items():
-                            if k.startswith(raw_module) or raw_module.startswith(k):
-                                handlers = v
-                                break
-                    if handlers:
-                        nodes = self._build_plugin_command_tree(handlers)
+                handlers = self._resolve_handlers(raw_module, handlers_map)
+                if handlers:
+                    nodes = self._build_plugin_command_tree(handlers)
 
                 results.append(
                     PluginMetadata(
@@ -297,7 +395,7 @@ class CommandAnalyzer(BaseAnalyzer):
         # 按分类分组排序, 并分配全局连续编号 (跨分类)
         results = self._assign_global_order(results)
 
-        logger.info(f"[HelpTypst] 指令分析完成。共展示 {len(results)} 个插件。")
+        logger.debug(f"[HelpTypst] 指令分析完成。共展示 {len(results)} 个插件。")
         return results
 
     def _assign_global_order(
@@ -540,15 +638,22 @@ class CommandAnalyzer(BaseAnalyzer):
 class EventAnalyzer(BaseAnalyzer):
     """事件分析器：处理所有 EventType，获取完整工具列表（含 MCP）"""
 
+    @staticmethod
+    def _event_type_sort_key(evt_type: Any) -> tuple[int, str]:
+        """事件分组排序键: 先按 EVENT_TYPE_MAP 登记顺序, 未登记类型排后并按名排序"""
+        try:
+            return (list(InternalCFG.EVENT_TYPE_MAP).index(evt_type), "")
+        except ValueError:
+            return (
+                len(InternalCFG.EVENT_TYPE_MAP),
+                str(getattr(evt_type, "name", evt_type)),
+            )
+
     def analyze_hierarchy(self) -> list[PluginMetadata]:
         results = []
 
-        # 1. 映射模块路径到插件对象
-        module_to_plugin = {}
-        all_stars = self.context.get_all_stars()
-        for star in all_stars:
-            if star.module_path:
-                module_to_plugin[star.module_path] = star
+        # 1. 映射模块路径到插件对象 (模糊归属由 _resolve_plugin 统一处理, 与指令/过滤器口径一致)
+        module_to_plugin = self._module_to_plugin_map()
 
         # --- A.处理函数工具 (Plugin Tools + MCP Tools) ---
         # 获取工具列表
@@ -556,6 +661,7 @@ class EventAnalyzer(BaseAnalyzer):
         if hasattr(self.context, "get_llm_tool_manager"):
             tool_manager = self.context.get_llm_tool_manager()
 
+        tool_cards: list[PluginMetadata] = []
         if tool_manager:
             for tool in tool_manager.func_list:
                 if not tool.active:
@@ -573,7 +679,9 @@ class EventAnalyzer(BaseAnalyzer):
                     tag = "mcp"
                 elif tool.handler_module_path:
                     # >>> 来源: 插件 <<<
-                    plugin = module_to_plugin.get(tool.handler_module_path)
+                    plugin = self._resolve_plugin(
+                        tool.handler_module_path, module_to_plugin
+                    )
                     if plugin:
                         if plugin.name in self.cfg.ignored_plugins:
                             continue
@@ -595,7 +703,11 @@ class EventAnalyzer(BaseAnalyzer):
                     desc="",
                     nodes=[node],
                 )
-                results.append(pm)
+                tool_cards.append(pm)
+
+        # 工具卡按 来源 + 工具名 排序, 渲染顺序不随注册顺序漂移
+        tool_cards.sort(key=lambda p: (p.name, p.nodes[0].name if p.nodes else ""))
+        results.extend(tool_cards)
 
         # --- B.处理普通事件 (排除 OnCallingFuncToolEvent)  ---
         event_groups = defaultdict(list)
@@ -609,29 +721,26 @@ class EventAnalyzer(BaseAnalyzer):
             if handler.event_type == EventType.OnCallingFuncToolEvent:
                 continue
 
-            if handler.handler_module_path in module_to_plugin:
-                plugin = module_to_plugin[handler.handler_module_path]
-                info = self._get_safe_plugin_info(plugin)
-                if info["name"] in self.cfg.ignored_plugins:
-                    continue  # 黑名单
-                if not plugin.activated:
-                    continue
-            else:
+            plugin = self._resolve_plugin(handler.handler_module_path, module_to_plugin)
+            if plugin is None:
+                continue
+            info = self._get_safe_plugin_info(plugin)
+            if info["name"] in self.cfg.ignored_plugins:
+                continue  # 黑名单
+            if not plugin.activated:
                 continue
 
             event_groups[handler.event_type].append(handler)
 
-        for evt_type, handlers in event_groups.items():
-            card_title = InternalCFG.EVENT_TYPE_MAP.get(evt_type, str(evt_type.name))
+        for evt_type, handlers in sorted(
+            event_groups.items(), key=lambda kv: self._event_type_sort_key(kv[0])
+        ):
+            card_title = InternalCFG.EVENT_TYPE_MAP.get(evt_type)
 
             nodes = []
             for h in handlers:
-                plugin = module_to_plugin.get(h.handler_module_path)
-                p_info = (
-                    self._get_safe_plugin_info(plugin)
-                    if plugin
-                    else {"name": "System", "display_name": None}
-                )
+                plugin = self._resolve_plugin(h.handler_module_path, module_to_plugin)
+                p_info = self._get_safe_plugin_info(plugin)
 
                 # 构造节点
                 p_name = p_info["name"]
@@ -663,14 +772,11 @@ class EventAnalyzer(BaseAnalyzer):
                     )
                 )
 
-            nodes.sort(key=lambda x: x.name)
-            nodes.sort(
-                key=lambda x: x.priority if x.priority is not None else 0, reverse=True
-            )
+            nodes.sort(key=lambda x: (-(x.priority or 0), x.name))
 
             pm = PluginMetadata(
-                name="event_group",
-                display_name=card_title,
+                name=card_title,
+                display_name=None,
                 version="",
                 desc=f"共 {len(nodes)} 个挂载点",
                 nodes=nodes,
@@ -687,22 +793,25 @@ class EventAnalyzer(BaseAnalyzer):
         """
         results: list[RenderNode] = []
 
-        # 1. 解析目标插件的 module_path
-        target_module: str | None = None
-        for star in self.context.get_all_stars():
-            info = self._get_safe_plugin_info(star)
-            if info["name"] == plugin_name:
-                target_module = info["raw_module"]
+        # 1. 定位目标插件对象 (模块归属交给 _resolve_plugin, 与其余分析器口径一致)
+        module_to_plugin = self._module_to_plugin_map()
+        target_star: Any | None = None
+        for star in module_to_plugin.values():
+            if self._get_safe_plugin_info(star)["name"] == plugin_name:
+                target_star = star
                 break
 
-        if not target_module:
+        if target_star is None:
             return results
 
         # 2. 收集该插件的非指令事件监听器
         for handler in star_handlers_registry:
             if not isinstance(handler, StarHandlerMetadata):
                 continue
-            if handler.handler_module_path != target_module:
+            if (
+                self._resolve_plugin(handler.handler_module_path, module_to_plugin)
+                is not target_star
+            ):
                 continue
             if self._is_command_handler(handler):
                 continue  # 纯 @command 已在指令区展示
@@ -725,10 +834,7 @@ class EventAnalyzer(BaseAnalyzer):
                 )
             )
 
-        results.sort(key=lambda x: x.name)
-        results.sort(
-            key=lambda x: x.priority if x.priority is not None else 0, reverse=True
-        )
+        results.sort(key=lambda x: (-(x.priority or 0), x.name))
         return results
 
     def _is_command_handler(self, handler: StarHandlerMetadata) -> bool:
@@ -745,11 +851,7 @@ class FilterAnalyzer(BaseAnalyzer):
 
     def analyze_hierarchy(self) -> list[PluginMetadata]:
         results = []
-        module_to_plugin = {}
-        all_stars = self.context.get_all_stars()
-        for star in all_stars:
-            if star.module_path:
-                module_to_plugin[star.module_path] = star
+        module_to_plugin = self._module_to_plugin_map()
 
         # 数据容器
         regex_data = defaultdict(list)
@@ -761,14 +863,13 @@ class FilterAnalyzer(BaseAnalyzer):
                 continue
 
             # 关联插件对象
-            if handler.handler_module_path in module_to_plugin:
-                plugin = module_to_plugin[handler.handler_module_path]
-                p_info = self._get_safe_plugin_info(plugin)
-                if p_info["name"] in self.cfg.ignored_plugins:
-                    continue  # 黑名单
-                if not plugin.activated:
-                    continue
-            else:
+            plugin = self._resolve_plugin(handler.handler_module_path, module_to_plugin)
+            if plugin is None:
+                continue
+            p_info = self._get_safe_plugin_info(plugin)
+            if p_info["name"] in self.cfg.ignored_plugins:
+                continue  # 黑名单
+            if not plugin.activated:
                 continue
 
             if not handler.event_filters:
@@ -793,7 +894,7 @@ class FilterAnalyzer(BaseAnalyzer):
         if regex_data:
             nodes = []
             for mod_path, items in regex_data.items():
-                plugin = module_to_plugin.get(mod_path)
+                plugin = self._resolve_plugin(mod_path, module_to_plugin)
                 p_info = (
                     self._get_safe_plugin_info(plugin)
                     if plugin
@@ -841,8 +942,8 @@ class FilterAnalyzer(BaseAnalyzer):
 
             results.append(
                 PluginMetadata(
-                    name="filter_regex",
-                    display_name="正则触发器 (Regex)",
+                    name="正则触发器 (Regex)",
+                    display_name=None,
                     version="",
                     desc=f"共 {len(nodes)} 个插件使用了正则",
                     nodes=nodes,
@@ -853,7 +954,7 @@ class FilterAnalyzer(BaseAnalyzer):
         if platform_data:
             results.append(
                 self._build_criteria_card(
-                    "平台限制 (Platform)", "platform", platform_data, module_to_plugin
+                    "平台限制 (Platform)", platform_data, module_to_plugin
                 )
             )
 
@@ -861,7 +962,7 @@ class FilterAnalyzer(BaseAnalyzer):
         if msgtype_data:
             results.append(
                 self._build_criteria_card(
-                    "消息类型限制 (MsgType)", "msg_type", msgtype_data, module_to_plugin
+                    "消息类型限制 (MsgType)", msgtype_data, module_to_plugin
                 )
             )
 
@@ -870,9 +971,8 @@ class FilterAnalyzer(BaseAnalyzer):
     def _build_criteria_card(
         self,
         title: str,
-        tag_prefix: str,
         data: dict[str, list[StarHandlerMetadata]],
-        module_to_plugin: dict,
+        module_to_plugin: dict[str, Any],
     ) -> PluginMetadata:
         nodes = []
         sorted_keys = sorted(data.keys())
@@ -882,12 +982,8 @@ class FilterAnalyzer(BaseAnalyzer):
             children = []
 
             for h in handlers:
-                plugin = module_to_plugin.get(h.handler_module_path)
-                p_info = (
-                    self._get_safe_plugin_info(plugin)
-                    if plugin
-                    else self._get_safe_plugin_info(None)
-                )
+                plugin = self._resolve_plugin(h.handler_module_path, module_to_plugin)
+                p_info = self._get_safe_plugin_info(plugin)
                 p_name = p_info["name"]
                 p_display = p_info["display_name"]
 
@@ -923,10 +1019,7 @@ class FilterAnalyzer(BaseAnalyzer):
                     )
                 )
 
-            children.sort(key=lambda x: x.name)
-            children.sort(
-                key=lambda x: x.priority if x.priority is not None else 0, reverse=True
-            )
+            children.sort(key=lambda x: (-(x.priority or 0), x.name))
 
             nodes.append(
                 RenderNode(
@@ -939,26 +1032,37 @@ class FilterAnalyzer(BaseAnalyzer):
             )
 
         return PluginMetadata(
-            name=f"filter_{tag_prefix}",
-            display_name=title,
+            name=title,
+            display_name=None,
             version="",
             desc=f"共 {len(data)} 种过滤条件",
             nodes=nodes,
         )
 
-    def _format_flags(self, value, enum_cls):
+    def _format_flags(self, value: Any, enum_cls: type[Enum]) -> str:
+        """把位标志枚举格式化为 `A | B` 字符串 (ALL → "ALL", 空 → "None")
+
+        `member in value` 依赖 3.11+ 的 Flag 包含语义, 这里按位判定;
+        非整型值 (旧版/自定义过滤器可能存集合) 回退到成员判断。
+        """
         if value is None:
             return "None"
-        if hasattr(enum_cls, "ALL") and value == enum_cls.ALL:
+        all_flag = getattr(enum_cls, "ALL", None)
+        if all_flag is not None and value == all_flag:
             return "ALL"
 
-        members = []
+        raw_mask = getattr(value, "value", value)
+        members: list[str] = []
         for member in enum_cls:
             if member.name == "ALL":
                 continue
-            if member in value:
-                formatted_name = member.name
-                members.append(formatted_name)
+            member_value = getattr(member, "value", None)
+            if isinstance(raw_mask, int) and isinstance(member_value, int):
+                if member_value & raw_mask:
+                    members.append(member.name)
+            elif isinstance(value, (set, frozenset)) and member in value:
+                # 仅集合型兜底: 其它非整型值不做 in 判断 (会 TypeError), 宁可显示 None
+                members.append(member.name)
 
         if not members:
             return "None"

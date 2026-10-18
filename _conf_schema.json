@@ -290,7 +290,7 @@
         "description": "图片清晰度 (PPI)",
         "type": "float",
         "slider": {
-          "min": 64,
+          "min": 72,
           "max": 256,
           "step": 1
         },
@@ -307,6 +307,17 @@
         },
         "default": 1500,
         "hint": "超过此高度的插件将独占一行显示 (仅 Event/Filter 模式有效)"
+      },
+      "webp_limit": {
+        "description": "WebP 单图高度上限 (px)",
+        "type": "int",
+        "slider": {
+          "min": 1000,
+          "max": 16383,
+          "step": 1
+        },
+        "default": 16383,
+        "hint": "超过该高度的长图会自动切分为多张；WebP 格式单图高度最高 16383，通常无需修改"
       },
       "split_height": {
         "description": "长图切分高度 (px)",
@@ -346,28 +357,7 @@
           "LXGW Neo XiHei"
         ],
         "options": [
-          "C059",
-          "Cantarell",
-          "D050000L",
-          "DejaVu Sans",
-          "DejaVu Sans Mono",
-          "DejaVu Serif",
-          "Droid Sans Fallback",
-          "Hack",
-          "LXGW Neo XiHei",
-          "Libertinus Serif",
-          "New Computer Modern",
-          "New Computer Modern Math",
-          "Nimbus Mono PS",
-          "Nimbus Roman",
-          "Nimbus Sans",
-          "Noto Mono",
-          "Noto Sans Mono",
-          "P052",
-          "Standard Symbols PS",
-          "URW Bookman",
-          "URW Gothic",
-          "Z003"
+          "LXGW Neo XiHei"
         ],
         "hint": "全局字体使用顺序（按选择顺序生效）。选项自动收录：内置字体 + 自定义目录字体 + 系统字体库；也支持直接输入字体名（需存在于系统中）。扫描不到的字体会被自动剔除"
       },
@@ -439,7 +429,7 @@
         "templates": {
           "standard_theme": {
             "name": "自定义预设",
-            "hint": "自定义配色列表：在上方选择「自定义」或勾选条目内的「启用」开关时使用本列表配置；默认提供 zhenxun 预设作为模板，可改名或新增条目",
+            "hint": "自定义配色列表：在上方选择「自定义」或勾选条目内的「启用」开关时使用本列表配置；默认提供 zhenxun 预设作为模板，可改名或新增条目。注意：内置预设的配色固定，直接修改内置预设条目的颜色不会生效——需先勾选该条目的「启用」开关，或把上方预设切到「自定义」",
             "items": {
               "preset_name": {
                 "description": "预设名称 (ID)",
@@ -648,6 +638,11 @@
                 "type": "string",
                 "default": "#E7EFF1"
               },
+              "c_rich_bg": {
+                "description": "富文本块背景",
+                "type": "string",
+                "default": "#FFFFFF"
+              },
               "header_004": {
                 "description": "🏷️ 标签与胶囊",
                 "type": "string",
@@ -684,8 +679,18 @@
                 "type": "string",
                 "default": "#F0C14B"
               },
+              "c_event_icon": {
+                "description": "事件监听图标颜色",
+                "type": "string",
+                "default": "#F0C14B"
+              },
               "c_tag_mcp": {
                 "description": "MCP图标颜色",
+                "type": "string",
+                "default": "#355A81"
+              },
+              "c_tag_id": {
+                "description": "指令 ID 标签颜色",
                 "type": "string",
                 "default": "#355A81"
               },
@@ -694,6 +699,21 @@
                 "type": "string",
                 "default": "---",
                 "read_only": true
+              },
+              "c_regex_bg": {
+                "description": "匹配关键词背景",
+                "type": "string",
+                "default": "#FFF6E3"
+              },
+              "c_regex_text": {
+                "description": "匹配关键词文字",
+                "type": "string",
+                "default": "#C99114"
+              },
+              "c_regex_icon": {
+                "description": "匹配图标颜色",
+                "type": "string",
+                "default": "#D4A017"
               },
               "c_highlight_bg": {
                 "description": "搜索高亮背景",

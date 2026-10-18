@@ -1,20 +1,27 @@
 import asyncio
 import shutil
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from astrbot.api import logger, AstrBotConfig
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.message_components import Image
 
 from .domain import InternalCFG, TypstPluginConfig
 from .utils import FontManager, HelpHint, MsgRecall, TypstLayout
-from .core import CommandAnalyzer, EventAnalyzer, FilterAnalyzer, TypstRenderer
+from .core import (
+    BaseAnalyzer,
+    CommandAnalyzer,
+    EventAnalyzer,
+    FilterAnalyzer,
+    TypstRenderer,
+)
 
 
 class HelpTypst(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         # 1. 静态资源路径
         self.plugin_dir = Path(__file__).parent
@@ -29,8 +36,9 @@ class HelpTypst(Star):
         self.plugin_config = TypstPluginConfig.load(config)
 
         # 3. 获取字体
+        # 路径项已在 config.load() 归一 (~ 展开 + strip), 这里直接用
         raw_path = self.plugin_config.custom_font_path
-        if raw_path and raw_path.strip():
+        if raw_path:
             self.user_font_dir = Path(raw_path)  # 自定义字体目录
         else:
             self.user_font_dir = self.data_dir / "fonts"  # 缺省值
@@ -83,6 +91,9 @@ class HelpTypst(Star):
 
         self.prefixes: list[str] = []
 
+        # /typst font 触发的自重载: terminate 跳过重复字体扫描 (新实例 initialize 会再扫)
+        self._skip_rescan_on_terminate = False
+
     async def initialize(self):
         """异步初始化"""
         self._init_prefixes(self.context)
@@ -93,17 +104,19 @@ class HelpTypst(Star):
     def _auto_close_rescan_flag(self):
         """「重新扫描字体」一次性开关: 勾选保存后自动关闭
 
-        扫描本体由 _refresh_resources 无条件执行 (initialize / terminate 均会触发),
+        扫描本体由 _refresh_resources 执行 (initialize 总会触发, terminate 仅在非自重载时触发),
         这里只负责在扫描完成后把开关复位, 避免每次重载都重复扫描。
         """
         try:
+            # 开关当前值统一经 plugin_config 读取; 写回仍需落到 raw config 才能持久化
+            if not self.plugin_config.appearance.rescan_fonts:
+                return
             appearance = self.config.get("appearance", {})
             if not isinstance(appearance, dict):
                 return
-            if not appearance.get("rescan_fonts"):
-                return
-            # 自动关闭开关
+            # 自动关闭开关 (raw config 持久化 + 同步内存 dataclass, 便于重复调用幂等)
             appearance["rescan_fonts"] = False
+            self.plugin_config.appearance.rescan_fonts = False
             if hasattr(self.config, "save_config"):
                 self.config.save_config()
             logger.info("[HelpTypst] 已按「重新扫描字体」开关完成扫描并自动关闭该开关")
@@ -112,8 +125,10 @@ class HelpTypst(Star):
 
     def _refresh_resources(self):
         try:
-            # 1. 扫描
-            self.font_manager.scan_fonts()
+            # 1. 扫描; 失败时 scan_fonts 已记录原因, 这里回报一次并跳过后续 schema/配置清洗
+            if not self.font_manager.scan_fonts():
+                logger.warning("[HelpTypst] 字体扫描未成功, 已保留原有字体选项")
+                return
 
             # 2. 更新 Schema (磁盘文件 + 内存存活 schema, 使新字体无需重载即可出现在配置面板)
             live_schema = getattr(self.config, "schema", None)
@@ -158,22 +173,25 @@ class HelpTypst(Star):
         if copied:
             logger.info(f"[HelpTypst] 已导入 {copied} 张内置背景图到 {dst_dir}")
 
-    async def terminate(self):
-        """周期hook"""
+    async def terminate(self) -> None:
+        """卸载/重载时执行: 清理临时文件、刷新字体资源与配置面板 schema"""
         # 1. 清理临时文件
         await self._perform_cleanup()
 
         # 2. [Dirty Hook] 刷新 Schema
-        # 用需重载维护的 Optional: 因为 勾选 + 排序 是 字体优先级 操作逻辑上的最佳实践
-        # 时序: 配置页面构建于插件实例化之前, 这是自动维护的最佳时点
-        # 阻塞: 符合预期，这是确保 放入/删除字体 → 重载即可见 的必要代价
-        try:
-            self._refresh_resources()
-        except Exception:
-            pass
+        # 时序: 配置页面构建于插件实例化之前, 这是自动维护的最佳时点;
+        # 扫描走线程, 卸载/重载期间不阻塞事件循环
+        if self._skip_rescan_on_terminate:
+            # 本次卸载由 /typst font 的自重载触发, 字体刚在指令里扫过, 跳过重复全盘扫描
+            self._skip_rescan_on_terminate = False
+        else:
+            try:
+                await asyncio.to_thread(self._refresh_resources)
+            except Exception as e:
+                logger.warning(f"[HelpTypst] 卸载时刷新字体资源失败: {e}")
 
         # 3. 「重新扫描字体」一次性开关: 勾选保存后自动扫描一次并自动关闭
-        # 扫描本体已在上面 _refresh_resources 中完成, 这里只复位开关
+        # 扫描本体已在上面完成, 这里只复位开关
         self._auto_close_rescan_flag()
 
     async def _perform_cleanup(self):
@@ -201,7 +219,9 @@ class HelpTypst(Star):
         pass
 
     @typst.command("font")
-    async def cmd_scan_fonts(self, event: AstrMessageEvent):
+    async def cmd_scan_fonts(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
         """扫描字体并重载插件"""
         # 1. 扫描与更新
         await asyncio.to_thread(self._refresh_resources)
@@ -219,10 +239,13 @@ class HelpTypst(Star):
                 self.context, "_star_manager", None
             )  # hack: 获取 PluginManager 实例
             if pm:
-                plugin_name = getattr(self, "name", "astrbot_plugin_help_typst")
+                # 插件 ID 优先取 AstrBot 注入的 name, 兜底取插件目录名 (与 metadata.yaml 同名)
+                plugin_name = getattr(self, "name", None) or self.plugin_dir.name
                 yield event.plain_result(
                     f"✅ 扫描完成 ({count} fonts)。正在重载以刷新面板..."
                 )
+                # 标记本次卸载已扫过字体, 避免 terminate 再全盘扫一遍
+                self._skip_rescan_on_terminate = True
                 asyncio.create_task(self._safe_reload(pm, plugin_name))  # 异步延迟重载
             else:
                 yield event.plain_result(f"✅ 扫描完成 ({count} fonts)。请手动重载插件")
@@ -275,12 +298,12 @@ class HelpTypst(Star):
     async def _handle_request(
         self,
         event: AstrMessageEvent,
-        analyzer,
+        analyzer: BaseAnalyzer,
         title: str,
         mode: str,
         query: str | None,
         is_detail: bool = False,
-    ):
+    ) -> AsyncGenerator[MessageEventResult, None]:
         """通用请求处理逻辑"""
         wait_msg_id = None
 
@@ -317,10 +340,14 @@ class HelpTypst(Star):
                 # 数字定位 → 单插件详情页
                 display_title = plugins[0].display_name or plugins[0].name
                 layout_mode = "plugin_detail"
-                # 附加该插件的事件监听器 (含命令式监听)
-                plugins[0].event_nodes = self.evt_analyzer.get_plugin_event_listeners(
-                    plugins[0].name
-                )
+                # 附加该插件的事件监听器 (含命令式监听); 失败只丢监听区, 不让整页失败
+                try:
+                    plugins[0].event_nodes = (
+                        self.evt_analyzer.get_plugin_event_listeners(plugins[0].name)
+                    )
+                except Exception as e:
+                    logger.warning(f"[HelpTypst] 获取事件监听失败: {e}")
+                    plugins[0].event_nodes = []
             else:
                 display_title = f'搜索结果: "{query}"' if query else title
                 layout_mode = mode
@@ -331,7 +358,10 @@ class HelpTypst(Star):
                             p.event_nodes = (
                                 self.evt_analyzer.get_plugin_event_listeners(p.name)
                             )
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(
+                                f"[HelpTypst] 获取 {p.name} 的事件监听失败: {e}"
+                            )
                             p.event_nodes = []
 
             user_fonts = (
@@ -354,26 +384,30 @@ class HelpTypst(Star):
         # 2. 执行渲染
         result, error = await self.renderer.render(data_pipeline, mode, query)
 
-        # 3. 结束撤回提示
-        if wait_msg_id:
-            await self.msg.recall(event, wait_msg_id)
-
-        # 4. 处理结果
-        if result:
-            try:
-                yield event.chain_result(
-                    [Image.fromFileSystem(p) for p in result.images]
-                )
-            finally:
-                # 后台任务清理文件列表
-                if result.temp_files:
-                    asyncio.create_task(self._cleanup_task(result.temp_files))
-        else:
-            # 错误处理
-            if error == "empty":
-                yield event.plain_result(self.hint.msg_empty_result(mode, query))
+        # 3. 处理结果; 等待提示在结果发出后撤回 (finally), 避免用户先等一次撤回延迟
+        try:
+            if result:
+                try:
+                    yield event.chain_result(
+                        [Image.fromFileSystem(p) for p in result.images]
+                    )
+                finally:
+                    # 后台任务清理文件列表
+                    if result.temp_files:
+                        asyncio.create_task(self._cleanup_task(result.temp_files))
             else:
-                yield event.plain_result(error)
+                # 错误处理
+                if error == "empty":
+                    yield event.plain_result(self.hint.msg_empty_result(mode, query))
+                else:
+                    yield event.plain_result(error)
+        finally:
+            if wait_msg_id:
+                try:
+                    await self.msg.recall(event, wait_msg_id)
+                except Exception as e:
+                    # 撤回失败不影响已发出的结果
+                    logger.debug(f"[HelpTypst] 撤回等待提示失败: {e}")
 
     async def _cleanup_task(self, files: list[Path]):
         """异步清理任务"""

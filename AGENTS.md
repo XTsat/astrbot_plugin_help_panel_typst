@@ -53,7 +53,7 @@
 ```
 main.py              # [入口] 注册指令、组装组件、请求编排与消息收发（含自我重载）
 domain/              # [数据定义层] 最底层，不做跨层依赖
-  constants.py       #   InternalCFG / DefaultCFG / RenderMode（阈值、默认值、映射、主题色板）
+  constants.py       #   InternalCFG / DefaultCFG / RenderMode（阈值、默认值、映射、主题色板、两列高度估算系数）
   config.py          #   TypstPluginConfig 及各子配置 + load() 兜底 + 分类匹配 + 配色解析
   schemas.py         #   RenderNode / PluginMetadata（SafeStr/SafeName 输入清洗）
 utils/               # [通用工具层] 禁止 import core/ 或 main
@@ -125,18 +125,20 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 
 `utils/view.py` 写出的 payload 按布局模式分支，模板依赖以下键：
 
-- `command` / `command_detail`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`enabled_count`、`category_count`、`category_columns`
+- `command` / `command_detail`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`enabled_count`、`category_columns`
 - `plugin_detail`：`title`、`mode`、`prefixes`、`fonts`、`plugin`、`admin_commands`、`normal_commands`、`event_listeners`
 - `event` / `filter`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`giants`、`columns`、`singles`
 - 所有模式统一注入 `colors`（激活配色 + `DISABLED_COLORS`）与 `system_name`（人格名，空串时模板不渲染该列）
 
-`core/worker.py` 向模板传入 `sys_inputs`：恒有 `json_string`、`timestamp`；搜索时额外有 `query_regex`；背景图相关为 `bg_image`（相对模板目录的路径）、`bg_aspect`、`hero_header`（`"true"/"false"`）。改 `view.py` / `worker.py` / `base.typ` 时保持键名一致。
+`core/worker.py` 向模板传入 `sys_inputs`：恒有 `json_string`、`timestamp`；搜索时额外有 `query_regex`（`re.escape` 后的原始关键词）；背景相关为 `bg_image`（相对模板目录的路径）、`hero_header`（`"true"/"false"`）；品牌资源为 `logo_image`（相对模板目录的路径，空串表示文件缺失）。改 `view.py` / `worker.py` / `base.typ` 时保持键名一致。
+
+**协议约定**：`sys_inputs` 的值一律按字符串传（Typst 侧 `sys.inputs.at(...)` 取回后由模板顶部集中解析成 bool / 数组）；payload 里的键模板必须用 `.at(key, default: ...)` 兜底，缺键不得导致整页编译失败。
 
 ---
 
 ## 3. 技术栈与依赖
 
-- Python **3.10+**（保持 3.10 语法：`list[str]`、`X | None`）
+- Python：代码保持 **3.10 兼容语法**（`list[str]`、`X | None`）；但实际运行环境由 AstrBot 决定，上游 `pyproject.toml` 当前要求 **>= 3.12**，因此不要依赖 3.11+ 才有的语义（如 `Flag.__contains__` 之外的 3.11 特性）做正确性判断
 - AstrBot **>= 4.9.2**（见 `metadata.yaml`）；使用 `astrbot.api.star`（`Context`、`Star`、`StarTools`）、`astrbot.api.event`（`filter`、`AstrMessageEvent`）、`astrbot.api`（`logger`、`AstrBotConfig`）、`core.star.*`、`core.agent.mcp_client.MCPTool`
 - `typst >= 0.14.7`（`typst.compile()` 编译、`typst.Fonts` 扫描字体）
 - `pydantic`（V2）
@@ -225,7 +227,7 @@ class HelpTypst(Star):
 
 - 面对不规范的插件元信息必须优雅 fallback（参考 `_get_safe_plugin_info`）。
 - 外部 IO 必须 try/except 并记录 `logger.warning/error`，**不允许静默吞异常**。
-- 配置值防御式校验：`max(1, int(...))`；类型异常（`TypeError`、`ValueError`）回落到默认值。
+- 配置值防御式校验：统一走 `domain/config.py` 的 `_as_int` / `_as_float` / `_as_bool`（类型异常→默认值、越界截断、布尔只认 `true/false/1/0` 字符串），**不要在各处散写 `int()` / `bool()`**；`rendering` / `appearance` 等子配置先 `isinstance(v, dict)` 收窄再取键。
 - 降级链路清晰：首选方案 → 兜底方案 → 占位文本（例如背景图失效时回退目录扫描/经典布局）。
 
 ### 4.7 并发与性能
@@ -248,6 +250,8 @@ class HelpTypst(Star):
 
 - `templates/base.typ` 只消费 `payload` 与 `sys_inputs`；新增字段在 `utils/view.py` 注入，模板侧对缺失字段提供默认值（旧缓存 JSON 不应导致编译崩溃）。
 - 修改 payload 键名时，同步 `view.py`、`worker.py`、`base.typ` 三处。
+- **协议解析集中在模板顶部**：`sys_inputs` 的字符串布尔（`hero_header`）与数组（`prefixes`）在文件头部解析成 `hero_header_enabled` / `primary_prefix` 等变量，后续只用变量；不要在渲染路径里散做 `== "false"` 比较。
+- **Typst 不能探测文件是否存在**（`image()` 缺文件 = 硬编译错误，无 try/catch）：需要模板引用的可选资源（如品牌徽标）由 Python 侧探测后注入相对路径，缺失时注入空串，模板按空串跳过，保证整页仍能编译。
 
 ---
 
@@ -258,7 +262,7 @@ class HelpTypst(Star):
 - 新增配置项**先**在 `_conf_schema.json` 补 schema（`type` / `hint` / `default` / `options`），**再**在代码中实现读取。
 - 默认值在 **`DefaultCFG` 与 `_conf_schema.json` 的 `default` 两处维护**，修改时必须同步（例如 `ignored_plugins`、字体缺省项）。
 - 文档（README 配置说明、CHANGELOG）引用配置项时，统一写成**「中文名（`key`）」**：中文名取自 schema 的 `hint`，key 用反引号包裹，例如「背景图随机选择（`background_random`）」。
-- 新增会影响布局的配置项，必须同时加入 `InternalCFG.CACHE_SENSITIVE_CONFIGS`（见 §5.4）。
+- 新增会影响布局/图片输出的配置项，必须同时加入 `InternalCFG.CACHE_SENSITIVE_CONFIGS`（见 §5.4）；`rendering` 下的 `ppi`、`webp_limit`、`split_height`、`giant_threshold` 均已入表。
 - 新增主题预设只需在 `DefaultCFG.PRESETS` 登记配色；`active_preset` 与字体下拉 `options` 由 `FontManager.update_json_schema` 在运行时自动同步，不要手改 schema 的 `options`。
 
 ### 5.2 配置读取与默认值
@@ -288,7 +292,7 @@ class HelpTypst(Star):
 
 1. **模板改动靠指纹失效**：模板自身的 mtime/大小已纳入快照，换模板文件会自动重编；但只改模板**引用的**资源（`resources/` 下的图片、字体）时指纹不变，仍需清掉对应 KV key 与 `cache_menu_*` 文件再验证。
 2. **新增渲染模式**：必须同时登记 `InternalCFG.CACHE_FILES`（决定缓存文件名与并发锁）、在 `main.py` 绑定指令、在 `utils/view.py` 生成 payload、在 `templates/base.typ` 消费新字段；漏登记会落到 `cache_unknown` 且无锁。
-3. **`RenderMode` 枚举是历史遗留**：当前调度使用字符串 mode，以 `CACHE_FILES` 为准，不要只改枚举就以为新增了模式。
+3. **`RenderMode` 枚举是历史遗留**：当前调度使用字符串 mode，以 `CACHE_FILES` 为准，不要只改枚举就以为新增了模式。四个静态模式现已与枚举成员对齐（新增模式仍需按上一条四处登记）。
 4. **静态产物是「临时 stem + 原子替换」**：编译先写 `temp_<uuid>.png/.webp`，成功后 `os.replace` 成 `cache_menu_*`；不要再改回「编译前先删旧文件」，那会删掉在途请求正在发送的图片。
 5. `rendering.timeout_compile` 与 `rendering.max_concurrent_tasks` 已接入渲染路径（编译外层全局信号量 + `wait_for` 超时）；不要绕过信号量直接调用 `execute_render_task`。
 
@@ -306,10 +310,10 @@ class HelpTypst(Star):
 **背景图 / Hero**
 
 - 解析优先级：`header_background`（单文件）→ `background_dir`（自定义目录）→ 数据目录 `backgrounds/`。
-- 只扫描目录**根层**的栅格图片（`.png/.jpg/.jpeg/.webp/.gif`，即 `InternalCFG.BACKGROUND_IMAGE_EXTS`，仅 Typst 能解码的格式），排除 `cache_` / `temp_` 前缀，并校验图片头与扩展名一致；`header_background` 同样受该白名单约束，不支持时回退目录扫描。
+- 只扫描目录**根层**的栅格图片（`.png/.jpg/.jpeg/.webp/.gif`，即 `InternalCFG.BACKGROUND_IMAGE_EXTS`，仅 Typst 能解码的格式），排除 `cache_` / `temp_` 前缀，并校验图片头与扩展名一致；扩展名按**小写**比较（Linux 区分大小写，`.PNG` 也算），`header_background` 同样受该白名单约束，不支持时回退目录扫描。
 - `background_random` 在**每批次渲染开始时只随机一次**（`render()` 内的局部变量 `bg_image`，不存实例属性），快照与本次编译使用同一个值；不要在模板或 worker 内再次随机，也不要把背景图放回 `self` 上（并发请求会互相覆盖）。
 - 背景图变更通过快照指纹自动使缓存失效；`hero_header` 关闭或无背景图时回到经典白色卡片布局。
-- 背景图注入依赖 Typst `root`：`root = commonpath(模板目录, 数据目录, 背景图)`，保证自定义目录/单文件背景图也在沙箱内。跨盘符（Windows）或无共同父目录时**只放弃背景图**（整页仍编译），不要假设背景一定可用。
+- 背景图注入依赖 Typst `root`：`root = commonpath(模板目录, 数据目录, 插件根目录, 背景图)`。`插件根目录` 必须在内，否则模板里的 `../resources` 徽标会越出沙箱；跨盘符（Windows）或无共同父目录时**只放弃背景图**并回落到插件根目录（整页仍编译），不要假设背景一定可用。
 
 ---
 
