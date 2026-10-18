@@ -11,7 +11,7 @@ import typst
 from astrbot.api import logger
 
 from ..domain import DefaultCFG
-from ..utils import process_image_to_webp
+from ..utils import process_image_to_output
 
 
 def force_memory_release():
@@ -43,6 +43,7 @@ class RenderTask:
     output_stem: str | None = None
     webp_limit: int = DefaultCFG.LIMIT_WEBP
     split_height: int = DefaultCFG.LIMIT_SIDE
+    output_format: str = DefaultCFG.OUTPUT_FORMAT
     ppi: float = DefaultCFG.LIMIT_PPI
     # 头部背景图 (可选): 绝对路径 + 沙箱 root
     bg_image_path: str | None = None
@@ -121,12 +122,13 @@ def execute_render_task(task: RenderTask) -> list[str]:
             or (f"temp_{task.req_id}" if task.is_temp else src_path.stem)
         )
 
-        return process_image_to_webp(
+        return process_image_to_output(
             source_path=task.output_png_path,
             output_dir=task.output_dir,
             stem_name=final_stem,
             webp_limit=task.webp_limit,
             split_height=task.split_height,
+            output_format=task.output_format,
         )
 
     except typst.TypstError as e:

@@ -5,7 +5,7 @@ from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 
-from . import DefaultCFG
+from . import DefaultCFG, InternalCFG
 
 # 预编译正则
 HEX_COLOR_REGEX = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
@@ -52,6 +52,19 @@ def _as_bool(value: Any, default: bool) -> bool:
     return default
 
 
+def _as_choice(value: Any, default: str, allowed: tuple[str, ...]) -> str:
+    """枚举配置解析: 只认白名单里的取值, 其它一律回落默认值
+
+    面板下拉与手工配置都可能写入大小写不一致或已下线的取值, 不做白名单收敛会让
+    出图扩展名与配置项对不上。
+    """
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in allowed:
+            return normalized
+    return default
+
+
 @dataclass
 class RenderingConfig:
     timeout_analysis: float
@@ -64,6 +77,7 @@ class RenderingConfig:
     page_width: float
     single_column_threshold: float
     plugin_two_lines: bool
+    output_format: str
 
 
 @dataclass
@@ -295,11 +309,18 @@ class TypstPluginConfig:
         if not isinstance(raw_render, dict):
             raw_render = {}
 
+        output_format = _as_choice(
+            raw_render.get("output_format"),
+            DefaultCFG.OUTPUT_FORMAT,
+            DefaultCFG.OUTPUT_FORMATS,
+        )
+        # 单张高度上限随格式走: WebP 16383 是硬限制, PNG/JPEG 可以更大
+        format_max_side = InternalCFG.FORMAT_MAX_SIDE[output_format]
         webp_limit = _as_int(
             raw_render.get("webp_limit"),
             DefaultCFG.LIMIT_WEBP,
             DefaultCFG.MIN_WEBP_LIMIT,
-            DefaultCFG.LIMIT_WEBP,
+            min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side),
         )
         render_cfg = RenderingConfig(
             timeout_analysis=_as_float(
@@ -327,12 +348,12 @@ class TypstPluginConfig:
                 DefaultCFG.MAX_GIANT,
             ),
             webp_limit=webp_limit,
-            # 单个分片高度不能超过 WebP 单图上限, 否则切片后仍然写不进 WebP
+            # 单个分片高度不能超过所选格式的单图上限, 否则切片后仍然写不进该格式
             split_height=_as_int(
                 raw_render.get("split_height"),
                 DefaultCFG.LIMIT_SIDE,
                 DefaultCFG.MIN_SPLIT_HEIGHT,
-                min(DefaultCFG.LIMIT_SIDE, webp_limit),
+                min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side, webp_limit),
             ),
             ppi=_as_float(
                 raw_render.get("ppi"),
@@ -357,6 +378,7 @@ class TypstPluginConfig:
                 raw_render.get("plugin_two_lines"),
                 DefaultCFG.PLUGIN_TWO_LINES,
             ),
+            output_format=output_format,
         )
 
         # Appearance (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)

@@ -67,6 +67,8 @@ class InternalCFG:
         "split_height",
         # 直接决定长图切片结果 (是否切、切成几张), 改动后必须重编
         "webp_limit",
+        # 换发送格式 = 换产物扩展名, 旧格式文件必须让位
+        "output_format",
         "ppi",
         # 页宽与单列阈值直接决定版式与出图像素, 改动后必须重编
         "page_width",
@@ -81,6 +83,20 @@ class InternalCFG:
         "hero_header",
         "category",
     ]
+
+    # 发送图片格式 → 产物扩展名 (扩展名参与缓存文件命名, 换格式即换文件名)
+    FORMAT_EXT: dict[str, str] = {
+        "webp": ".webp",
+        "png": ".png",
+        "jpeg": ".jpg",
+    }
+    # 各格式单张边长上限: WebP 是硬限制 16383; PNG/JPEG 理论更大, 但再高 Pillow 解码/编码内存会失控,
+    # 因此只放开到实用值, 超出部分仍按切片处理
+    FORMAT_MAX_SIDE: dict[str, int] = {
+        "webp": 16383,
+        "png": 32000,
+        "jpeg": 65500,
+    }
 
     # 默认设计页宽: 三列布局 (事件/过滤器外栏、卡片内功能块/指令标签) 按该宽度排定,
     # 页宽再窄就退回两列, 避免每列被压到放不下标签/描述
@@ -151,6 +167,11 @@ class DefaultCFG:
     LIMIT_GIANT: int = 1500
     LIMIT_WEBP: int = 16383
     LIMIT_SIDE: int = 16000
+    # 发送图片格式: webp 体积最小, png 无损, jpeg 体积接近 webp
+    OUTPUT_FORMAT: str = "webp"
+    OUTPUT_FORMATS: tuple[str, ...] = ("webp", "png", "jpeg")
+    # 单张高度上限/切片高度的配置上限: 按最大的 JPEG 放开, 实际执行时再按所选格式收敛
+    MAX_LIMIT_SIDE: int = 65500
     # 与 _conf_schema.json 的 ppi 默认值一致: 144 / 180 都是历史默认值,
     # 当前面板与兜底统一为 256
     LIMIT_PPI: float = 256.0

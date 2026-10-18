@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..domain import DefaultCFG
+from ..domain import DefaultCFG, InternalCFG
 
 # PIL 格式名 → 合法的文件扩展名集合 (全小写, 不含点)
 _FORMAT_EXTENSIONS: dict[str, set[str]] = {
@@ -60,14 +60,31 @@ def get_image_dimensions(path: Path) -> tuple[int, int] | None:
         return None
 
 
-def process_image_to_webp(
+def _save_rendered(img: Image.Image, path: Path, output_format: str) -> None:
+    """按所选格式保存: 面板是大色块 + 文字, 各格式的取舍点不同"""
+    if output_format == "png":
+        # 无损, 体积约为 WebP 的 5~6 倍, 换来原图级别的小字锐度
+        img.save(path, "PNG", optimize=True, compress_level=6)
+    elif output_format == "jpeg":
+        # 不支持透明, 需要先转 RGB; subsampling=0 关闭色度抽样, 避免中文小字出现彩边
+        img.convert("RGB").save(path, "JPEG", quality=92, optimize=True, subsampling=0)
+    else:
+        img.save(path, "WEBP", quality=80, method=6)
+
+
+def process_image_to_output(
     source_path: str,
     output_dir: str,
     stem_name: str,
     webp_limit: int,
     split_height: int,
+    output_format: str = DefaultCFG.OUTPUT_FORMAT,
 ) -> list[str]:
-    """核心图片处理逻辑"""
+    """把 Typst 产出的 PNG 转成发送格式, 超长时按高度切片
+
+    单张高度上限与切片高度都要先按所选格式的边长上限收敛:
+    WebP 硬限制 16383, PNG/JPEG 上限更大但仍有实用上限。
+    """
     images = []
     src_path_obj = Path(source_path)
     out_dir_obj = Path(output_dir)
@@ -75,29 +92,34 @@ def process_image_to_webp(
     if not src_path_obj.exists():
         return []
     try:
+        fmt = output_format if output_format in InternalCFG.FORMAT_EXT else DefaultCFG.OUTPUT_FORMAT
+        ext = InternalCFG.FORMAT_EXT[fmt]
+        max_side = InternalCFG.FORMAT_MAX_SIDE[fmt]
         # 与 domain/config 的收敛区间保持一致: 非法值回落到下限,
         # split_height 为 0 会在下面的除法里抛零除错误
-        webp_limit = max(DefaultCFG.MIN_WEBP_LIMIT, int(webp_limit))
-        split_height = max(DefaultCFG.MIN_SPLIT_HEIGHT, int(split_height))
+        limit = max(DefaultCFG.MIN_WEBP_LIMIT, int(webp_limit))
+        limit = min(limit, max_side)
+        step = max(DefaultCFG.MIN_SPLIT_HEIGHT, int(split_height))
+        step = min(step, max_side)
         with Image.open(src_path_obj) as img:
-            if img.height <= webp_limit:
+            if img.height <= limit:
                 # 不切分
-                webp_path = out_dir_obj / f"{stem_name}.webp"
-                img.save(webp_path, "WEBP", quality=80, method=6)
-                images.append(str(webp_path))
+                out_path = out_dir_obj / f"{stem_name}{ext}"
+                _save_rendered(img, out_path, fmt)
+                images.append(str(out_path))
             else:
-                # 切分
+                # 切分: 每片高度不超过所选格式的上限
                 width, total_height = img.size
-                chunks = math.ceil(total_height / split_height)
+                chunks = math.ceil(total_height / step)
                 for i in range(chunks):
-                    top = i * split_height
-                    bottom = min((i + 1) * split_height, total_height)
+                    top = i * step
+                    bottom = min((i + 1) * step, total_height)
 
                     box = (0, top, width, bottom)
                     chunk = img.crop(box)
 
-                    chunk_path = out_dir_obj / f"{stem_name}_part{i + 1}.webp"
-                    chunk.save(chunk_path, "WEBP", quality=80, method=6)
+                    chunk_path = out_dir_obj / f"{stem_name}_part{i + 1}{ext}"
+                    _save_rendered(chunk, chunk_path, fmt)
                     images.append(str(chunk_path))
 
     except Exception as e:

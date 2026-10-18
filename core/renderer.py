@@ -27,7 +27,10 @@ def _part_index(path: Path) -> int:
 
     字典序会把 `_part10` 排到 `_part2` 之前, 长图发送顺序就乱了。
     """
-    match = re.search(r"_part(\d+)\.webp$", path.name)
+    ext_pattern = "|".join(
+        re.escape(ext.lstrip(".")) for ext in InternalCFG.FORMAT_EXT.values()
+    )
+    match = re.search(rf"_part(\d+)\.(?:{ext_pattern})$", path.name)
     return int(match.group(1)) if match else 0
 
 
@@ -278,9 +281,9 @@ class TypstRenderer:
                     )
 
                 if not need_compile:
-                    cached_webps = self._find_cached_webps(img_path.stem)
-                    if cached_webps:
-                        return RenderResult(cached_webps, []), ""
+                    cached_outputs = self._find_cached_outputs(img_path.stem)
+                    if cached_outputs:
+                        return RenderResult(cached_outputs, []), ""
                     else:
                         need_compile = True
 
@@ -333,6 +336,7 @@ class TypstRenderer:
                         req_id=req_id,
                         webp_limit=self.cfg.rendering.webp_limit,
                         split_height=self.cfg.rendering.split_height,
+                        output_format=self.cfg.rendering.output_format,
                         ppi=self.cfg.rendering.ppi,
                         bg_image_path=bg_image_path,
                         root_dir=root_dir,
@@ -446,7 +450,7 @@ class TypstRenderer:
         self,
         cache_png: Path,
         compile_png: Path,
-        produced_webps: list[str],
+        produced_outputs: list[str],
         compile_stem: str,
     ) -> list[str]:
         """把临时 stem 上的编译产物原子替换为正式缓存文件
@@ -456,25 +460,30 @@ class TypstRenderer:
         """
         committed: list[Path] = []
         os.replace(compile_png, cache_png)
-        for produced in produced_webps:
+        for produced in produced_outputs:
             suffix = Path(produced).name[len(compile_stem) :]
             target = self.data_dir / f"{cache_png.stem}{suffix}"
             os.replace(produced, target)
             committed.append(target)
 
-        # 单图 ↔ 分片 或 分片数变少时, 清掉本次没有产出的旧分片
-        self._discard_stale_webps(cache_png.stem, committed)
+        # 单图 ↔ 分片、分片数变少、或换了发送格式时, 清掉本次没有产出的旧产物
+        self._discard_stale_outputs(cache_png.stem, committed)
         self._discard_artifacts(compile_stem)
         return [str(p) for p in committed]
 
-    def _discard_stale_webps(self, stem: str, keep: list[Path]) -> None:
-        """删除某个静态 mode 下本次未产出的旧 WebP (含旧分片)
+    def _discard_stale_outputs(self, stem: str, keep: list[Path]) -> None:
+        """删除某个静态 mode 下本次未产出的旧图 (含旧分片, 不限扩展名)
 
         只匹配本 mode 自己的文件名: cache_menu_command 与 cache_menu_command_detail
-        互为前缀, 用 glob(f"{stem}*.webp") 会误删另一个模式的缓存。
+        互为前缀, 用 glob(f"{stem}*") 会误删另一个模式的缓存。
+        换发送格式后旧格式文件也在这里清掉。
         """
         keep_names = {p.name for p in keep}
-        part_pattern = re.compile(rf"^{re.escape(stem)}_part\d+\.webp$")
+        exts = "|".join(
+            re.escape(ext.lstrip(".")) for ext in InternalCFG.FORMAT_EXT.values()
+        )
+        single_names = {f"{stem}{ext}" for ext in InternalCFG.FORMAT_EXT.values()}
+        part_pattern = re.compile(rf"^{re.escape(stem)}_part\d+\.(?:{exts})$")
         try:
             entries = list(self.data_dir.iterdir())
         except OSError as e:
@@ -483,7 +492,7 @@ class TypstRenderer:
         for entry in entries:
             if entry.name in keep_names:
                 continue
-            if entry.name != f"{stem}.webp" and not part_pattern.match(entry.name):
+            if entry.name not in single_names and not part_pattern.match(entry.name):
                 continue
             try:
                 entry.unlink(missing_ok=True)
@@ -491,9 +500,11 @@ class TypstRenderer:
                 logger.warning(f"[HelpTypst] 清理旧缓存文件失败 {entry}: {e}")
 
     def _discard_artifacts(self, stem: str) -> None:
-        """尽力删除某个 stem 的编译产物 (png / webp / 分片)"""
-        leftovers = [self.data_dir / f"{stem}.png", self.data_dir / f"{stem}.webp"]
-        leftovers.extend(self.data_dir.glob(f"{stem}_part*.webp"))
+        """尽力删除某个 stem 的编译产物 (各格式单图 + 各格式分片)"""
+        leftovers: list[Path] = []
+        for ext in InternalCFG.FORMAT_EXT.values():
+            leftovers.append(self.data_dir / f"{stem}{ext}")
+            leftovers.extend(self.data_dir.glob(f"{stem}_part*{ext}"))
         for path in leftovers:
             try:
                 path.unlink(missing_ok=True)
@@ -535,13 +546,17 @@ class TypstRenderer:
                 "req_id": "static",
             }
 
-    def _find_cached_webps(self, stem: str) -> list[str]:
-        p1 = self.data_dir / f"{stem}.webp"
-        if p1.exists():
-            return [str(p1)]
+    def _find_cached_outputs(self, stem: str) -> list[str]:
+        """按已配置格式之外的所有已知扩展名查找产物: 换格式后旧文件也还能兜底读到"""
+        for ext in InternalCFG.FORMAT_EXT.values():
+            single = self.data_dir / f"{stem}{ext}"
+            if single.exists():
+                return [str(single)]
 
-        parts = sorted(self.data_dir.glob(f"{stem}_part*.webp"), key=_part_index)
-        return [str(p) for p in parts] if parts else []
+            parts = sorted(self.data_dir.glob(f"{stem}_part*{ext}"), key=_part_index)
+            if parts:
+                return [str(p) for p in parts]
+        return []
 
     async def _check_cache(
         self,

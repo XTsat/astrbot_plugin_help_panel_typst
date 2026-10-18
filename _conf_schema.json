@@ -336,27 +336,38 @@
         "default": 1500,
         "hint": "超过此高度的插件将独占一行显示 (仅 Event/Filter 模式有效)"
       },
+      "output_format": {
+        "description": "发送图片格式",
+        "type": "string",
+        "options": [
+          "webp",
+          "png",
+          "jpeg"
+        ],
+        "default": "webp",
+        "hint": "webp 体积最小（默认，面板图约为 PNG 的 1/5）；png 无损、点开原图更锐利但体积大 5~6 倍；jpeg 体积接近 webp，但小字边缘可能出现压缩痕迹"
+      },
       "webp_limit": {
-        "description": "WebP 单图高度上限 (px)",
+        "description": "单图高度上限 (px)",
         "type": "int",
         "slider": {
           "min": 1000,
-          "max": 16383,
-          "step": 1
+          "max": 65500,
+          "step": 1000
         },
         "default": 16383,
-        "hint": "超过该高度的长图会自动切分为多张；WebP 格式单图高度最高 16383，通常无需修改"
+        "hint": "超过该高度的长图会自动切分为多张。可设上限由发送格式决定：WebP 最高 16383，PNG 最高 32000，JPEG 最高 65500，填得更大时会按所选格式自动收敛"
       },
       "split_height": {
         "description": "长图切分高度 (px)",
         "type": "int",
         "slider": {
           "min": 1000,
-          "max": 16000,
+          "max": 65500,
           "step": 1000
         },
         "default": 16000,
-        "hint": "当图片高度超过 WebP 限制时的切分单位高度"
+        "hint": "超过「单图高度上限」后每一张切片的高度；同样按发送格式收敛（WebP 不超过 16383，PNG 32000，JPEG 65500）"
       }
     }
   },

@@ -4,7 +4,7 @@ from .image import (
     verify_image_header,
     verify_image_format_matches_extension,
     get_image_dimensions,
-    process_image_to_webp,
+    process_image_to_output,
 )
 from .view import HelpHint, MsgRecall, TypstLayout
 
@@ -17,5 +17,5 @@ __all__ = [
     "verify_image_header",
     "verify_image_format_matches_extension",
     "get_image_dimensions",
-    "process_image_to_webp",
+    "process_image_to_output",
 ]
