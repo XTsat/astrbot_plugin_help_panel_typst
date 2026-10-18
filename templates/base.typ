@@ -553,7 +553,7 @@
       columns: (auto, 1fr, auto, auto), gutter: 6pt,
       // ID 徽章
       align(center + horizon)[
-        #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 2pt))[
+        #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 3pt))[
           // hide 只占位: 用最大位数撑出等宽徽章, 数字本身再居中覆盖上去
           #hide[#text(size: 8.5pt, weight: "bold")[#("0" * order_digits)]]
           #place(center + horizon)[#text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]]
@@ -771,7 +771,7 @@
     #grid(
       columns: (auto, 1fr, auto), gutter: 6pt,
       align(top + left)[
-        #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 2pt), baseline: 2pt)[
+        #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 3pt), baseline: 2.5pt)[
           #hide[#text(size: 8.5pt, weight: "bold")[#("0" * order_digits)]]
           #place(center + horizon)[#text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]]
         ]
