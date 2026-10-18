@@ -291,38 +291,38 @@
         "type": "float",
         "slider": {
           "min": 72,
-          "max": 256,
+          "max": 384,
           "step": 1
         },
-        "default": 180.0,
+        "default": 256.0,
         "hint": "越高图片越清晰，但越慢&大&高占用，根据内存 & 带宽调整"
       },
       "page_width": {
         "description": "页面总宽度 (pt)",
         "type": "float",
         "slider": {
-          "min": 480,
+          "min": 360,
           "max": 1200,
           "step": 10
         },
-        "default": 830.0,
+        "default": 540.0,
         "hint": "整张面板的宽度，分栏列宽随它等比变化；调窄后同一清晰度下图片更窄、文字相对更大，手机聊天窗口里更清楚"
       },
       "single_column_threshold": {
         "description": "单列切换阈值 (pt)",
         "type": "float",
         "slider": {
-          "min": 480,
+          "min": 360,
           "max": 1200,
           "step": 10
         },
-        "default": 680.0,
+        "default": 480.0,
         "hint": "页面总宽度低于该值时改为单列排版，避免两列/三列挤在一起；不小于页面总宽度时即为强制单列"
       },
       "plugin_two_lines": {
         "description": "插件双行模式",
         "type": "bool",
-        "default": false,
+        "default": true,
         "hint": "开启后插件行右侧的英文 ID（@xxx）移到中文名下方排成两行，单行更窄，页宽很窄或插件名很长时不会挤在一起"
       },
       "giant_threshold": {

@@ -151,22 +151,24 @@ class DefaultCFG:
     LIMIT_GIANT: int = 1500
     LIMIT_WEBP: int = 16383
     LIMIT_SIDE: int = 16000
-    # 与 _conf_schema.json 的 ppi 默认值一致: 144 是开放配置前的硬编码残留,
-    # 面板自 v0.3.x 起默认 180, 已保存的配置也是 180, 兜底值必须跟上
-    LIMIT_PPI: float = 180.0
+    # 与 _conf_schema.json 的 ppi 默认值一致: 144 / 180 都是历史默认值,
+    # 当前面板与兜底统一为 256
+    LIMIT_PPI: float = 256.0
 
     # 1.1 配置值收敛区间 (防御手工改坏的配置; 与设置面板 slider 范围对齐)
     MIN_PPI: float = 72.0
-    MAX_PPI: float = 256.0
+    # 上限受 WebP 单边 16383px 与 Pillow 像素上限约束: 600pt 页宽下 384ppi 已接近单张上限
+    MAX_PPI: float = 384.0
     MIN_SPLIT_HEIGHT: int = 200  # image.py 按此高度切片, 过小无意义, 0 会除零
     # 页面总宽度 (pt): 越窄同 PPI 下出图越窄、文字相对越大, 聊天窗口里更易读
-    LIMIT_WIDTH: float = 830.0
+    LIMIT_WIDTH: float = 540.0
     # 页面宽度低于该值时改单列 (两列/三列在窄页宽下会挤成一团)
-    LIMIT_SINGLE_COLUMN_THRESHOLD: float = 680.0
-    MIN_PAGE_WIDTH: float = 480.0
+    LIMIT_SINGLE_COLUMN_THRESHOLD: float = 480.0
+    # 360 是实测下限: Hero 统计卡 3×76pt + 26pt 左偏移占 274pt, 页面再窄 (≈330pt 以下) 就会溢出
+    MIN_PAGE_WIDTH: float = 360.0
     MAX_PAGE_WIDTH: float = 1200.0
     # 插件双行模式: 英文 ID 移到中文名下方, 单行更窄, 窄页宽下不易被截断
-    PLUGIN_TWO_LINES: bool = False
+    PLUGIN_TWO_LINES: bool = True
     MIN_WEBP_LIMIT: int = 1000
     MIN_GIANT: int = 100
     MAX_GIANT: int = 3000
