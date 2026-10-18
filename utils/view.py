@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 
-from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
+from ..domain import InternalCFG, PluginMetadata, RenderNode, TypstPluginConfig
 
 
 class HelpHint:
@@ -163,6 +163,10 @@ class TypstLayout:
         payload["colors"] = colors
         # 注入 Hero 统计卡片第三列显示名 (人格名称, 空串则不渲染该列)
         payload["system_name"] = system_name
+        # 页面总宽度 (pt): 模板据此设置 page 宽度, 越窄同 PPI 下出图越窄、文字相对越大
+        payload["page_width"] = self.cfg.rendering.page_width
+        # 卡片内部小块的列数: 页宽变窄时从三列降为两列, 否则文字会被压成竖条
+        payload["content_columns"] = self._resolve_content_columns()
 
         content = json.dumps(payload, ensure_ascii=False, indent=2)
         # 先写同目录临时文件再原子替换: 渲染子进程会并发读取该 JSON,
@@ -175,6 +179,28 @@ class TypstLayout:
             tmp_path.unlink(missing_ok=True)
             logger.warning(f"[HelpTypst] 布局 JSON 写入失败: {exc}")
             raise
+
+    def _resolve_column_count(self, mode: str) -> int:
+        """按页面总宽度决定分栏数 (列宽随页宽等比收缩)
+
+        - 页宽低于单列阈值: 一律单列, 否则每列会被压到放不下插件名/标签;
+        - 事件/过滤器视图: 三列需要默认页宽 (830pt), 页宽变窄时先退回两列;
+        - 指令类视图: 恒为两列 (单列已在上面处理)。
+        """
+        width = self.cfg.rendering.page_width
+        if width < self.cfg.rendering.single_column_threshold:
+            return 1
+        if mode in ("event", "filter"):
+            return 3 if width >= InternalCFG.DESIGN_PAGE_WIDTH else 2
+        return 2
+
+    def _resolve_content_columns(self) -> int:
+        """卡片内部小块 (功能块/指令标签/独立工具) 的并排数
+
+        三列是按默认设计页宽定的; 页宽变窄后卡片本身也变窄, 继续三列会把文字压成竖条。
+        """
+        width = self.cfg.rendering.page_width
+        return 3 if width >= InternalCFG.DESIGN_PAGE_WIDTH else 2
 
     def _generate_balanced_payload(
         self,
@@ -243,8 +269,9 @@ class TypstLayout:
         # 降序排列 (贪心算法基础)
         sorted_plugins = sorted(plugins_with_height, key=lambda x: x[1], reverse=True)
 
-        cols_data = [[] for _ in range(3)]
-        col_heights = [0] * 3
+        n_cols = self._resolve_column_count(mode)
+        cols_data: list[list[dict[str, Any]]] = [[] for _ in range(n_cols)]
+        col_heights = [0] * n_cols
 
         for plugin, height in sorted_plugins:
             # 放入当前高度最小的列
@@ -270,9 +297,11 @@ class TypstLayout:
         prefixes: list[str],
         font_list: list[str],
     ) -> dict[str, Any]:
-        """指令模式: 按分类分组为卡片, 并均衡分配到 2 列"""
+        """指令模式: 按分类分组为卡片, 并均衡分配到多列 (窄页宽时单列)"""
         categories = self._group_by_category(plugins)
-        cols = self._balance_categories(categories)
+        cols = self._balance_categories(
+            categories, columns=self._resolve_column_count("command")
+        )
 
         return {
             "title": title,
@@ -293,7 +322,11 @@ class TypstLayout:
     ) -> dict[str, Any]:
         """详细指令模式: 分类卡片 + 每个插件展示能力树 (指令/指令组/监听器)"""
         categories = self._group_by_category_detail(plugins)
-        cols = self._balance_categories(categories, detail=True)
+        cols = self._balance_categories(
+            categories,
+            detail=True,
+            columns=self._resolve_column_count("command_detail"),
+        )
 
         return {
             "title": title,
@@ -623,13 +656,24 @@ class TypstLayout:
         return categories
 
     def _balance_categories(
-        self, categories: list[dict[str, Any]], detail: bool = False
+        self,
+        categories: list[dict[str, Any]],
+        detail: bool = False,
+        columns: int = 2,
     ) -> list[list[dict[str, Any]]]:
-        """将分类卡片按估算高度分配到 2 列, 使两列高度接近
+        """将分类卡片按估算高度分到多列, 使各列高度接近
 
-        分类数量通常很少 (<20), 采用子集和 DP 求最接近等高的一列, 而非贪心。
+        分类数量通常很少 (<20), 两列时采用子集和 DP 求最接近等高的一列, 而非贪心;
+        单列原样返回, 三列及以上退化为按高度贪心装填 (当前指令模式最多两列)。
         估算高度按模板的实际排版参数折算, 见 _estimate_category_height。
         """
+        if not categories:
+            return []
+        if columns <= 1:
+            return [list(categories)]
+        if columns > 2:
+            return self._balance_categories_greedy(categories, detail, columns)
+
         n = len(categories)
         heights = [self._estimate_category_height(c, detail) for c in categories]
         total = sum(heights)
@@ -676,11 +720,29 @@ class TypstLayout:
             return [col1, col2]
         return [col2, col1]
 
+    def _balance_categories_greedy(
+        self,
+        categories: list[dict[str, Any]],
+        detail: bool,
+        columns: int,
+    ) -> list[list[dict[str, Any]]]:
+        """三列及以上的兜底分列: 按估算高度从高到低装进当前最矮的一列"""
+        heights = [self._estimate_category_height(c, detail) for c in categories]
+        buckets: list[list[dict[str, Any]]] = [[] for _ in range(columns)]
+        bucket_heights = [0] * columns
+        order = sorted(range(len(categories)), key=lambda i: heights[i], reverse=True)
+        for idx in order:
+            target_col = bucket_heights.index(min(bucket_heights))
+            buckets[target_col].append(categories[idx])
+            bucket_heights[target_col] += heights[idx]
+        return buckets
+
     def _estimate_category_height(self, cat: dict[str, Any], detail: bool = False) -> int:
         """估算单个分类卡片在列内占用的高度 (pt)
 
         按模板 category_card 的真实排版折算: 固定头部/内边距 + 每个插件条目的实际高度。
         detail=True 时按能力区 chip 的折行数累加指令/指令组/监听器的高度。
+        估算以默认 830pt 页宽为基准: 页宽更窄时文字折行更多, 只求两列大致均衡。
         """
         plugins = cat.get("plugins") or []
         if detail:

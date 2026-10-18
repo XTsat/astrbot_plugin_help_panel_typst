@@ -68,6 +68,9 @@ class InternalCFG:
         # 直接决定长图切片结果 (是否切、切成几张), 改动后必须重编
         "webp_limit",
         "ppi",
+        # 页宽与单列阈值直接决定版式与出图像素, 改动后必须重编
+        "page_width",
+        "single_column_threshold",
         "ignored_plugins",
         "effective_colors",
         "header_background",
@@ -76,6 +79,10 @@ class InternalCFG:
         "hero_header",
         "category",
     ]
+
+    # 默认设计页宽: 三列布局 (事件/过滤器外栏、卡片内功能块/指令标签) 按该宽度排定,
+    # 页宽再窄就退回两列, 避免每列被压到放不下标签/描述
+    DESIGN_PAGE_WIDTH: float = 830.0
 
     # 头部背景图候选扩展名 (扫描背景目录时使用, 缓存文件按前缀排除)
     # 仅保留 Typst 可解码的栅格格式; 新增格式前先确认 Typst 支持
@@ -150,6 +157,12 @@ class DefaultCFG:
     MIN_PPI: float = 72.0
     MAX_PPI: float = 256.0
     MIN_SPLIT_HEIGHT: int = 200  # image.py 按此高度切片, 过小无意义, 0 会除零
+    # 页面总宽度 (pt): 越窄同 PPI 下出图越窄、文字相对越大, 聊天窗口里更易读
+    LIMIT_WIDTH: float = 830.0
+    # 页面宽度低于该值时改单列 (两列/三列在窄页宽下会挤成一团)
+    LIMIT_SINGLE_COLUMN_THRESHOLD: float = 680.0
+    MIN_PAGE_WIDTH: float = 480.0
+    MAX_PAGE_WIDTH: float = 1200.0
     MIN_WEBP_LIMIT: int = 1000
     MIN_GIANT: int = 100
     MAX_GIANT: int = 3000

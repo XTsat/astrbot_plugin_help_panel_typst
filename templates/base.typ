@@ -33,6 +33,8 @@
 
 // 统计卡片第三列显示名 (人格名称, 由 Python 侧注入; 空串则不渲染该列)
 #let system_name = data.at("system_name", default: "")
+// 卡片内部小块 (功能块 / 指令标签 / 独立工具) 的并排列数: 页宽变窄时 Python 侧降为 2
+#let content_cols = data.at("content_columns", default: 3)
 // 页面标题: Hero 搜索提示与 detail/event 视图头部共用, 新模式漏写该键时不至于整页失败
 #let panel_title = data.at("title", default: "帮助面板")
 // 指令前缀: Python 侧按 wake_prefix 写字符串列表 (如 ["/"]) 供快捷操作文案使用
@@ -79,7 +81,10 @@
 
 // === 🖼️ 页面设置 ===
 #let page_fill = get_color("page_fill", "#F5FBFC")
-#set page(width: 830pt, height: auto, margin: (x: 28pt, y: 24pt), fill: page_fill)
+// 页面总宽度 (pt): Python 侧按 rendering.page_width 注入; 旧缓存/旧配置缺键时沿用默认 830pt。
+// 页宽同时决定列宽 (各列按 1fr 等比分配) 与出图像素宽度, 窄页宽在聊天窗口里文字相对更大。
+#let page_width_pt = data.at("page_width", default: 830) * 1pt
+#set page(width: page_width_pt, height: auto, margin: (x: 28pt, y: 24pt), fill: page_fill)
 #set text(size: 10pt)
 // 字体: 数据驱动, 未提供时使用 Typst 默认字体 (系统自动回退渲染 CJK)
 // 注意: set 规则必须放在顶层 (不能包在 #if 块内), 否则只作用于块内内容, 全局不生效
@@ -803,8 +808,9 @@
 #let render_categories(detail: false) = {
   let cols = data.at("category_columns", default: ())
   if cols.len() > 0 {
+    // 列数由 Python 侧按页宽决定 (窄页宽 → 单列), 每列等分页宽
     grid(
-      columns: (1fr, 1fr),
+      columns: range(cols.len()).map(_ => 1fr),
       column-gutter: 14pt,
       row-gutter: 12pt,
       ..cols.map(col => {
@@ -993,7 +999,7 @@
         #if simple.len() > 0 {
            if (complex.len() + specials.len()) > 0 { v(4pt) }
            pad(left: 1em)[
-             #grid(columns: (1fr, 1fr, 1fr), gutter: 5pt, ..simple.map(c => render_compact_block(c)))
+             #grid(columns: range(content_cols).map(_ => 1fr), gutter: 5pt, ..simple.map(c => render_compact_block(c)))
            ]
         }
     ]
@@ -1050,7 +1056,7 @@
 
     #if mode == "giant" {
        grid(
-         columns: (1fr, 1fr, 1fr),
+         columns: range(content_cols).map(_ => 1fr),
          gutter: 8pt,
          ..plugin.nodes.map(n => render_rich_block(n))
        )
@@ -1073,7 +1079,7 @@
        if simple.len() > 0 [
           #if (complex.len() + specials.len()) > 0 { v(6pt) }
           #grid(
-            columns: (1fr, 1fr, 1fr), gutter: 5pt,
+            columns: range(content_cols).map(_ => 1fr), gutter: 5pt,
             ..simple.map(c => render_compact_block(c))
           )
         ]
@@ -1108,7 +1114,7 @@
         width: 100%, fill: c_card, radius: card_radius, inset: 15pt, stroke: 0.5pt + c_box_stroke
       )[
       #grid(
-        columns: (1fr, 1fr, 1fr), gutter: 12pt,
+        columns: range(content_cols).map(_ => 1fr), gutter: 12pt,
         ..singles.map(plugin => {
           let cmd = plugin.nodes.at(0)
            box(
@@ -1333,14 +1339,18 @@
   }
 
   // --- Columns ---
-  grid(
-    columns: (1fr, 1fr, 1fr), gutter: 15pt,
-    ..data.at("columns", default: ()).map(col_plugins => {
-      align(top)[
-        #stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
-      ]
-    })
-  )
+  // 列数由 Python 侧按页宽决定 (默认三列, 页宽变窄时退回两列/单列)
+  let ev_cols = data.at("columns", default: ())
+  if ev_cols.len() > 0 {
+    grid(
+      columns: range(ev_cols.len()).map(_ => 1fr), gutter: 15pt,
+      ..ev_cols.map(col_plugins => {
+        align(top)[
+          #stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
+        ]
+      })
+    )
+  }
 
   // --- Singles ---
   render_singles_section(data.at("singles", default: ()))

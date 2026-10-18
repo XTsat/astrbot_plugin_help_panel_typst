@@ -61,6 +61,8 @@ class RenderingConfig:
     webp_limit: int
     split_height: int
     ppi: float
+    page_width: float
+    single_column_threshold: float
 
 
 @dataclass
@@ -336,6 +338,19 @@ class TypstPluginConfig:
                 DefaultCFG.LIMIT_PPI,
                 DefaultCFG.MIN_PPI,
                 DefaultCFG.MAX_PPI,
+            ),
+            page_width=_as_float(
+                raw_render.get("page_width"),
+                DefaultCFG.LIMIT_WIDTH,
+                DefaultCFG.MIN_PAGE_WIDTH,
+                DefaultCFG.MAX_PAGE_WIDTH,
+            ),
+            # 阈值允许大于页宽 (等于强制单列), 因此上界与页宽一致
+            single_column_threshold=_as_float(
+                raw_render.get("single_column_threshold"),
+                DefaultCFG.LIMIT_SINGLE_COLUMN_THRESHOLD,
+                DefaultCFG.MIN_PAGE_WIDTH,
+                DefaultCFG.MAX_PAGE_WIDTH,
             ),
         )
 
