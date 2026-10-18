@@ -24,7 +24,7 @@
     "description": "自定义字体目录",
     "type": "string",
     "default": "",
-    "hint": "绝对路径。缺省值 .../data/plugin_data/astrbot_plugin_help_typst/fonts"
+    "hint": "绝对路径。缺省值 .../data/plugin_data/astrbot_plugin_help_panel_typst/fonts"
   },
   "header_background": {
     "description": "顶部 Header 背景图 (单文件)",
@@ -36,7 +36,7 @@
     "description": "背景图目录",
     "type": "string",
     "default": "",
-    "hint": "绝对路径。只扫描该目录根下的图片作为背景；留空时使用缺省目录 .../data/plugin_data/astrbot_plugin_help_typst/backgrounds"
+    "hint": "绝对路径。只扫描该目录根下的图片作为背景；留空时使用缺省目录 .../data/plugin_data/astrbot_plugin_help_panel_typst/backgrounds"
   },
   "background_random": {
     "description": "背景图随机选择",

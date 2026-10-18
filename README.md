@@ -80,7 +80,7 @@
 背景图放在**背景目录**中，插件只扫描该目录根下的图片（`.png/.jpg/.jpeg/.webp/.bmp/.gif`，排除 `cache_`、`temp_` 开头的文件）。目录来源：
 
 1. **自定义背景目录**：配置 `background_dir` 为绝对路径（优先）。
-2. **默认背景目录**（推荐）：缺省 `.../data/plugin_data/astrbot_plugin_help_typst/backgrounds`，直接把图片放进去即可，无需配置。
+2. **默认背景目录**（推荐）：缺省 `.../data/plugin_data/astrbot_plugin_help_panel_typst/backgrounds`，直接把图片放进去即可，无需配置。
 
 > 插件安装时，`resources/images/` 中的内置图片（`.png/.jpg/.jpeg/.webp/.bmp/.gif` 格式）**自动导入**到默认背景目录；已存在的文件不会被覆盖，用户后可自行替换或增删。
 
@@ -104,7 +104,7 @@
 
 * 文档显式指定：通过 #set text(font: "font-family-name") 直接指定，优先级最高
 * 项目字体目录：即本插件的根目录下的 ./resources/fonts <br>
-~~后面会考虑增加额外的目录支持~~已完成，缺省值为 `.../data/plugin_data/astrbot_plugin_help_typst/fonts` 🚨 docker 用户记得确保自定义字体目录已被挂载
+~~后面会考虑增加额外的目录支持~~已完成，缺省值为 `.../data/plugin_data/astrbot_plugin_help_panel_typst/fonts` 🚨 docker 用户记得确保自定义字体目录已被挂载
 * 系统字体库：自动扫描并收录进 `appearance.font_order` 选择框（Windows: `C:/Windows/Fonts`；macOS: `/System/Library/Fonts`、`/Library/Fonts`、`~/Library/Fonts`；Linux: `/usr/share/fonts`、`/usr/local/share/fonts` 等）🚨 docker 环境可能没有系统字体，需要把字体放入自定义字体目录或安装字体依赖）
 
 > 💡 渲染时编译进程会同时加载系统字体库与自定义目录字体（与扫描路径一致），因此从下拉框选择系统内置字体也能正常生效。若放入自定义字体后下拉框未出现，可在「外观 → 字体优先级下方 → 重新扫描字体」勾选保存，插件会自动扫描一次并自动关闭该开关；或手动执行 `/typst font`。
@@ -114,9 +114,9 @@
 ## 🌳 目录结构（初步预期）
 
 ```
-astrbot_plugin_typst_menu/
+astrbot_plugin_help_panel_typst/
 ├── main.py                # [入口] AstrBot 插件主文件，注册指令和事件，转发给 core
-├── domain/                # [数据定义层] (最底层，无依赖)
+├── domain/                # [数据定义层] (最底层，不做跨层依赖)
 │    ├── constants.py          # 存储 “魔术数字” 统一于此维护调试
 │    ├── config.py             # 配置结构
 │    └── schemas.py            # Pydantic Models & TypedDicts
@@ -124,13 +124,14 @@ astrbot_plugin_typst_menu/
 │    ├── hash.py               # hash
 │    ├── font.py               # 字体扫描 & 管理
 │    ├── image.py              # 图片处理
-│    └── views.py              # [视图层] 处理通过指令组管理和调试插件时展示给用户的格式化文本
+│    └── view.py               # [视图层] 布局 JSON、提示文案与消息撤回
 ├── core/                  # [核心业务层] (纯 Python 逻辑)
 │    ├── analyzer.py           # 获取、组织数据
 │    ├── renderer.py           # 渲染调度
 │    └── worker.py             # 进程调用（即用即销）
 ├── templates/             # Typst 模板文件
 │    └── base.typ              # 基础库文件 (类似 CSS Reset)
+├── preview/               # README 功能预览图
 └── resources/             # 静态资源
      ├── fonts/                # 内置开源中文字体
      └── images/               # 内置图片（安装时自动导入到 backgrounds 目录）
