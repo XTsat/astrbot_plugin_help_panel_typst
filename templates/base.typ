@@ -430,26 +430,44 @@
 // 快捷操作区
 // ============================================================
 #let render_quick_actions() = {
-  let action(icon, color, label_str) = {
+  // 胶囊只放「指令 + 四字说明」: 长句会让单个胶囊占两三行, 整行看着全是噪声
+  let action(icon, color, cmd, label_str) = {
     box(
       width: 100%, fill: c_card, radius: 11pt,
       stroke: 1pt + c_border,
-      inset: (x: 12pt, y: 8pt),
+      inset: (x: 9pt, y: 7pt),
     )[
       #align(center + horizon)[
         #text(size: 9pt, fill: c_navy)[
-          #text(fill: color, size: 1.05em)[#icon]  #label_str
+          #text(fill: color, size: 1.05em)[#icon]
+          #text(weight: "bold")[#cmd]
+          #text(fill: c_gray)[#label_str]
         ]
       ]
     ]
   }
 
+  // 每个指令一个胶囊; 页宽不足时减少列数, 免得文字被挤成竖条
+  let cols = if page_width_pt < 520pt {
+    (1fr, 1fr)
+  } else if page_width_pt < 600pt {
+    (1fr, 1fr, 1fr)
+  } else {
+    (1fr, 1fr, 1fr, 1fr, 1fr)
+  }
   grid(
-    columns: (1fr, 1fr, 1fr), column-gutter: 10pt,
-    action("📌", c_sky, "发送 " + primary_prefix + "helps <编号> 查看插件详情"),
-    action("📋", c_mint, "发送 " + primary_prefix + "helps s <关键词> 搜索指令"),
-    action("👑", c_cream, "发送 " + primary_prefix + "events " + primary_prefix + "filters 查看事件与过滤器"),
+    columns: cols, column-gutter: 10pt, row-gutter: 8pt,
+    // 说明一律两个字: 五列并排时四字会折行, 把胶囊撑成两行高
+    action("📋", c_sky, primary_prefix + "helps", "列表"),
+    action("📖", c_mint, primary_prefix + "helpss", "详情"),
+    action("👑", c_cream, primary_prefix + "events", "事件"),
+    action("🧭", c_navy, primary_prefix + "filters", "过滤"),
+    action("🔍", c_sky, "s <关键词>", "搜索"),
   )
+  // 搜索是四个指令共用的子命令, 单独用一行说明, 免得被当成某一个指令专属
+  let search_hint = "以上指令都可以在末尾追加 s <关键词> 搜索，例如 " + primary_prefix + "events s 天气"
+  v(5pt)
+  align(center, text(size: 8pt, fill: c_gray, search_hint))
 }
 
 // ============================================================
