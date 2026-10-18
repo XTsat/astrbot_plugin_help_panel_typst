@@ -101,7 +101,11 @@
 // 页面总宽度 (pt): Python 侧按 rendering.page_width 注入; 旧缓存/旧配置缺键时沿用默认 830pt。
 // 页宽同时决定列宽 (各列按 1fr 等比分配) 与出图像素宽度, 窄页宽在聊天窗口里文字相对更大。
 #let page_width_pt = data.at("page_width", default: 830) * 1pt
-#set page(width: page_width_pt, height: auto, margin: (x: 28pt, y: 24pt), fill: page_fill)
+// 内容区宽度: 页宽减去左右留白, 页眉/页脚与正文共用同一宽度
+#let content_width = page_width_pt - 56pt
+// 单页高度上限 (pt): Python 侧按「切片高度 ÷ 清晰度」换算后注入; 0 表示不做分页 (单张整图)
+#let max_page_height_pt = float(sys.inputs.at("max_page_height", default: "0")) * 1pt
+#set page(width: page_width_pt, margin: (x: 28pt, y: 24pt), fill: page_fill)
 #set text(size: 10pt)
 // 字体: 数据驱动, 未提供时使用 Typst 默认字体 (系统自动回退渲染 CJK)
 // 注意: set 规则必须放在顶层 (不能包在 #if 块内), 否则只作用于块内内容, 全局不生效
@@ -1362,65 +1366,139 @@
 
 #let mode = data.at("mode", default: "command")
 
-#if mode == "command" or mode == "command_detail" {
-  // 指令模式: Header + 快捷操作 + 分类卡片
-  render_header()
-  v(6pt)
-  render_quick_actions()
-  v(8pt)
-  render_categories(detail: mode == "command_detail")
-} else if mode == "plugin_detail" {
-  // 插件详情页
-  align(center)[
-    #block(inset: (top: 16pt, bottom: 8pt))[
-      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#panel_title] \
-      #v(5pt)
-      #text(size: 9.5pt, fill: c_desc_text)[
-        插件详情  ·  #generated_time
-      ]
-    ]
-  ]
-  render_plugin_detail()
-} else {
-  // 事件/过滤器模式
-  align(center)[
-    #block(inset: (top: 16pt, bottom: 8pt))[
-      #text(size: 24pt, weight: "bold", fill: c_text_primary)[#panel_title] \
-      #v(5pt)
-      #text(size: 9.5pt, fill: c_desc_text)[
-        已加载 #data.at("plugin_count", default: 0) 个插件/监听组  ·  #generated_time
-      ]
-    ]
-  ]
-  v(12pt)
-
-  // --- 巨型块 ---
-  if data.at("giants", default: ()).len() > 0 {
-    stack(spacing: 10pt, ..data.at("giants", default: ()).map(plugin => plugin_card(plugin, mode: "giant")))
-    v(15pt)
-  }
-
-  // --- Columns ---
-  // 列数由 Python 侧按页宽决定 (默认三列, 页宽变窄时退回两列/单列)
-  let ev_cols = data.at("columns", default: ())
-  if ev_cols.len() > 0 {
-    grid(
-      columns: range(ev_cols.len()).map(_ => 1fr), gutter: 15pt,
-      ..ev_cols.map(col_plugins => {
-        align(top)[
-          #stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
+// ---- 分页渲染 ----
+// 长图不再按像素硬切: 头部与尾部改为页眉/页脚, 每一页都完整重复;
+// 分类卡片本身 breakable: false, 因此只会在分类边界换页, 不会被截成两半。
+#let render_page_header() = {
+  if mode == "command" or mode == "command_detail" {
+    // 指令模式: 横幅 + 快捷操作
+    render_header()
+    v(6pt)
+    render_quick_actions()
+    v(8pt)
+  } else if mode == "plugin_detail" {
+    align(center)[
+      #block(inset: (top: 16pt, bottom: 8pt))[
+        #text(size: 24pt, weight: "bold", fill: c_text_primary)[#panel_title] \
+        #v(5pt)
+        #text(size: 9.5pt, fill: c_desc_text)[
+          插件详情  ·  #generated_time
         ]
-      })
-    )
+      ]
+    ]
+  } else {
+    align(center)[
+      #block(inset: (top: 16pt, bottom: 8pt))[
+        #text(size: 24pt, weight: "bold", fill: c_text_primary)[#panel_title] \
+        #v(5pt)
+        #text(size: 9.5pt, fill: c_desc_text)[
+          已加载 #data.at("plugin_count", default: 0) 个插件/监听组  ·  #generated_time
+        ]
+      ]
+    ]
+    v(12pt)
   }
-
-  // --- Singles ---
-  render_singles_section(data.at("singles", default: ()))
 }
 
-#v(24pt)
-#align(center)[
-  #text(size: 7.5pt, fill: c_gray)[
-    Powered by #text(fill: c_sky)[AstrBot] & Typst Engine  ·  #generated_time
+#let render_page_body() = {
+  if mode == "command" or mode == "command_detail" {
+    render_categories(detail: mode == "command_detail")
+  } else if mode == "plugin_detail" {
+    render_plugin_detail()
+  } else {
+    // --- 巨型块 ---
+    if data.at("giants", default: ()).len() > 0 {
+      stack(spacing: 10pt, ..data.at("giants", default: ()).map(plugin => plugin_card(plugin, mode: "giant")))
+      v(15pt)
+    }
+
+    // --- Columns ---
+    // 列数由 Python 侧按页宽决定 (默认三列, 页宽变窄时退回两列/单列)
+    let ev_cols = data.at("columns", default: ())
+    if ev_cols.len() > 0 {
+      grid(
+        columns: range(ev_cols.len()).map(_ => 1fr), gutter: 15pt,
+        ..ev_cols.map(col_plugins => {
+          align(top)[
+            #stack(spacing: 10pt, ..col_plugins.map(plugin => plugin_card(plugin, mode: "standard")))
+          ]
+        })
+      )
+    }
+
+    // --- Singles ---
+    render_singles_section(data.at("singles", default: ()))
+  }
+}
+
+#let render_page_footer() = {
+  align(center)[
+    #text(size: 7.5pt, fill: c_gray)[
+      Powered by #text(fill: c_sky)[AstrBot] & Typst Engine  ·  #generated_time
+    ]
   ]
-]
+}
+
+#let body_block = block(width: content_width)[#render_page_body()]
+
+// 页眉/页脚放进页边距区域后, 「页面外沿的呼吸位」只能写在块内部:
+// 页眉上方 24pt、页脚上下各 24pt。这样页眉与正文之间的间距 (头部自带的 8pt)
+// 才和单页整图完全一致 —— 如果改用 margin 撑开外沿, 正文会被一并推开。
+// 相邻两个 block 之间 Typst 会插入段间距 (par.spacing = 1.2em)。单页整图里
+// 头部↔正文、正文↔页脚都吃到了这段间距; 页眉/页脚挪进页边距后它就不存在了,
+// 所以量出来手动补上, 否则分页页会比单页整图紧一截。
+#let panel_header = block(width: content_width)[#render_page_header()]
+#let panel_footer = block(width: content_width)[#render_page_footer()]
+
+// 内容高度用 measure 拿: 放得下就保持原来的「单张整图」, 放不下才切成多页
+#context {
+  // 页眉/页脚要放进页边距, 24pt 外沿呼吸位只能写在块内部:
+  // 页眉上方 24pt、页脚上下各 24pt, 再把上面量出的段间距补回去
+  let flow_gap = (
+    measure(block(width: content_width)[#body_block #body_block]).height
+      - 2 * measure(body_block).height
+  )
+  let page_header_block = block(width: content_width)[
+    #v(24pt)
+    #panel_header
+    #v(flow_gap)
+  ]
+  let page_footer_block = block(width: content_width)[
+    #v(24pt + flow_gap)
+    #panel_footer
+    #v(24pt)
+  ]
+  let header_h = measure(page_header_block).height
+  let footer_h = measure(page_footer_block).height
+  let body_h = measure(body_block).height
+  let cap = max_page_height_pt
+  // 留 8pt 余量, 避免整页高度恰好压线时反复在「单张/分页」之间抖动
+  let paginate = cap > 0pt and header_h + footer_h + body_h + 8pt > cap
+
+  set page(
+    width: page_width_pt,
+    height: if paginate { cap } else { auto },
+    margin: if paginate {
+      (x: 28pt, top: header_h, bottom: footer_h)
+    } else {
+      (x: 28pt, y: 24pt)
+    },
+    header: if paginate { page_header_block } else { none },
+    footer: if paginate { page_footer_block } else { none },
+    // 0pt: 页眉底边/页脚顶边贴在正文区边界上, 位置完全由 margin 决定;
+    // 用默认值 (按首/末行基线推算) 会把页眉顶出页面上沿、页脚下沿被裁掉。
+    // 不分页时 header/footer 为 none, 这两个值不起作用
+    header-ascent: 0pt,
+    footer-descent: 0pt,
+    fill: page_fill,
+  )
+
+  if paginate {
+    body_block
+  } else {
+    panel_header
+    body_block
+    v(24pt)
+    panel_footer
+  }
+}

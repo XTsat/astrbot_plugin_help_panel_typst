@@ -60,6 +60,81 @@ def get_image_dimensions(path: Path) -> tuple[int, int] | None:
         return None
 
 
+def _row_uniform(rgb: Image.Image, width: int, row: int, tolerance: int) -> bool:
+    extrema = rgb.crop((0, row, width, row + 1)).getextrema()
+    return all(channel_max - channel_min <= tolerance for channel_min, channel_max in extrema)
+
+
+def _band_uniform(rgb: Image.Image, width: int, top: int, bottom: int, tolerance: int) -> bool:
+    extrema = rgb.crop((0, top, width, bottom)).getextrema()
+    return all(channel_max - channel_min <= tolerance for channel_min, channel_max in extrema)
+
+
+def _trim_page_blank(img: Image.Image, pad_px: int, tolerance: int = 2) -> Image.Image:
+    """去掉分页产物「正文与页脚之间」的整段空白, 把页脚上提到正文之后
+
+    分页的页面高度固定, 末页常常只填了小半张: 空白出现在正文结束后、页脚之前,
+    单纯裁底部只会裁到页脚以下那点边距。这里把图拆成「正文 / 页脚」两段重新拼接。
+    页脚在每页内容一致, 因此按行扫描定位即可, 不需要模板侧再输出高度。
+    """
+    rgb = img.convert("RGB")
+    width, height = rgb.size
+    if height < 32:
+        return img
+    step = 16
+
+    # 1) 页脚底部: 自下而上第一条有内容的行
+    row = height - 1
+    while row > 0 and _row_uniform(rgb, width, row, tolerance):
+        row -= 1
+    footer_bottom = row + 1  # 页脚墨迹底部 (其下是页面下边距)
+
+    # 2) 页脚顶部: 继续向上, 遇到连续空白 (页脚上方的大段间隙) 即为页脚结束
+    footer_top = footer_bottom
+    scan = footer_bottom
+    found_footer_top = False
+    while scan > 0:
+        top = max(0, scan - step)
+        if _band_uniform(rgb, width, top, scan, tolerance):
+            footer_top = scan
+            found_footer_top = True
+            break
+        scan = top
+    if not found_footer_top:
+        return img
+
+    # 3) 正文底部: 从页脚顶部继续向上, 第一段非空白即正文末尾
+    content_bottom = 0
+    scan = footer_top
+    while scan > 0:
+        top = max(0, scan - step)
+        if not _band_uniform(rgb, width, top, scan, tolerance):
+            for candidate in range(scan, top, -1):
+                if not _row_uniform(rgb, width, candidate - 1, tolerance):
+                    content_bottom = candidate
+                    break
+            else:
+                content_bottom = top
+            break
+        scan = top
+
+    if content_bottom <= 0 or footer_top - content_bottom < step:
+        # 正文已经贴着页脚, 没有可压缩的空白
+        return img
+
+    background = rgb.getpixel((width // 2, height - 1))
+    body = rgb.crop((0, 0, width, content_bottom))
+    # 页脚连同它下面的页面下边距整体搬走, 这样底部留白与分页页保持一致,
+    # 且新高度必定不超过原页高 (否则等于白裁)
+    bottom_block = rgb.crop((0, footer_top, width, height))
+
+    new_height = body.height + pad_px + bottom_block.height
+    if new_height >= height:
+        return img
+    merged = Image.new("RGB", (width, new_height), background)
+    merged.paste(body, (0, 0))
+    merged.paste(bottom_block, (0, body.height + pad_px))
+    return merged
 def _save_rendered(img: Image.Image, path: Path, output_format: str) -> None:
     """按所选格式保存: 面板是大色块 + 文字, 各格式的取舍点不同"""
     if output_format == "png":
@@ -79,6 +154,8 @@ def process_image_to_output(
     webp_limit: int,
     split_height: int,
     output_format: str = DefaultCFG.OUTPUT_FORMAT,
+    trim_bottom: bool = False,
+    pad_px: int = 0,
 ) -> list[str]:
     """把 Typst 产出的 PNG 转成发送格式, 超长时按高度切片
 
@@ -102,6 +179,9 @@ def process_image_to_output(
         step = max(DefaultCFG.MIN_SPLIT_HEIGHT, int(split_height))
         step = min(step, max_side)
         with Image.open(src_path_obj) as img:
+            if trim_bottom:
+                # 分页产物: 每页高度固定, 末页常有大片空白
+                img = _trim_page_blank(img, pad_px)
             if img.height <= limit:
                 # 不切分
                 out_path = out_dir_obj / f"{stem_name}{ext}"

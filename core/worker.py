@@ -10,7 +10,7 @@ from pathlib import Path
 import typst
 from astrbot.api import logger
 
-from ..domain import DefaultCFG
+from ..domain import DefaultCFG, InternalCFG
 from ..utils import process_image_to_output
 
 
@@ -25,6 +25,21 @@ def force_memory_release():
             libc.malloc_trim(0)
         except Exception:
             pass
+
+
+def _collect_page_pngs(src: Path) -> list[Path]:
+    """收集 Typst 分页渲染出的单页 PNG (`<stem>.pageN.png`), 按页码排序
+
+    模板按内容高度自行分页, 每页都是一张完整的图 (自带头部与尾部),
+    因此页码顺序就是发送顺序, 不能再按文件名做字典序排序 (page10 < page2)。
+    """
+    prefix = f"{src.stem}.page"
+    pages: list[Path] = []
+    for path in src.parent.glob(f"{prefix}*.png"):
+        index = path.name[len(prefix) : -len(".png")]
+        if index.isdigit():
+            pages.append(path)
+    return sorted(pages, key=lambda p: int(p.name[len(prefix) : -len(".png")]))
 
 
 @dataclass
@@ -103,10 +118,14 @@ def execute_render_task(task: RenderTask) -> list[str]:
             # 跨盘符等无法计算相对路径的情况: 当作缺图处理, 不影响整页
             sys_inputs["logo_image"] = ""
 
-        # 3. 执行 Typst 编译
+        # 单页高度上限 (pt): 由切片高度与清晰度换算, 模板据此决定是否分页 (0 = 不分页)
+        sys_inputs["max_page_height"] = f"{task.split_height * 72.0 / max(1.0, float(task.ppi)):.2f}"
+
+        # 3. 执行 Typst 编译: {p} 由 Typst 替换为页码, 长图在模板内按分类边界分页
+        src_path = Path(task.output_png_path)
         typst.compile(
             task.template_path,
-            output=task.output_png_path,
+            output=f"{src_path.with_suffix('')}.page{{p}}.png",
             font_paths=task.font_paths,
             format="png",
             ppi=task.ppi,
@@ -114,22 +133,63 @@ def execute_render_task(task: RenderTask) -> list[str]:
             **compile_kwargs,
         )
 
-        # 3. 调用图片处理
+        # 4. 调用图片处理
         # 计算文件名 stem
-        src_path = Path(task.output_png_path)
         final_stem = (
             task.output_stem
             or (f"temp_{task.req_id}" if task.is_temp else src_path.stem)
         )
 
-        return process_image_to_output(
-            source_path=task.output_png_path,
-            output_dir=task.output_dir,
-            stem_name=final_stem,
-            webp_limit=task.webp_limit,
-            split_height=task.split_height,
-            output_format=task.output_format,
-        )
+        pages = _collect_page_pngs(src_path)
+        try:
+            if len(pages) <= 1:
+                # 单页: 保留编译产物原名 (缓存靠它的 PNG 头做有效性校验)
+                if not pages:
+                    return []
+                page = pages[0]
+                outputs = process_image_to_output(
+                    source_path=str(page),
+                    output_dir=task.output_dir,
+                    stem_name=final_stem,
+                    webp_limit=task.webp_limit,
+                    split_height=task.split_height,
+                    output_format=task.output_format,
+                )
+                # PNG 输出且 stem 相同: 产物本身就是编译产物, 再把原页图搬过去反而会覆盖它
+                if task.output_format == "png" and final_stem == src_path.stem:
+                    page.unlink(missing_ok=True)
+                else:
+                    os.replace(page, src_path)
+                return outputs
+
+            # 多页: 每页本身就是完整面板, 直接按页码出图, 不再二次截切
+            # 每页高度固定, 末页常只填了小半张 → 把页脚上提到正文之后,
+            # 间距用「24pt 外沿 + 段间距」, 和正常分页页的正文↔页脚一致
+            gap_pt = 24.0 + InternalCFG.FLOW_GAP_PT
+            pad_px = max(1, int(round(gap_pt * float(task.ppi) / 72)))
+            outputs: list[str] = []
+            for index, page in enumerate(pages, start=1):
+                outputs.extend(
+                    process_image_to_output(
+                        source_path=str(page),
+                        output_dir=task.output_dir,
+                        stem_name=f"{final_stem}_part{index}",
+                        webp_limit=task.webp_limit,
+                        split_height=task.split_height,
+                        output_format=task.output_format,
+                        trim_bottom=True,
+                        pad_px=pad_px,
+                    )
+                )
+            # 第一页保留为编译产物, 其余页 PNG 用完即删
+            os.replace(pages[0], src_path)
+            for page in pages[1:]:
+                page.unlink(missing_ok=True)
+            return outputs
+        finally:
+            # 异常/超时残留的单页 PNG 一并清掉
+            for leftover in _collect_page_pngs(src_path):
+                leftover.unlink(missing_ok=True)
 
     except typst.TypstError as e:
         # 完整回显 typst 诊断 (message/diagnostic/hints/trace), 便于直接定位

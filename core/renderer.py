@@ -461,6 +461,10 @@ class TypstRenderer:
         committed: list[Path] = []
         os.replace(compile_png, cache_png)
         for produced in produced_outputs:
+            if Path(produced) == compile_png:
+                # PNG 输出且 stem 与编译产物同名: 产物已随上面的 replace 落位
+                committed.append(cache_png)
+                continue
             suffix = Path(produced).name[len(compile_stem) :]
             target = self.data_dir / f"{cache_png.stem}{suffix}"
             os.replace(produced, target)
@@ -482,7 +486,12 @@ class TypstRenderer:
         exts = "|".join(
             re.escape(ext.lstrip(".")) for ext in InternalCFG.FORMAT_EXT.values()
         )
-        single_names = {f"{stem}{ext}" for ext in InternalCFG.FORMAT_EXT.values()}
+        # <stem>.png 是缓存的编译产物 (PNG 输出格式下也是输出本身), 任何情况下都不能删
+        single_names = {
+            f"{stem}{ext}"
+            for ext in InternalCFG.FORMAT_EXT.values()
+            if ext != InternalCFG.FORMAT_EXT["png"]
+        }
         part_pattern = re.compile(rf"^{re.escape(stem)}_part\d+\.(?:{exts})$")
         try:
             entries = list(self.data_dir.iterdir())
@@ -500,11 +509,13 @@ class TypstRenderer:
                 logger.warning(f"[HelpTypst] 清理旧缓存文件失败 {entry}: {e}")
 
     def _discard_artifacts(self, stem: str) -> None:
-        """尽力删除某个 stem 的编译产物 (各格式单图 + 各格式分片)"""
+        """尽力删除某个 stem 的编译产物 (各格式单图 + 各格式分片 + Typst 单页 PNG)"""
         leftovers: list[Path] = []
         for ext in InternalCFG.FORMAT_EXT.values():
             leftovers.append(self.data_dir / f"{stem}{ext}")
             leftovers.extend(self.data_dir.glob(f"{stem}_part*{ext}"))
+        # 分页编译的中间产物: <stem>.pageN.png
+        leftovers.extend(self.data_dir.glob(f"{stem}.page*.png"))
         for path in leftovers:
             try:
                 path.unlink(missing_ok=True)
@@ -547,16 +558,20 @@ class TypstRenderer:
             }
 
     def _find_cached_outputs(self, stem: str) -> list[str]:
-        """按已配置格式之外的所有已知扩展名查找产物: 换格式后旧文件也还能兜底读到"""
-        for ext in InternalCFG.FORMAT_EXT.values():
-            single = self.data_dir / f"{stem}{ext}"
-            if single.exists():
-                return [str(single)]
+        """按当前发送格式查找产物: 先找分片, 再找单图
 
-            parts = sorted(self.data_dir.glob(f"{stem}_part*{ext}"), key=_part_index)
-            if parts:
-                return [str(p) for p in parts]
-        return []
+        分片优先: PNG 格式下缓存里的编译产物本身就是 `<stem>.png`,
+        先看单图会把「第一页原图」当成整张面板, 漏掉真正要发的分片。
+        """
+        ext = InternalCFG.FORMAT_EXT.get(
+            self.cfg.rendering.output_format, InternalCFG.FORMAT_EXT["webp"]
+        )
+        parts = sorted(self.data_dir.glob(f"{stem}_part*{ext}"), key=_part_index)
+        if parts:
+            return [str(p) for p in parts]
+
+        single = self.data_dir / f"{stem}{ext}"
+        return [str(single)] if single.exists() else []
 
     async def _check_cache(
         self,
