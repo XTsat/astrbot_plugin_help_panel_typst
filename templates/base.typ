@@ -38,6 +38,9 @@
 // 插件行双行模式: 英文 ID 换到中文名下方 (窄页宽下单行放不下名称+ID)
 #let plugin_two_lines = data.at("plugin_two_lines", default: false)
 
+// 编号徽章统一宽度: 徽章若随位数变宽, 9→10 时整列插件名会跟着左右错位
+#let order_digits = calc.max(1, str(data.at("plugin_count", default: 0)).len())
+
 // 分类计数徽章同样按最长位数统一宽度: 4 与 14 位数不同时徽章一长一短, 并排看很明显
 #let count_digits = {
   let digits = 1
@@ -551,7 +554,9 @@
       // ID 徽章
       align(center + horizon)[
         #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 2pt))[
-          #text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]
+          // hide 只占位: 用最大位数撑出等宽徽章, 数字本身再居中覆盖上去
+          #hide[#text(size: 8.5pt, weight: "bold")[#("0" * order_digits)]]
+          #place(center + horizon)[#text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]]
         ]
       ],
       // 名称 (双行模式下 ID 跟随在名称下方)
@@ -767,7 +772,8 @@
       columns: (auto, 1fr, auto), gutter: 6pt,
       align(top + left)[
         #box(fill: badge_bg, radius: 9pt, inset: (x: 8pt, y: 2pt), baseline: 2pt)[
-          #text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]
+          #hide[#text(size: 8.5pt, weight: "bold")[#("0" * order_digits)]]
+          #place(center + horizon)[#text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]]
         ]
       ],
       align(top + left)[
