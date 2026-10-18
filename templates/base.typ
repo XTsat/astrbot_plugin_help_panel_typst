@@ -37,6 +37,18 @@
 #let content_cols = data.at("content_columns", default: 3)
 // 插件行双行模式: 英文 ID 换到中文名下方 (窄页宽下单行放不下名称+ID)
 #let plugin_two_lines = data.at("plugin_two_lines", default: false)
+
+// 分类计数徽章同样按最长位数统一宽度: 4 与 14 位数不同时徽章一长一短, 并排看很明显
+#let count_digits = {
+  let digits = 1
+  for column in data.at("category_columns", default: ()) {
+    for cat in column {
+      let d = str(cat.at("count", default: 0)).len()
+      if d > digits { digits = d }
+    }
+  }
+  digits
+}
 // 页面标题: Hero 搜索提示与 detail/event 视图头部共用, 新模式漏写该键时不至于整页失败
 #let panel_title = data.at("title", default: "帮助面板")
 // 指令前缀: Python 侧按 wake_prefix 写字符串列表 (如 ["/"]) 供快捷操作文案使用
@@ -798,9 +810,10 @@
     c_gray
   }
 
-  // 标题栏与计数徽章都压在分类主题色上, 前景必须取该色的对比色而非固定白:
-  // 浅色分类色 (如 查询/工具/娱乐) 上白字对比度只有 1.3~2.2:1, 直接用 on_color 兜底
-  let title_fill = on_color(color)
+  // 标题栏一律用白字; 橙黄、草绿这类很浅的分类色上白字只有 1.6~2.1:1, 先把底色压深再上白字,
+  // 不能像原来那样靠切深色标题来保可读性 (参差的黑白标题看起来像漏改)
+  let title_fill = white
+  let bar_fill = if is_light(color, threshold: 0.62) { color.darken(30%) } else { color }
   // 徽章沿用 plugin_item 的编号徽章规则: 主题色浅化作底, 数字取该底色上的深色
   let badge_bg   = color.lighten(82%)
   let badge_num  = on_color(badge_bg)
@@ -813,22 +826,26 @@
     #block(
       width: 100%, fill: c_card, radius: 15pt, stroke: 1pt + c_border,
     )[
-      // 主题色标题栏: 居中加粗标题 + 右侧计数徽章, 两者文字均按底色取对比色
+      // 主题色标题栏: 居中加粗标题 + 右侧计数徽章
       #block(
-        width: 100%, fill: color, radius: (top: 14pt),
+        width: 100%, fill: bar_fill, radius: (top: 14pt),
         inset: (x: 12pt, y: 8pt),
       )[
-        #grid(
-          columns: (1fr, auto), gutter: 8pt,
-          align(center + horizon)[
-            #text(fill: title_fill, weight: 800, size: 17pt)[#hl(name)]
-          ],
-          align(right + horizon)[
-            #box(fill: badge_bg, radius: 10pt, inset: (x: 9pt, y: 3pt))[
-              #text(fill: badge_num, size: 9.5pt, weight: "bold")[#count]
-            ]
-          ],
-        )
+        // 徽章用 place 贴右侧, 不参与列宽计算: 放进网格右列会把标题的居中位置挤偏
+        #place(right + horizon)[
+          #box(fill: badge_bg, radius: 10pt, inset: (x: 9pt, y: 3pt))[
+            // 同编号徽章: hide 占位按最长位数撑宽度, 数字本身再居中覆盖上去
+            #hide[#text(size: 9.5pt, weight: "bold")[#("0" * count_digits)]]
+            #place(center + horizon)[#text(fill: badge_num, size: 9.5pt, weight: "bold")[#count]]
+          ]
+        ]
+        // 标题相对整条标题栏居中; 左右各让 20pt 给徽章, 分类名过长时换行而不压到徽章上
+        #align(center)[
+          #block(
+            width: 100% - 40pt,
+            align(center, text(fill: title_fill, weight: 800, size: 17pt)[#hl(name)]),
+          )
+        ]
       ]
       // 插件列表
       #block(inset: (x: 8pt, y: 8pt), spacing: 0pt)[
