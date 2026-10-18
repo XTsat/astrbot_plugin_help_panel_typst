@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -52,20 +53,20 @@ class TypstRenderer:
         self.template_path = template_path
         self.font_dirs = font_dirs
         self.cfg = config
+        # 全局编译并发上限: 配置值可能被手工改成 0 或负数, 收敛到至少 1 避免永久阻塞
         self._compile_semaphore = asyncio.Semaphore(
-            self.cfg.rendering.max_concurrent_tasks
+            max(1, int(self.cfg.rendering.max_concurrent_tasks))
         )
+        # 静态资源锁 (每个静态 mode 一把, 避免同模式重复编译)
         self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
 
-        # 静态资源锁
-        self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
+    def _get_config_snapshot(self, bg_image: Path | None = None) -> dict[str, Any]:
+        """渲染配置的快照字典
 
-        # 当前渲染批次已解析的背景图 (由 render() 在批次开始时设置, 确保 random 只选一次)
-        self._current_bg_image: Path | None = None
-
-    def _get_config_snapshot(self) -> dict[str, Any]:
-        """渲染配置的快照字典"""
-        snapshot = {}
+        背景图由调用方以参数显式传入, 不使用实例属性: 同一实例上的并发请求会互相
+        覆盖背景图, 导致快照指纹与实际编译的图片不是同一张 (缓存命中即错图)。
+        """
+        snapshot: dict[str, Any] = {}
         for key in InternalCFG.CACHE_SENSITIVE_CONFIGS:
             # rendering 子配置
             if hasattr(self.cfg.rendering, key):
@@ -89,13 +90,11 @@ class TypstRenderer:
             snapshot["effective_colors"] = self.cfg.appearance.get_active_colors()
 
         # 头部背景图指纹 (路径 + 大小 + mtime), 背景图变更时缓存失效
-        # 使用当前批次已解析的背景图 (self._current_bg_image), 确保 random 只选一次
-        bg = self._current_bg_image
-        if bg is not None:
+        if bg_image is not None:
             try:
-                st = bg.stat()
+                st = bg_image.stat()
                 snapshot["background_image"] = {
-                    "path": str(bg),
+                    "path": str(bg_image),
                     "size": st.st_size,
                     "mtime": st.st_mtime,
                 }
@@ -103,6 +102,17 @@ class TypstRenderer:
                 snapshot["background_image"] = None
         else:
             snapshot["background_image"] = None
+
+        # 模板指纹: 模板改动不参与内容 hash, 只能靠快照失效, 否则升级后仍返回旧布局的缓存图
+        try:
+            tpl_stat = self.template_path.stat()
+            snapshot["template"] = {
+                "path": str(self.template_path),
+                "size": tpl_stat.st_size,
+                "mtime": tpl_stat.st_mtime,
+            }
+        except OSError:
+            snapshot["template"] = None
 
         return snapshot
 
@@ -121,7 +131,13 @@ class TypstRenderer:
         if cfg_path:
             p = Path(cfg_path)
             if p.is_file():
-                if not verify_image_header(p):
+                if p.suffix.lower() not in InternalCFG.BACKGROUND_IMAGE_EXTS:
+                    # Typst 只能解码白名单内的栅格格式, 放行会让整页编译失败
+                    logger.warning(
+                        f"[HelpTypst] 配置的背景图格式不受支持: {cfg_path}, "
+                        f"仅支持 {', '.join(InternalCFG.BACKGROUND_IMAGE_EXTS)}, 回退目录扫描"
+                    )
+                elif not verify_image_header(p):
                     logger.warning(
                         f"[HelpTypst] 配置的背景图无法打开: {cfg_path}, 回退目录扫描"
                     )
@@ -207,8 +223,17 @@ class TypstRenderer:
         # 2. 获取锁 (仅静态模式需要)
         lock = self._cache_locks.get(mode) if not is_temp else None
 
-        # 解析背景图: 在此批次开始时确定 (确保 random 只选一次, 快照与渲染一致)
-        self._current_bg_image = self._resolve_background_image()
+        # 背景图在本批次开始时只解析一次, 并用局部变量贯穿「快照」与「编译」:
+        # 写实例属性会被并发请求覆盖, 导致 KV 里记录的指纹与实际编译的图片不是同一张
+        bg_image = self._resolve_background_image()
+
+        # 静态模式的编译产物先落在临时 stem 上, 成功后再原子替换到正式缓存名:
+        # 直接写正式名 / 编译前先删旧文件, 会让正在发送上一张图的请求读到被删掉的文件
+        compile_stem = f"temp_{uuid.uuid4().hex}"
+        compile_png = self.data_dir / f"{compile_stem}.png"
+        output_png = img_path if is_temp else compile_png
+        # 本次请求的临时产物 stem (取消/异常时按它清理)
+        artifact_stem = img_path.stem if is_temp else compile_stem
 
         try:
             async with lock or AsyncNullContext():
@@ -232,7 +257,9 @@ class TypstRenderer:
                 need_compile = True
                 if not is_temp and json_path.exists():
                     # hash + config 双校验
-                    need_compile = await self._check_cache(json_path, kv_key, img_path)
+                    need_compile = await self._check_cache(
+                        json_path, kv_key, img_path, bg_image
+                    )
 
                 if not need_compile:
                     cached_webps = self._find_cached_webps(img_path.stem)
@@ -243,9 +270,6 @@ class TypstRenderer:
 
                 # --- 3. Typst 编译 ---
                 if need_compile:
-                    if not is_temp:
-                        self._purge_old_cache(img_path.stem)
-
                     json_str = await asyncio.to_thread(
                         json_path.read_text, encoding="utf-8"
                     )
@@ -255,7 +279,6 @@ class TypstRenderer:
                     font_paths_str = [str(p) for p in self.font_dirs]
 
                     # 头部背景图: 使用批次开始时已解析的背景图 (确保 random 只选一次)
-                    bg_image = self._current_bg_image
                     bg_image_path: str | None = None
                     bg_aspect: float | None = None
                     root_dir: str | None = None
@@ -265,13 +288,20 @@ class TypstRenderer:
                         if dims and dims[1] > 0:
                             bg_aspect = dims[0] / dims[1]
                         try:
+                            # root 必须同时覆盖模板与背景图: 背景图放在数据目录之外
+                            # (自定义 background_dir / header_background) 时, 只按
+                            # 「模板 + 数据目录」算 root 会让 Typst 拒绝读取 → 整页编译失败
                             root_dir = os.path.commonpath(
-                                [str(self.template_path.parent), str(self.data_dir)]
+                                [
+                                    str(self.template_path.parent),
+                                    str(self.data_dir),
+                                    str(bg_image),
+                                ]
                             )
                         except ValueError:
-                            # 模板与数据目录无共同父目录 (如跨盘符), 放弃背景图
+                            # 跨盘符等无共同父目录的情况: 放弃背景图, 而不是放弃整页
                             logger.warning(
-                                "[HelpTypst] 模板目录与数据目录无共同父目录, 头部背景图不可用"
+                                "[HelpTypst] 背景图与模板/数据目录无共同父目录, 头部背景图不可用"
                             )
                             bg_image_path = None
                             bg_aspect = None
@@ -282,8 +312,9 @@ class TypstRenderer:
                         template_path=str(self.template_path),
                         font_paths=font_paths_str,
                         json_str=json_str,
-                        output_png_path=str(img_path),
+                        output_png_path=str(output_png),
                         output_dir=str(self.data_dir),
+                        output_stem=None if is_temp else compile_stem,
                         timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                         query=query,
                         is_temp=is_temp,
@@ -297,11 +328,31 @@ class TypstRenderer:
                         hero_header=self.cfg.hero_header,
                     )
 
-                    # 调度执行
-                    with ProcessPoolExecutor(max_workers=1) as temp_pool:
-                        final_images = await asyncio.get_running_loop().run_in_executor(
-                            temp_pool, execute_render_task, task
+                    # 调度执行: 全局并发上限 + 编译超时, 避免一次挂死永久持有 mode 锁
+                    pool = ProcessPoolExecutor(max_workers=1)
+                    try:
+                        async with self._compile_semaphore:
+                            final_images = await asyncio.wait_for(
+                                asyncio.get_running_loop().run_in_executor(
+                                    pool, execute_render_task, task
+                                ),
+                                timeout=max(
+                                    1.0, float(self.cfg.rendering.timeout_compile)
+                                ),
+                            )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"[HelpTypst] 编译超时 (>={self.cfg.rendering.timeout_compile}s), "
+                            f"已放弃本次渲染: mode={mode}"
                         )
+                        # 子进程可能仍在写文件, 延迟再清一次它迟到的产物
+                        self._schedule_artifact_cleanup(artifact_stem)
+                        if is_temp:
+                            json_path.unlink(missing_ok=True)
+                        return None, "渲染超时，请稍后重试或减少插件数量"
+                    finally:
+                        # wait=False: 超时/取消时不能阻塞事件循环等待子进程退出
+                        pool.shutdown(wait=False, cancel_futures=True)
 
                     # 错误检查
                     if final_images and final_images[0].startswith("ERROR:"):
@@ -310,10 +361,20 @@ class TypstRenderer:
                     if not final_images:
                         return None, "渲染未生成图片文件"
 
+                    # 静态模式: 原子替换到正式缓存名, 不删除在途请求正在发送的图片
+                    if not is_temp:
+                        final_images = await asyncio.to_thread(
+                            self._commit_cache_images,
+                            img_path,
+                            compile_png,
+                            final_images,
+                            compile_stem,
+                        )
+
                     # --- 4. 缓存写入 ---
                     if not is_temp and kv_key:
                         new_content_hash = calculate_hash(json_str)
-                        current_config_snapshot = self._get_config_snapshot()
+                        current_config_snapshot = self._get_config_snapshot(bg_image)
 
                         meta_data = {
                             "content_hash": new_content_hash,
@@ -323,25 +384,34 @@ class TypstRenderer:
                         await self.star.put_kv_data(kv_key, meta_data)
 
                     # --- 5. 清理 ---
-                    files_to_clean = []
+                    files_to_clean: list[Path] = []
                     if is_temp:
                         files_to_clean.extend([json_path, img_path])
                         files_to_clean.extend([Path(p) for p in final_images])
 
                     return RenderResult(final_images, files_to_clean), ""
 
+        except asyncio.CancelledError:
+            # 取消同样要清理: 否则 temp_* 会一直堆到下次插件卸载
+            logger.warning("[HelpTypst] 渲染被取消, 清理本次临时产物")
+            if is_temp:
+                try:
+                    json_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            self._discard_artifacts(artifact_stem)
+            raise
+
         except Exception as e:
             logger.error(f"[HelpTypst] Render Error: {e}", exc_info=True)
 
-            # 清理临时文件
+            # 清理临时文件 (json / 编译中间产物)
             if is_temp:
                 try:
-                    if json_path.exists():
-                        json_path.unlink()
-                    if img_path.exists():
-                        img_path.unlink()
-                except Exception:
+                    json_path.unlink(missing_ok=True)
+                except OSError:
                     pass
+            self._discard_artifacts(artifact_stem)
 
             # 清理 KV 缓存
             if not is_temp and kv_key:
@@ -356,20 +426,76 @@ class TypstRenderer:
 
         return None, "未知错误"
 
-    def _purge_old_cache(self, stem: str):
-        """清理旧 WebP 缓存"""
+    def _commit_cache_images(
+        self,
+        cache_png: Path,
+        compile_png: Path,
+        produced_webps: list[str],
+        compile_stem: str,
+    ) -> list[str]:
+        """把临时 stem 上的编译产物原子替换为正式缓存文件
+
+        os.replace 是原子操作: 正式缓存名在任何时刻都指向一份完整文件, 不会出现
+        「文件被删掉」的窗口, 并发请求正在发送上一张图时也不会读不到文件。
+        """
+        committed: list[Path] = []
+        os.replace(compile_png, cache_png)
+        for produced in produced_webps:
+            suffix = Path(produced).name[len(compile_stem) :]
+            target = self.data_dir / f"{cache_png.stem}{suffix}"
+            os.replace(produced, target)
+            committed.append(target)
+
+        # 单图 ↔ 分片 或 分片数变少时, 清掉本次没有产出的旧分片
+        self._discard_stale_webps(cache_png.stem, committed)
+        self._discard_artifacts(compile_stem)
+        return [str(p) for p in committed]
+
+    def _discard_stale_webps(self, stem: str, keep: list[Path]) -> None:
+        """删除某个静态 mode 下本次未产出的旧 WebP (含旧分片)
+
+        只匹配本 mode 自己的文件名: cache_menu_command 与 cache_menu_command_detail
+        互为前缀, 用 glob(f"{stem}*.webp") 会误删另一个模式的缓存。
+        """
+        keep_names = {p.name for p in keep}
+        part_pattern = re.compile(rf"^{re.escape(stem)}_part\d+\.webp$")
         try:
-            # 未切片的单图
-            single_path = self.data_dir / f"{stem}.webp"
-            if single_path.exists():
-                single_path.unlink()
+            entries = list(self.data_dir.iterdir())
+        except OSError as e:
+            logger.warning(f"[HelpTypst] 清理旧缓存失败 {stem}: {e}")
+            return
+        for entry in entries:
+            if entry.name in keep_names:
+                continue
+            if entry.name != f"{stem}.webp" and not part_pattern.match(entry.name):
+                continue
+            try:
+                entry.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning(f"[HelpTypst] 清理旧缓存文件失败 {entry}: {e}")
 
-            # glob 匹配所有切片 (_part1.webp, _part2.webp ...)
-            for p in self.data_dir.glob(f"{stem}_part*.webp"):
-                p.unlink(missing_ok=True)
+    def _discard_artifacts(self, stem: str) -> None:
+        """尽力删除某个 stem 的编译产物 (png / webp / 分片)"""
+        leftovers = [self.data_dir / f"{stem}.png", self.data_dir / f"{stem}.webp"]
+        leftovers.extend(self.data_dir.glob(f"{stem}_part*.webp"))
+        for path in leftovers:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning(f"[HelpTypst] 清理临时产物失败 {path}: {e}")
 
-        except Exception as e:
-            logger.warning(f"[HelpTypst] 清理旧缓存残留失败 {stem}: {e}")
+    def _schedule_artifact_cleanup(self, stem: str, delay: float = 30.0) -> None:
+        """超时后子进程可能仍在写文件, 延迟再清一次它迟到的产物"""
+
+        async def _cleanup() -> None:
+            await asyncio.sleep(delay)
+            self._discard_artifacts(stem)
+
+        try:
+            asyncio.get_running_loop().create_task(_cleanup())
+        except RuntimeError:
+            # 没有运行中的事件循环 (解释器退出等), 直接同步清一次
+            self._discard_artifacts(stem)
 
     def _resolve_paths(self, mode: str, query: str | None) -> dict[str, Any]:
         """计算文件路径"""
@@ -401,7 +527,13 @@ class TypstRenderer:
         parts = sorted(self.data_dir.glob(f"{stem}_part*.webp"), key=lambda x: x.name)
         return [str(p) for p in parts] if parts else []
 
-    async def _check_cache(self, json_path: Path, kv_key: str, img_path: Path) -> bool:
+    async def _check_cache(
+        self,
+        json_path: Path,
+        kv_key: str,
+        img_path: Path,
+        bg_image: Path | None = None,
+    ) -> bool:
         """检查是否需要重新编译(AstrBot的简单KV存储)"""
         try:
             # 1. 计算当前 Hash
@@ -423,8 +555,8 @@ class TypstRenderer:
             cached_content_hash = cached_meta.get("content_hash")
             cached_config = cached_meta.get("config", {})
 
-            # 4. 当前配置快照
-            current_config = self._get_config_snapshot()
+            # 4. 当前配置快照 (背景图由调用方显式传入, 与本次编译用的是同一张)
+            current_config = self._get_config_snapshot(bg_image)
 
             # 5. 图片完整性校验
             is_img_valid = False

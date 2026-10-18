@@ -130,7 +130,7 @@ class HelpTypst(Star):
     def _import_default_backgrounds(self):
         """安装时从 resources/images 导入内置图片到默认背景图目录。
 
-        只复制背景扫描器支持的栅格格式 (.png/.jpg/.jpeg/.webp/.bmp/.gif)，
+        只复制背景扫描器支持的栅格格式 (.png/.jpg/.jpeg/.webp/.gif)，
         跳过已存在的文件，避免覆盖用户自行添加的背景图。
         """
         src_dir = self.plugin_dir / "resources" / "images"
@@ -205,6 +205,12 @@ class HelpTypst(Star):
         """扫描字体并重载插件"""
         # 1. 扫描与更新
         await asyncio.to_thread(self._refresh_resources)
+        if not self.font_manager.last_scan_ok:
+            # 扫描失败时不重载, 避免用失败的空结果覆盖面板里的字体选项
+            yield event.plain_result(
+                "❌ 字体扫描失败（详见日志）。已保留原有字体选项，未执行重载"
+            )
+            return
         count = len(self.font_manager.available_families)
 
         # 2. 尝试自我重载
@@ -292,8 +298,17 @@ class HelpTypst(Star):
 
         def data_pipeline(save_path: Path) -> int:
             """数据流转"""
-            # 数据层：获取对象
-            plugins = analyzer.get_plugins(query)
+            # 数据层：获取对象。意图已由 _parse_menu_query 判定, 此处不再按内容猜测:
+            # 编号详情走显式 API, 关键词搜索/全量走 get_plugins
+            if is_detail:
+                try:
+                    order = int(query or "")
+                except ValueError:
+                    # 纯数字分支之外理论上不会传进来; 转换失败按空结果处理
+                    return 0
+                plugins = analyzer.get_plugin_by_order(order)
+            else:
+                plugins = analyzer.get_plugins(query)
             if not plugins:
                 return 0
 

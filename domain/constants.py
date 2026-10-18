@@ -39,12 +39,12 @@ class InternalCFG:
     ]
 
     # 头部背景图候选扩展名 (扫描背景目录时使用, 缓存文件按前缀排除)
+    # 仅保留 Typst 可解码的栅格格式; 新增格式前先确认 Typst 支持
     BACKGROUND_IMAGE_EXTS: tuple[str, ...] = (
         ".png",
         ".jpg",
         ".jpeg",
         ".webp",
-        ".bmp",
         ".gif",
     )
     # 自动扫描时排除的缓存文件前缀

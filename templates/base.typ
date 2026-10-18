@@ -129,12 +129,14 @@
 #let card_shadow_offset = 2pt
 
 // --- 对比度: 深色背景用白字, 浅色背景用深海蓝 ---
-#let is_light(c) = {
+// threshold 默认 0.6 用于主题明暗判定; 纯色块前景可单独放低阈值 (见 on_color)
+#let is_light(c, threshold: 0.6) = {
   let (r, g, b, _) = c.components()
-  (0.299 * float(r) + 0.587 * float(g) + 0.114 * float(b)) > 0.6
+  (0.299 * float(r) + 0.587 * float(g) + 0.114 * float(b)) > threshold
 }
 #let on_color(c) = {
-  if is_light(c) { c_on_light } else { white }
+  // 亮度 0.58~0.60 的中亮色块上白字只有 ~2.5:1, 压深海蓝才够可读, 故阈值略低于默认值
+  if is_light(c, threshold: 0.58) { c_on_light } else { white }
 }
 
 // --- 头部背景横幅: 前景文字/统计统一压深以保证在浅色背景图上可读
@@ -713,6 +715,13 @@
     c_gray
   }
 
+  // 标题栏与计数徽章都压在分类主题色上, 前景必须取该色的对比色而非固定白:
+  // 浅色分类色 (如 查询/工具/娱乐) 上白字对比度只有 1.3~2.2:1, 直接用 on_color 兜底
+  let title_fill = on_color(color)
+  // 徽章沿用 plugin_item 的编号徽章规则: 主题色浅化作底, 数字取该底色上的深色
+  let badge_bg   = color.lighten(82%)
+  let badge_num  = on_color(badge_bg)
+
   block(
     width: 100%, breakable: false,
     fill: luma(0, 4%), radius: card_radius,
@@ -721,7 +730,7 @@
     #block(
       width: 100%, fill: c_card, radius: 15pt, stroke: 1pt + c_border,
     )[
-      // 主题色标题栏: 白色居中加粗标题 + 右侧计数 (计数数字用分类色)
+      // 主题色标题栏: 居中加粗标题 + 右侧计数徽章, 两者文字均按底色取对比色
       #block(
         width: 100%, fill: color, radius: (top: 14pt),
         inset: (x: 12pt, y: 8pt),
@@ -729,11 +738,11 @@
         #grid(
           columns: (1fr, auto), gutter: 8pt,
           align(center + horizon)[
-            #text(fill: white, weight: 800, size: 17pt)[#hl(name)]
+            #text(fill: title_fill, weight: 800, size: 17pt)[#hl(name)]
           ],
           align(right + horizon)[
-            #box(fill: white, radius: 10pt, inset: (x: 9pt, y: 3pt))[
-              #text(fill: color, size: 9.5pt, weight: "bold")[#count]
+            #box(fill: badge_bg, radius: 10pt, inset: (x: 9pt, y: 3pt))[
+              #text(fill: badge_num, size: 9.5pt, weight: "bold")[#count]
             ]
           ],
         )

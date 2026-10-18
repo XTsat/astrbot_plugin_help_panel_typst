@@ -38,6 +38,9 @@ class RenderTask:
     query: str | None
     is_temp: bool
     req_id: str
+    # 静态模式下编译产物先落在临时 stem 上, 由渲染器成功后原子替换为正式缓存名;
+    # 为空时沿用旧规则 (temp 用 temp_<req_id>, 静态用 png 文件名)
+    output_stem: str | None = None
     webp_limit: int = DefaultCFG.LIMIT_WEBP
     split_height: int = DefaultCFG.LIMIT_SIDE
     ppi: float = DefaultCFG.LIMIT_PPI
@@ -96,7 +99,10 @@ def execute_render_task(task: RenderTask) -> list[str]:
         # 3. 调用图片处理
         # 计算文件名 stem
         src_path = Path(task.output_png_path)
-        final_stem = f"temp_{task.req_id}" if task.is_temp else src_path.stem
+        final_stem = (
+            task.output_stem
+            or (f"temp_{task.req_id}" if task.is_temp else src_path.stem)
+        )
 
         return process_image_to_webp(
             source_path=task.output_png_path,

@@ -105,8 +105,8 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
   └─ main.HelpTypst._handle_request(event, analyzer, title, mode, query, is_detail)
        ├─ _get_persona_name()                 # Hero 统计第三列（失败返回空串，不影响渲染）
        ├─ data_pipeline(save_path)            # 经 asyncio.to_thread 执行
-       │    ├─ analyzer.get_plugins(query)    # 编号 → 按全局 order 精确命中
-       │    │                                 # 关键词 → 插件/节点递归剪枝；无参 → 全量
+       │    ├─ analyzer.get_plugin_by_order(n)    # 编号详情 → 按全局 order 精确命中（main 已判定意图）
+       │    ├─ analyzer.get_plugins(query)        # 关键词 → 插件/节点递归剪枝；无参 → 全量
        │    ├─ (详情 / 详细模式) event_analyzer.get_plugin_event_listeners(...)
        │    ├─ font_manager.get_render_font_list(font_order)
        │    └─ layout.dump_layout_json(...)   # 标题/布局/颜色/字体/人格名 → JSON 落盘
@@ -114,9 +114,9 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
             ├─ query 非空 → temp_<uuid> 临时路径：不读写缓存，发送后延迟清理
             └─ query 为空 → cache_menu_* 静态路径：
                  ├─ _check_cache（内容 hash + 配置快照 + PNG 头有效性）命中 → 直接返回 WebP
-                 └─ 未命中 → RenderTask → ProcessPoolExecutor(1) → typst.compile
-                             → process_image_to_webp（quality=80，超高图切 _partN）
-                             → 写 AstrBot KV：typst_cache_{mode}
+                 └─ 未命中 → RenderTask → ProcessPoolExecutor(1)（全局信号量 + timeout_compile）
+                             → typst.compile → process_image_to_webp（quality=80，超高图切 _partN）
+                             → 原子替换为 cache_menu_* → 写 AstrBot KV：typst_cache_{mode}
 ```
 
 **布局模式与缓存模式是两回事**：`plugin_detail` 是「编号」详情页的布局模式，走临时路径、不进静态缓存；静态缓存只对应 `command` / `command_detail` / `event` / `filter` 四种。
@@ -232,7 +232,7 @@ class HelpTypst(Star):
 
 - 异步方法使用 `async/await`，**禁止阻塞事件循环**；数据分析、编译、图片处理必须走 `asyncio.to_thread` 或子进程。
 - 并发限制用 `asyncio.Semaphore(...)`；静态渲染按 mode 持 `asyncio.Lock`，避免同模式重复编译。
-- 渲染路径的 `ProcessPoolExecutor` **即用即销**（`with ProcessPoolExecutor(...)`），子进程结束调用 `force_memory_release()`。
+- 渲染路径的 `ProcessPoolExecutor` **即用即销**：`max_workers=1`，用 `pool.shutdown(wait=False, cancel_futures=True)` 收尾（不能用 `with` 语句——超时/取消时阻塞等待子进程会卡住事件循环），子进程结束调用 `force_memory_release()`。
 - 长任务超时（如 `timeout_analysis`）必须显式处理，返回用户可读的错误提示。
 
 ### 4.8 回复消息
@@ -281,15 +281,16 @@ class HelpTypst(Star):
 - 静态模式 → 文件名映射见 **`InternalCFG.CACHE_FILES`**（`command` / `command_detail` / `event` / `filter`）。
 - KV key：`typst_cache_{mode}`；缓存文件以 `CACHE_FILES` 的值命名（如 `cache_menu_command.json/.png/.webp`，超高图为 `_partN.webp`）。
 - 缓存命中 = **内容 hash（JSON 的 MD5）+ 配置快照 + PNG 图片头有效** 三重比对（`_check_cache`）；命中后还会复查对应 WebP 是否存在。
-- 配置快照包含：`InternalCFG.CACHE_SENSITIVE_CONFIGS` 中的配置项、当前生效的 `effective_fonts` / `effective_colors`、以及背景图指纹（路径 + 大小 + mtime）。
+- 配置快照包含：`InternalCFG.CACHE_SENSITIVE_CONFIGS` 中的配置项、当前生效的 `effective_fonts` / `effective_colors`、背景图指纹（路径 + 大小 + mtime）、模板指纹（路径 + 大小 + mtime）。
 - **新增布局相关配置时必须加入 `CACHE_SENSITIVE_CONFIGS`**（或显式注入快照），否则缓存不会失效。
 
 **缓存相关陷阱**：
 
-1. **模板改动不参与 hash**：只改 `templates/base.typ` 或模板内样式时，静态缓存仍会命中旧图。改模板后必须清掉对应 KV key 与 `cache_menu_*` 文件再验证。
+1. **模板改动靠指纹失效**：模板自身的 mtime/大小已纳入快照，换模板文件会自动重编；但只改模板**引用的**资源（`resources/` 下的图片、字体）时指纹不变，仍需清掉对应 KV key 与 `cache_menu_*` 文件再验证。
 2. **新增渲染模式**：必须同时登记 `InternalCFG.CACHE_FILES`（决定缓存文件名与并发锁）、在 `main.py` 绑定指令、在 `utils/view.py` 生成 payload、在 `templates/base.typ` 消费新字段；漏登记会落到 `cache_unknown` 且无锁。
 3. **`RenderMode` 枚举是历史遗留**：当前调度使用字符串 mode，以 `CACHE_FILES` 为准，不要只改枚举就以为新增了模式。
-4. `rendering.timeout_compile` 与 `rendering.max_concurrent_tasks` 目前仅存在于配置与 schema（渲染路径尚未接入），不要假设已生效；实际生效的分析超时是 `rendering.timeout_analysis`。
+4. **静态产物是「临时 stem + 原子替换」**：编译先写 `temp_<uuid>.png/.webp`，成功后 `os.replace` 成 `cache_menu_*`；不要再改回「编译前先删旧文件」，那会删掉在途请求正在发送的图片。
+5. `rendering.timeout_compile` 与 `rendering.max_concurrent_tasks` 已接入渲染路径（编译外层全局信号量 + `wait_for` 超时）；不要绕过信号量直接调用 `execute_render_task`。
 
 ### 5.5 字体与背景图
 
@@ -305,10 +306,10 @@ class HelpTypst(Star):
 **背景图 / Hero**
 
 - 解析优先级：`header_background`（单文件）→ `background_dir`（自定义目录）→ 数据目录 `backgrounds/`。
-- 只扫描目录**根层**的栅格图片（`.png/.jpg/.jpeg/.webp/.bmp/.gif`），排除 `cache_` / `temp_` 前缀，并校验图片头与扩展名一致。
-- `background_random` 在**每批次渲染开始时只随机一次**（`_current_bg_image`），保证配置快照与本次编译使用同一张图；不要在模板或 worker 内再次随机。
+- 只扫描目录**根层**的栅格图片（`.png/.jpg/.jpeg/.webp/.gif`，即 `InternalCFG.BACKGROUND_IMAGE_EXTS`，仅 Typst 能解码的格式），排除 `cache_` / `temp_` 前缀，并校验图片头与扩展名一致；`header_background` 同样受该白名单约束，不支持时回退目录扫描。
+- `background_random` 在**每批次渲染开始时只随机一次**（`render()` 内的局部变量 `bg_image`，不存实例属性），快照与本次编译使用同一个值；不要在模板或 worker 内再次随机，也不要把背景图放回 `self` 上（并发请求会互相覆盖）。
 - 背景图变更通过快照指纹自动使缓存失效；`hero_header` 关闭或无背景图时回到经典白色卡片布局。
-- 背景图注入依赖 Typst `root`：`root = commonpath(模板目录, 数据目录)`。跨盘符（Windows）或无共同父目录时**自动放弃背景图**，不要假设背景一定可用。
+- 背景图注入依赖 Typst `root`：`root = commonpath(模板目录, 数据目录, 背景图)`，保证自定义目录/单文件背景图也在沙箱内。跨盘符（Windows）或无共同父目录时**只放弃背景图**（整页仍编译），不要假设背景一定可用。
 
 ---
 

@@ -55,9 +55,6 @@ def _extract_command_keywords(desc: str) -> list[str]:
 
 
 class BaseAnalyzer:
-    # 子类可覆写: 是否支持按全局编号定位搜索 (仅指令模式)
-    _supports_order_search: bool = False
-
     def __init__(self, context: Context, config: TypstPluginConfig):
         self.context = context
         self.cfg = config
@@ -74,14 +71,6 @@ class BaseAnalyzer:
             # 2. 非搜索 → 返回
             if not query:
                 return structured_plugins
-
-            # 2.5 纯数字定位 (仅指令模式): /helps <编号> 按全局编号精确命中
-            if self._supports_order_search and query.strip().isdigit():
-                target = int(query.strip())
-                for p in structured_plugins:
-                    if p.order == target:
-                        return [p]
-                return []
 
             # 3. 搜索 → 过滤
             q_lower = query.lower()
@@ -112,6 +101,21 @@ class BaseAnalyzer:
 
         except Exception as e:
             logger.error(f"[HelpTypst] 分析失败: {e}", exc_info=True)
+            return []
+
+    def get_plugin_by_order(self, order: int) -> list[PluginMetadata]:
+        """按全局编号精确定位单个插件 (编号语义仅指令模式存在)
+
+        编号由 CommandAnalyzer._assign_global_order 在过滤前统一分配,
+        因此与全量列表展示的编号一致。未命中返回空列表。
+        """
+        try:
+            for p in self.analyze_hierarchy():
+                if p.order == order:
+                    return [p]
+            return []
+        except Exception as e:
+            logger.error(f"[HelpTypst] 按编号 {order} 分析失败: {e}", exc_info=True)
             return []
 
     def _is_match(self, name: str, display: str | None, desc: str, query: str) -> bool:
@@ -234,8 +238,6 @@ class BaseAnalyzer:
 
 class CommandAnalyzer(BaseAnalyzer):
     """指令分析器：处理 CommandFilter / CommandGroupFilter"""
-
-    _supports_order_search: bool = True
 
     def analyze_hierarchy(self) -> list[PluginMetadata]:
         handlers_map = self._group_handlers_by_module()
