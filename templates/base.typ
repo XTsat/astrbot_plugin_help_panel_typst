@@ -35,6 +35,8 @@
 #let system_name = data.at("system_name", default: "")
 // 卡片内部小块 (功能块 / 指令标签 / 独立工具) 的并排列数: 页宽变窄时 Python 侧降为 2
 #let content_cols = data.at("content_columns", default: 3)
+// 插件行双行模式: 英文 ID 换到中文名下方 (窄页宽下单行放不下名称+ID)
+#let plugin_two_lines = data.at("plugin_two_lines", default: false)
 // 页面标题: Hero 搜索提示与 detail/event 视图头部共用, 新模式漏写该键时不至于整页失败
 #let panel_title = data.at("title", default: "帮助面板")
 // 指令前缀: Python 侧按 wake_prefix 写字符串列表 (如 ["/"]) 供快捷操作文案使用
@@ -498,10 +500,20 @@
     none
   }
 
+  // 双行模式: 没有右侧 ID 的插件 (无 display_name) 本来就只显示一行, 不参与
+  let stacked = plugin_two_lines and id_content != none
+  // 两行文字之间留出行距, 否则中文字形与 ID 的上下缘几乎贴在一起
+  let name_cell = if stacked {
+    stack(spacing: 3.5pt, name_content, id_content)
+  } else {
+    name_content
+  }
+
   box(
     width: 100%, fill: row_bg,
     stroke: 0.75pt + row_stroke, radius: 8pt,
-    inset: (x: 8pt, y: 5pt),
+    // 双行时行高随之变大, 上下内边距同步放宽, 避免文字贴住边框
+    inset: (x: 8pt, y: if stacked { 8pt } else { 5pt }),
   )[
     #grid(
       columns: (auto, 1fr, auto, auto), gutter: 6pt,
@@ -511,10 +523,10 @@
           #text(size: 8.5pt, weight: "bold", fill: badge_num)[#pidx]
         ]
       ],
-      // 名称
-      align(left + horizon)[#name_content],
+      // 名称 (双行模式下 ID 跟随在名称下方)
+      align(left + horizon)[#name_cell],
       // 插件内部 ID (右侧)
-      align(right + horizon)[#id_content],
+      align(right + horizon)[#if stacked { none } else { id_content }],
       // 禁用标识
       align(right + horizon)[#disabled_mark],
     )
@@ -689,7 +701,12 @@
   let badge_bg   = if pdisabled { c_dis_badge_bg } else { theme_color.lighten(82%) }
   let badge_num  = if pdisabled { c_dis_badge_text } else { c_on_light }
 
-  // 插件名称 (优先 display_name) — 直接内联在 grid 中
+  // 插件名称 (优先 display_name): 抽成变量, 双行模式要把它和 ID 堆叠
+  let name_text = if pdisp != none and pdisp != "" {
+    text(size: 10.5pt, weight: "bold", fill: name_fill)[#hl(pdisp)]
+  } else {
+    text(size: 10.5pt, weight: "bold", fill: name_fill)[#hl(breakable_id(pname))]
+  }
 
   // 插件内部 ID (右侧, 极小灰字)
   let id_content = if pdisp != none and pdisp != "" {
@@ -697,6 +714,9 @@
   } else {
     none
   }
+
+  // 双行模式: 英文 ID 换到名称下方, 行距与行高都要比单行大一档
+  let stacked = plugin_two_lines and id_content != none
 
   // 处理能力数据
   let cmds = capabilities.at("commands", default: ())
@@ -709,7 +729,7 @@
   block(
     width: 100%, fill: row_bg,
     stroke: 0.5pt + row_stroke, radius: 8pt,
-    inset: (x: 10pt, y: 7pt),
+    inset: (x: 10pt, y: if stacked { 10pt } else { 7pt }),
   )[
     // 头部: 编号 + 名称 + @id
     #grid(
@@ -720,13 +740,13 @@
         ]
       ],
       align(top + left)[
-        #if pdisp != none and pdisp != "" {
-          text(size: 10.5pt, weight: "bold", fill: name_fill)[#hl(pdisp)]
+        #if stacked {
+          stack(spacing: 3.5pt, name_text, id_content)
         } else {
-          text(size: 10.5pt, weight: "bold", fill: name_fill)[#hl(breakable_id(pname))]
+          name_text
         }
       ],
-      align(top + right)[#id_content],
+      align(top + right)[#if stacked { none } else { id_content }],
     )
 
     // 能力内容

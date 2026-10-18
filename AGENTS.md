@@ -128,7 +128,7 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 - `command` / `command_detail`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`enabled_count`、`category_columns`
 - `plugin_detail`：`title`、`mode`、`prefixes`、`fonts`、`plugin`、`admin_commands`、`normal_commands`、`event_listeners`
 - `event` / `filter`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`giants`、`columns`、`singles`
-- 所有模式统一注入 `colors`（激活配色 + `DISABLED_COLORS`）、`system_name`（人格名，空串时模板不渲染该列）、`page_width`（页面总宽度，pt，模板据此设置 `#set page`；缺键按 830pt 兜底）与 `content_columns`（卡片内部小块并排列数：页宽 ≥ 830pt 为 3，更窄为 2；缺键按 3 兜底）
+- 所有模式统一注入 `colors`（激活配色 + `DISABLED_COLORS`）、`system_name`（人格名，空串时模板不渲染该列）、`page_width`（页面总宽度，pt，模板据此设置 `#set page`；缺键按 830pt 兜底）、`content_columns`（卡片内部小块并排列数：页宽 ≥ 830pt 为 3，更窄为 2；缺键按 3 兜底）与 `plugin_two_lines`（插件行双行模式，缺键按 false 兜底）
 
 `core/worker.py` 向模板传入 `sys_inputs`：恒有 `json_string`、`timestamp`；搜索时额外有 `query_regex`（`re.escape` 后的原始关键词）；背景相关为 `bg_image`（相对模板目录的路径）、`hero_header`（`"true"/"false"`）；品牌资源为 `logo_image`（相对模板目录的路径，空串表示文件缺失）。改 `view.py` / `worker.py` / `base.typ` 时保持键名一致。
 

@@ -167,6 +167,8 @@ class TypstLayout:
         payload["page_width"] = self.cfg.rendering.page_width
         # 卡片内部小块的列数: 页宽变窄时从三列降为两列, 否则文字会被压成竖条
         payload["content_columns"] = self._resolve_content_columns()
+        # 插件行双行模式: 英文 ID 换到中文名下方, 单行更窄, 窄列宽下不易挤掉名称
+        payload["plugin_two_lines"] = self.cfg.rendering.plugin_two_lines
 
         content = json.dumps(payload, ensure_ascii=False, indent=2)
         # 先写同目录临时文件再原子替换: 渲染子进程会并发读取该 JSON,

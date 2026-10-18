@@ -319,6 +319,12 @@
         "default": 680.0,
         "hint": "页面总宽度低于该值时改为单列排版，避免两列/三列挤在一起；不小于页面总宽度时即为强制单列"
       },
+      "plugin_two_lines": {
+        "description": "插件双行模式",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后插件行右侧的英文 ID（@xxx）移到中文名下方排成两行，单行更窄，页宽很窄或插件名很长时不会挤在一起"
+      },
       "giant_threshold": {
         "description": "巨型块阈值 (pt)",
         "type": "int",

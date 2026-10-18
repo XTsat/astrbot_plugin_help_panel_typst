@@ -63,6 +63,7 @@ class RenderingConfig:
     ppi: float
     page_width: float
     single_column_threshold: float
+    plugin_two_lines: bool
 
 
 @dataclass
@@ -351,6 +352,10 @@ class TypstPluginConfig:
                 DefaultCFG.LIMIT_SINGLE_COLUMN_THRESHOLD,
                 DefaultCFG.MIN_PAGE_WIDTH,
                 DefaultCFG.MAX_PAGE_WIDTH,
+            ),
+            plugin_two_lines=_as_bool(
+                raw_render.get("plugin_two_lines"),
+                DefaultCFG.PLUGIN_TWO_LINES,
             ),
         )
 

@@ -71,6 +71,8 @@ class InternalCFG:
         # 页宽与单列阈值直接决定版式与出图像素, 改动后必须重编
         "page_width",
         "single_column_threshold",
+        # 插件行双行模式改变行高与文本排布, 同样影响出图
+        "plugin_two_lines",
         "ignored_plugins",
         "effective_colors",
         "header_background",
@@ -163,6 +165,8 @@ class DefaultCFG:
     LIMIT_SINGLE_COLUMN_THRESHOLD: float = 680.0
     MIN_PAGE_WIDTH: float = 480.0
     MAX_PAGE_WIDTH: float = 1200.0
+    # 插件双行模式: 英文 ID 移到中文名下方, 单行更窄, 窄页宽下不易被截断
+    PLUGIN_TWO_LINES: bool = False
     MIN_WEBP_LIMIT: int = 1000
     MIN_GIANT: int = 100
     MAX_GIANT: int = 3000
