@@ -354,7 +354,8 @@
       }
 
     // 背景图以原始宽高比铺满整卡 (块高度由图片自身决定, 右侧角色完整可见)
-    block(width: 100%, breakable: false)[
+    // 圆角与下方卡片保持一致; clip 让图片跟着裁出圆角, 否则图片会盖住圆角
+    block(width: 100%, breakable: false, radius: card_radius, clip: true)[
       #image(bg_image_path, width: 100%)
 
       // 品牌徽标: 官方 AstrBot 文字徽标; 路径为空 (Python 侧判定缺图) 时留白
