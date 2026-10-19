@@ -669,6 +669,10 @@ class HelpTypst(Star):
         # 屏蔽集分成两个键写入：勾选项与自定义条目各自整体替换
         patch["ignored_plugins"] = list(plan["ignored_plugins"])
         patch["ignored_plugins_custom"] = list(plan["ignored_plugins_custom"])
+        # 分类规则由面板整体提供（兜底分类 + 规则列表），未改动时计划里为 None
+        category = plan.get("category")
+        if category is not None:
+            patch["category"] = category
         return patch
 
     def _merge_preset_entries(

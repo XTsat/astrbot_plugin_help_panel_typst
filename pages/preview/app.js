@@ -82,6 +82,20 @@ const state = {
   ignoredCustom: [],
   pluginFilter: "",
 
+  // 分类规则编辑器（导入自插件配置，应用时可写回）
+  categoryFallback: "其他",
+  categoryFallbackColor: "slot_0",
+  categoryRules: [],
+  categorySelected: 0,
+  categoryOptions: {
+    slots: [],
+    standard: [],
+    fallbackDefaults: { fallback: "其他", fallbackColor: "slot_0" },
+    hotWords: [],
+    matchTexts: [],
+    limits: { name: 16, keyword: 24, rules: 30, keywords: 60, hotWords: 48 },
+  },
+
   // 预览状态
   images: [],
   lastRender: null,
@@ -157,6 +171,16 @@ const els = {
   pluginCustom: document.getElementById("plugin-custom"),
   pluginSummary: document.getElementById("plugin-summary"),
   pluginSelfHint: document.getElementById("plugin-self-hint"),
+
+  categoryRules: document.getElementById("category-rules"),
+  categoryHotWords: document.getElementById("category-hot-words"),
+  categoryHotTarget: document.getElementById("category-hot-target"),
+  categoryFallback: document.getElementById("category-fallback"),
+  categoryFallbackColor: document.getElementById("category-fallback-color"),
+  categoryFallbackPicker: document.getElementById("category-fallback-picker"),
+  categoryAdd: document.getElementById("btn-add-category"),
+  categoryStandard: document.getElementById("btn-standard-category"),
+  categorySummary: document.getElementById("category-summary"),
 
   colorGroups: document.getElementById("color-groups"),
   restoreColors: document.getElementById("btn-restore-colors"),
@@ -404,6 +428,121 @@ function sameNameSet(left, right) {
   return true;
 }
 
+function normalizeKeywordList(rawKeywords) {
+  const seen = new Set();
+  const keywords = [];
+  for (const item of asArray(rawKeywords)) {
+    if (typeof item !== "string") continue;
+    const keyword = item.trim();
+    if (!keyword) continue;
+    const lower = keyword.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    keywords.push(keyword);
+  }
+  return keywords;
+}
+
+/** 分类色：空串=按顺序自动分配，slot_N=跟随主题色槽，其余按 #rrggbb 固定 */
+function normalizeRuleColor(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  if (/^slot_\d+$/.test(text)) return text;
+  return normalizeHex(text) || "";
+}
+
+function normalizeCategoryRule(rawRule) {
+  const rule = asObject(rawRule);
+  return {
+    name: typeof rule.name === "string" ? rule.name.trim() : "",
+    keywords: normalizeKeywordList(rule.keywords),
+    enabled: asBool(rule.enabled, true),
+    color: normalizeRuleColor(rule.color),
+  };
+}
+
+/** 面板状态 / 服务端配置共用同一份归一化：{ fallback, fallbackColor, rules } */
+function normalizeCategory(rawCategory) {
+  const category = asObject(rawCategory);
+  return {
+    fallback: typeof category.fallback === "string" ? category.fallback.trim() : "",
+    fallbackColor: normalizeRuleColor(category.fallback_color),
+    rules: asArray(category.rules)
+      .map(normalizeCategoryRule)
+      .filter((rule) => rule.name),
+  };
+}
+
+function normalizeCategoryOptions(rawOptions) {
+  const options = asObject(rawOptions);
+  const limits = asObject(options.limits);
+  const fallbackDefaults = asObject(options.fallback_defaults);
+  const slots = asArray(options.slots)
+    .map((rawSlot) => {
+      const slot = asObject(rawSlot);
+      const value = typeof slot.value === "string" ? slot.value : "";
+      return {
+        value,
+        label: String(slot.label || value),
+        hex: normalizeHex(slot.hex) || "#8a93a3",
+      };
+    })
+    .filter((slot) => slot.value);
+  const standard = asArray(options.standard)
+    .map((rawRule, index) => {
+      const rule = normalizeCategoryRule(rawRule);
+      // 标准分类没给颜色时按顺序轮流用主题槽，和自动分配保持一致
+      if (!rule.color && slots.length) rule.color = slots[(index + 1) % slots.length].value;
+      return rule;
+    })
+    .filter((rule) => rule.name);
+  return {
+    slots,
+    standard,
+    fallbackDefaults: {
+      fallback: String(fallbackDefaults.fallback || "其他"),
+      fallbackColor: normalizeRuleColor(fallbackDefaults.fallback_color) || slots[0]?.value || "slot_0",
+    },
+    hotWords: asArray(options.hot_words)
+      .map((rawWord) => {
+        const word = asObject(rawWord);
+        return {
+          word: typeof word.word === "string" ? word.word : "",
+          count: Math.max(1, asNumber(word.count, 1)),
+        };
+      })
+      .filter((word) => word.word),
+    matchTexts: asArray(options.match_texts)
+      .map((rawText) => {
+        const entry = asObject(rawText);
+        return { name: String(entry.name || ""), text: String(entry.text || "").toLowerCase() };
+      })
+      .filter((entry) => entry.name),
+    limits: {
+      name: Math.max(1, asNumber(limits.name, 16)),
+      keyword: Math.max(1, asNumber(limits.keyword, 24)),
+      rules: Math.max(1, asNumber(limits.rules, 30)),
+      keywords: Math.max(1, asNumber(limits.keywords, 60)),
+      hotWords: Math.max(1, asNumber(limits.hot_words, 48)),
+    },
+  };
+}
+
+/** 分类规则的稳定签名：关键词排序、忽略大小写与颜色写法差异 */
+function categorySignature(rawCategory) {
+  const category = normalizeCategory(rawCategory);
+  return JSON.stringify({
+    fallback: category.fallback,
+    fallbackColor: category.fallbackColor.toLowerCase(),
+    rules: category.rules.map((rule) => ({
+      name: rule.name,
+      keywords: rule.keywords.map((keyword) => keyword.toLowerCase()).sort(),
+      enabled: rule.enabled,
+      color: rule.color.toLowerCase(),
+    })),
+  });
+}
+
 /* ==========================================================================
    初始化
    ========================================================================== */
@@ -502,6 +641,7 @@ function applyOptions(rawOptions, viewOptions = {}) {
   state.modes = normalizeModes(options.modes, String(active.mode || "command"));
   state.presets = normalizePresets(options.presets);
   state.colorGroups = normalizeColorGroups(options.color_groups);
+  state.categoryOptions = normalizeCategoryOptions(options.category);
   state.fonts = normalizeFontList(options.fonts);
   state.backgrounds = normalizeBackgrounds(options.backgrounds);
   // 老版本 AstrBot 或读取失败时 plugins 可能缺失/非数组，按空数组降级
@@ -637,6 +777,14 @@ function importActiveStyle(rawActive) {
   const ignored = asObject(active.ignored);
   state.ignoredSelected = normalizeNameList(ignored.selected);
   state.ignoredCustom = normalizeNameList(ignored.custom);
+  // 旧后端没有 category 字段时退回 options.category.active，避免整块规则被清空
+  const categorySource =
+    active.category !== undefined ? active.category : asObject(state.options?.category).active;
+  const category = normalizeCategory(categorySource);
+  state.categoryFallback = category.fallback || state.categoryOptions.fallbackDefaults.fallback;
+  state.categoryFallbackColor = category.fallbackColor || state.categoryOptions.fallbackDefaults.fallbackColor;
+  state.categoryRules = category.rules;
+  state.categorySelected = 0;
   state.fontFilter = "";
   state.pluginFilter = "";
 }
@@ -656,6 +804,7 @@ function buildControls() {
   buildPresetControl();
   buildBackgroundControl();
   buildPluginControl();
+  buildCategoryControl();
   buildOutputFormatControl();
   buildColorControl();
   configureRanges();
@@ -890,6 +1039,523 @@ function updatePluginSelfHint() {
   show(els.pluginSelfHint, state.ignoredSelected.some((name) => selfNames.includes(name)));
 }
 
+/* ==========================================================================
+   分类规则与高频热词
+   ========================================================================== */
+
+function buildCategoryControl() {
+  if (!els.categoryRules) return;
+  renderCategoryRules();
+  renderHotWords();
+  updateCategorySummary();
+  updateCategoryTarget();
+}
+
+function syncCategoryControl() {
+  if (!els.categoryRules) return;
+  const limits = state.categoryOptions.limits;
+  if (els.categoryFallback) {
+    els.categoryFallback.maxLength = limits.name;
+    if (document.activeElement !== els.categoryFallback) {
+      els.categoryFallback.value = state.categoryFallback;
+    }
+  }
+  if (els.categoryFallbackColor) {
+    rebuildCategoryColorSelect(
+      els.categoryFallbackColor,
+      state.categoryFallbackColor,
+      "默认（槽 0）",
+      "fallback-color",
+    );
+  }
+  syncFallbackColorPicker();
+  if (state.categorySelected >= state.categoryRules.length) {
+    state.categorySelected = Math.max(0, state.categoryRules.length - 1);
+  }
+  renderCategoryRules();
+  renderHotWords();
+  updateCategorySummary();
+  updateCategoryTarget();
+}
+
+function syncFallbackColorPicker() {
+  if (!els.categoryFallbackPicker) return;
+  const isFixed = /^#[0-9a-f]{6}$/i.test(state.categoryFallbackColor);
+  els.categoryFallbackPicker.hidden = !isFixed;
+  if (isFixed) els.categoryFallbackPicker.value = state.categoryFallbackColor;
+}
+
+/** 重建分类色下拉：空串自动分配、主题槽、固定 hex，另给一项「自定义颜色…」 */
+function rebuildCategoryColorSelect(select, value, autoLabel, action) {
+  select.dataset.action = action;
+  select.replaceChildren();
+  select.appendChild(new Option(autoLabel, ""));
+  for (const slot of state.categoryOptions.slots) {
+    select.appendChild(new Option(`${slot.label} · ${slot.hex}`, slot.value));
+  }
+  select.appendChild(new Option("自定义颜色…", "__custom__"));
+  updateCategoryColorSelect(select, value);
+}
+
+/** 只更新选中项：固定颜色在「自定义颜色…」之前插入/替换一项，避免整卡重画 */
+function updateCategoryColorSelect(select, value) {
+  const current = normalizeRuleColor(value);
+  const fixed = select.querySelector('option[data-fixed="true"]');
+  if (fixed) fixed.remove();
+  if (current && !state.categoryOptions.slots.some((slot) => slot.value === current)) {
+    // 固定颜色或主题里已不存在的槽位：补占位项，避免下拉显示错位
+    const label = current.startsWith("#") ? `固定 ${current}` : `${current}（未找到）`;
+    const option = new Option(label, current);
+    option.dataset.fixed = "true";
+    select.insertBefore(option, select.lastElementChild);
+  }
+  select.value = current;
+}
+
+function renderCategoryRules() {
+  if (!els.categoryRules) return;
+  els.categoryRules.replaceChildren();
+  if (!state.categoryRules.length) {
+    const empty = document.createElement("p");
+    empty.className = "category-rule-empty";
+    empty.textContent =
+      "还没有分组，所有插件都会进兜底分组。可以点「套用标准分类」快速开始，或手动添加一个分组。";
+    els.categoryRules.appendChild(empty);
+    updateCategoryTarget();
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  state.categoryRules.forEach((rule, index) => {
+    fragment.appendChild(buildCategoryRuleCard(rule, index));
+  });
+  els.categoryRules.appendChild(fragment);
+}
+
+function buildCategoryRuleCard(rule, index) {
+  const card = document.createElement("div");
+  card.className = "category-rule";
+  card.dataset.index = String(index);
+  card.classList.toggle("is-selected", index === state.categorySelected);
+  card.classList.toggle("is-disabled", !rule.enabled);
+
+  const head = document.createElement("div");
+  head.className = "category-rule-head";
+
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.className = "category-rule-check";
+  check.dataset.action = "enabled";
+  check.checked = rule.enabled;
+  check.title = "启用这条分组规则";
+
+  const name = document.createElement("input");
+  name.type = "text";
+  name.className = "category-rule-name";
+  name.dataset.action = "name";
+  name.value = rule.name;
+  name.maxLength = state.categoryOptions.limits.name;
+  name.placeholder = "分组名";
+  name.setAttribute("aria-label", `第 ${index + 1} 个分组的名称`);
+
+  const actions = document.createElement("div");
+  actions.className = "category-rule-actions";
+  const up = categoryIconButton("↑", "上移（越靠前优先级越高）", "up");
+  up.disabled = index === 0;
+  const down = categoryIconButton("↓", "下移", "down");
+  down.disabled = index === state.categoryRules.length - 1;
+  const remove = categoryIconButton("×", "删除该分组", "remove");
+  remove.classList.add("is-danger");
+  actions.append(up, down, remove);
+
+  head.append(check, name, actions);
+
+  const meta = document.createElement("div");
+  meta.className = "category-rule-meta";
+  const color = document.createElement("select");
+  color.className = "category-color-select";
+  rebuildCategoryColorSelect(color, rule.color, "自动分配颜色", "rule-color");
+  color.setAttribute("aria-label", `${rule.name || "分组"}的颜色`);
+  meta.appendChild(color);
+  if (/^#[0-9a-f]{6}$/i.test(rule.color)) {
+    // 固定颜色时多给一个取色器，比手改 hex 更直接
+    const picker = document.createElement("input");
+    picker.type = "color";
+    picker.className = "category-color-picker";
+    picker.dataset.action = "rule-color-picker";
+    picker.value = rule.color;
+    picker.title = "调整固定颜色";
+    picker.setAttribute("aria-label", `${rule.name || "分组"}的固定颜色`);
+    meta.appendChild(picker);
+  }
+  const count = document.createElement("span");
+  count.className = "category-rule-count";
+  count.textContent = rule.enabled ? `命中 ${countCategoryMatches(rule)} 个插件` : "已停用";
+  meta.appendChild(count);
+
+  const keywords = document.createElement("div");
+  keywords.className = "category-keywords";
+  for (const keyword of rule.keywords) {
+    keywords.appendChild(buildKeywordChip(keyword));
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "category-keyword-input";
+  input.dataset.action = "keyword";
+  input.maxLength = state.categoryOptions.limits.keyword;
+  const reached = rule.keywords.length >= state.categoryOptions.limits.keywords;
+  input.placeholder = reached ? "关键词已达上限" : "输入关键词后回车";
+  input.disabled = reached;
+  input.setAttribute("aria-label", `${rule.name || "分组"}的关键词`);
+  keywords.appendChild(input);
+
+  card.append(head, meta, keywords);
+  return card;
+}
+
+function buildKeywordChip(keyword) {
+  const chip = document.createElement("span");
+  chip.className = "category-keyword";
+
+  const text = document.createElement("span");
+  text.className = "category-keyword-text";
+  text.textContent = keyword;
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "category-keyword-remove";
+  remove.dataset.action = "remove-keyword";
+  remove.dataset.keyword = keyword;
+  remove.title = `移除关键词「${keyword}」`;
+  remove.textContent = "×";
+
+  chip.append(text, remove);
+  return chip;
+}
+
+function categoryIconButton(label, title, action) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "category-icon-btn";
+  button.dataset.action = action;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.textContent = label;
+  return button;
+}
+
+function renderHotWords() {
+  if (!els.categoryHotWords) return;
+  els.categoryHotWords.replaceChildren();
+  const words = state.categoryOptions.hotWords;
+  if (!words.length) {
+    const empty = document.createElement("p");
+    empty.className = "hot-word-empty";
+    empty.textContent = "插件名称与简介里还没有重复出现的词，先手动填关键词吧";
+    els.categoryHotWords.appendChild(empty);
+    return;
+  }
+  const used = new Set(
+    state.categoryRules.flatMap((rule) => rule.keywords.map((keyword) => keyword.toLowerCase())),
+  );
+  const maxCount = Math.max(...words.map((word) => word.count));
+  const fragment = document.createDocumentFragment();
+  for (const entry of words.slice(0, state.categoryOptions.limits.hotWords)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hot-word";
+    button.dataset.word = entry.word;
+    button.title = `出现 ${entry.count} 次，点击加入选中的分组`;
+    button.classList.toggle("is-used", used.has(entry.word.toLowerCase()));
+    // 按出现次数做轻微字号分级，一眼看出哪些词更常见
+    button.style.fontSize = `${11 + Math.round(2.5 * (entry.count / maxCount))}px`;
+
+    const label = document.createElement("span");
+    label.textContent = entry.word;
+    const count = document.createElement("span");
+    count.className = "hot-word-count";
+    count.textContent = String(entry.count);
+    button.append(label, count);
+    fragment.appendChild(button);
+  }
+  els.categoryHotWords.appendChild(fragment);
+}
+
+/** 当前关键词能命中多少个插件（仅作参考：最终归属还受规则顺序影响） */
+function countCategoryMatches(rule) {
+  const enabledKeywords = rule.keywords.map((keyword) => keyword.toLowerCase()).filter(Boolean);
+  if (!rule.enabled || !enabledKeywords.length) return 0;
+  return state.categoryOptions.matchTexts.reduce(
+    (total, entry) => total + (enabledKeywords.some((keyword) => entry.text.includes(keyword)) ? 1 : 0),
+    0,
+  );
+}
+
+function updateCategoryTarget() {
+  if (!els.categoryHotTarget) return;
+  const rule = state.categoryRules[state.categorySelected];
+  setText(els.categoryHotTarget, rule ? `填入：${rule.name || "未命名分组"}` : "先添加一个分组");
+}
+
+function updateCategorySummary() {
+  if (!els.categorySummary) return;
+  const total = state.categoryOptions.matchTexts.length;
+  if (!total) {
+    setText(els.categorySummary, "");
+    return;
+  }
+  const matched = state.categoryOptions.matchTexts.filter((entry) =>
+    state.categoryRules.some(
+      (rule) =>
+        rule.enabled &&
+        rule.keywords.some((keyword) => entry.text.includes(keyword.toLowerCase())),
+    ),
+  ).length;
+  setText(
+    els.categorySummary,
+    `面板可见 ${total} 个插件：${matched} 个会被分组命中，${total - matched} 个进入「${state.categoryFallback || "其他"}」。`,
+  );
+}
+
+function addCategoryRule() {
+  const limits = state.categoryOptions.limits;
+  if (state.categoryRules.length >= limits.rules) {
+    setNotice(`最多只能添加 ${limits.rules} 个分组`);
+    return;
+  }
+  // 预填一个能保存的名称：后端会丢弃无名分组，先给占位名再让用户直接改
+  state.categoryRules.push({ name: "新分组", keywords: [], enabled: true, color: "" });
+  state.categorySelected = state.categoryRules.length - 1;
+  renderCategoryRules();
+  updateCategoryTarget();
+  const nameInput = els.categoryRules.querySelector(
+    ".category-rule.is-selected .category-rule-name",
+  );
+  if (nameInput instanceof HTMLInputElement) {
+    nameInput.focus();
+    nameInput.select();
+  }
+}
+
+function applyStandardCategories() {
+  if (!state.categoryOptions.standard.length) {
+    setNotice("没有可用的标准分类模板");
+    return;
+  }
+  state.categoryRules = state.categoryOptions.standard.map((rule) => ({
+    name: rule.name,
+    keywords: [...rule.keywords],
+    enabled: true,
+    color: rule.color,
+  }));
+  state.categorySelected = 0;
+  renderCategoryRules();
+  renderHotWords();
+  updateCategorySummary();
+  updateCategoryTarget();
+  markDirty();
+  setNotice(`已套用 ${state.categoryRules.length} 个标准分组，可继续微调关键词`);
+}
+
+function selectCategoryRule(index) {
+  if (index === state.categorySelected) return;
+  state.categorySelected = index;
+  for (const card of els.categoryRules.querySelectorAll(".category-rule")) {
+    card.classList.toggle("is-selected", Number(card.dataset.index) === index);
+  }
+  updateCategoryTarget();
+}
+
+function addKeywordToSelectedRule(rawWord) {
+  const keyword = String(rawWord || "").trim();
+  if (!keyword) return;
+  const limits = state.categoryOptions.limits;
+  let rule = state.categoryRules[state.categorySelected];
+  if (!rule) {
+    if (state.categoryRules.length >= limits.rules) {
+      setNotice(`最多只能添加 ${limits.rules} 个分组`);
+      return;
+    }
+    rule = { name: "新分组", keywords: [], enabled: true, color: "" };
+    state.categoryRules.push(rule);
+    state.categorySelected = state.categoryRules.length - 1;
+  }
+  if (rule.keywords.length >= limits.keywords) {
+    setNotice(`每个分组最多 ${limits.keywords} 个关键词`);
+    return;
+  }
+  if (rule.keywords.some((item) => item.toLowerCase() === keyword.toLowerCase())) {
+    setNotice(`「${rule.name || "当前分组"}」已包含关键词「${keyword}」`);
+    return;
+  }
+  rule.keywords.push(keyword.slice(0, limits.keyword));
+  renderCategoryRules();
+  renderHotWords();
+  updateCategorySummary();
+  markDirty();
+}
+
+/** 提交关键词输入：支持一次粘贴多个词（逗号 / 顿号 / 空格 / 竖线分隔） */
+function commitKeyword(index, rawValue) {
+  const rule = state.categoryRules[index];
+  if (!rule) return;
+  const words = String(rawValue || "")
+    .split(/[,，、;；\s|]+/)
+    .filter(Boolean);
+  for (const word of words) {
+    if (rule.keywords.length >= state.categoryOptions.limits.keywords) break;
+    const keyword = word.slice(0, state.categoryOptions.limits.keyword);
+    if (rule.keywords.some((item) => item.toLowerCase() === keyword.toLowerCase())) continue;
+    rule.keywords.push(keyword);
+  }
+  renderCategoryRules();
+  renderHotWords();
+  updateCategorySummary();
+  markDirty();
+}
+
+function focusCategoryKeywordInput(index) {
+  const card = els.categoryRules.querySelector(`.category-rule[data-index="${index}"]`);
+  const input = card ? card.querySelector(".category-keyword-input") : null;
+  if (input instanceof HTMLInputElement && !input.disabled) input.focus();
+}
+
+function moveCategoryRule(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= state.categoryRules.length) return;
+  const [rule] = state.categoryRules.splice(index, 1);
+  state.categoryRules.splice(target, 0, rule);
+  state.categorySelected = target;
+  renderCategoryRules();
+  markDirty();
+}
+
+function removeCategoryRule(index) {
+  const rule = state.categoryRules[index];
+  if (!rule) return;
+  state.categoryRules.splice(index, 1);
+  if (state.categorySelected > index) state.categorySelected -= 1;
+  state.categorySelected = Math.min(
+    state.categorySelected,
+    Math.max(0, state.categoryRules.length - 1),
+  );
+  renderCategoryRules();
+  renderHotWords();
+  updateCategorySummary();
+  markDirty();
+  setNotice(`已删除分组「${rule.name || "未命名"}」`);
+}
+
+function removeKeywordFromRule(index, keyword) {
+  const rule = state.categoryRules[index];
+  if (!rule) return;
+  const position = rule.keywords.indexOf(keyword);
+  if (position < 0) return;
+  rule.keywords.splice(position, 1);
+  renderCategoryRules();
+  renderHotWords();
+  updateCategorySummary();
+  markDirty();
+}
+
+function handleCategoryClick(event) {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  const card = target.closest(".category-rule");
+  if (!card) return;
+  const index = Number(card.dataset.index);
+  if (!Number.isInteger(index) || !state.categoryRules[index]) return;
+  const actionTarget = target.closest("[data-action]");
+  const action = actionTarget instanceof HTMLElement ? actionTarget.dataset.action : "";
+  if (action === "up") {
+    moveCategoryRule(index, -1);
+    return;
+  }
+  if (action === "down") {
+    moveCategoryRule(index, 1);
+    return;
+  }
+  if (action === "remove") {
+    removeCategoryRule(index);
+    return;
+  }
+  if (action === "remove-keyword") {
+    removeKeywordFromRule(index, actionTarget.dataset.keyword || "");
+    return;
+  }
+  selectCategoryRule(index);
+}
+
+function handleCategoryInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.dataset.action !== "name") return;
+  const card = target.closest(".category-rule");
+  if (!card) return;
+  const rule = state.categoryRules[Number(card.dataset.index)];
+  if (!rule) return;
+  rule.name = target.value.slice(0, state.categoryOptions.limits.name);
+  updateCategoryTarget();
+  markDirty();
+}
+
+function handleCategoryChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+  const card = target.closest(".category-rule");
+  if (!card) return;
+  const index = Number(card.dataset.index);
+  const rule = state.categoryRules[index];
+  if (!rule) return;
+  const action = target.dataset.action;
+  if (action === "enabled") {
+    rule.enabled = target.checked;
+    // 启停会影响每组命中数，整体重画最省事（行数远小于性能感知阈值）
+    renderCategoryRules();
+    updateCategorySummary();
+    markDirty();
+    return;
+  }
+  if (action === "rule-color") {
+    let value = target.value;
+    if (value === "__custom__") value = "#5b8def";
+    rule.color = normalizeRuleColor(value);
+    // 固定 hex 需要以「固定 #xxxxxx」的形式回显，直接重画下拉
+    renderCategoryRules();
+    markDirty();
+    return;
+  }
+  if (action === "rule-color-picker") {
+    const hex = normalizeHex(target.value);
+    if (!hex) return;
+    rule.color = hex;
+    const select = card.querySelector('select[data-action="rule-color"]');
+    if (select instanceof HTMLSelectElement) updateCategoryColorSelect(select, hex);
+    markDirty();
+    return;
+  }
+  if (action === "keyword") {
+    const value = target.value;
+    target.value = "";
+    if (!value.trim()) return;
+    commitKeyword(index, value);
+    focusCategoryKeywordInput(index);
+  }
+}
+
+function handleCategoryKeydown(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.dataset.action !== "keyword") return;
+  if (event.key !== "Enter" && event.key !== "," && event.key !== "，") return;
+  event.preventDefault();
+  const card = target.closest(".category-rule");
+  const index = card ? Number(card.dataset.index) : -1;
+  const value = target.value;
+  if (!value.trim()) return;
+  target.value = "";
+  commitKeyword(index, value);
+  focusCategoryKeywordInput(index);
+}
+
 function buildColorControl() {
   colorInputs.clear();
   els.colorGroups.replaceChildren();
@@ -1070,6 +1736,7 @@ function syncControls() {
   updateBackgroundVisibility();
   syncBackgroundControl();
   syncPluginControl();
+  syncCategoryControl();
 
   els.fontSearch.value = "";
   renderFontList();
@@ -1307,6 +1974,56 @@ function bindStaticEvents() {
     markDirty();
   });
 
+  if (els.categoryAdd) els.categoryAdd.addEventListener("click", addCategoryRule);
+  if (els.categoryStandard) {
+    els.categoryStandard.addEventListener("click", applyStandardCategories);
+  }
+  if (els.categoryFallback) {
+    els.categoryFallback.addEventListener("input", () => {
+      state.categoryFallback = els.categoryFallback.value;
+      updateCategorySummary();
+      markDirty();
+    });
+  }
+  if (els.categoryFallbackColor) {
+    els.categoryFallbackColor.addEventListener("change", () => {
+      let value = els.categoryFallbackColor.value;
+      if (value === "__custom__") value = "#5b8def";
+      state.categoryFallbackColor = normalizeRuleColor(value);
+      // 重画下拉，避免「自定义颜色…」一直停在选中态
+      rebuildCategoryColorSelect(
+        els.categoryFallbackColor,
+        state.categoryFallbackColor,
+        "默认（槽 0）",
+        "fallback-color",
+      );
+      syncFallbackColorPicker();
+      markDirty();
+    });
+  }
+  if (els.categoryFallbackPicker) {
+    els.categoryFallbackPicker.addEventListener("change", () => {
+      const hex = normalizeHex(els.categoryFallbackPicker.value);
+      if (!hex) return;
+      state.categoryFallbackColor = hex;
+      updateCategoryColorSelect(els.categoryFallbackColor, hex);
+      markDirty();
+    });
+  }
+  if (els.categoryHotWords) {
+    els.categoryHotWords.addEventListener("click", (event) => {
+      const button = event.target instanceof Element ? event.target.closest(".hot-word") : null;
+      if (!button || !button.dataset.word) return;
+      addKeywordToSelectedRule(button.dataset.word);
+    });
+  }
+  if (els.categoryRules) {
+    els.categoryRules.addEventListener("click", handleCategoryClick);
+    els.categoryRules.addEventListener("input", handleCategoryInput);
+    els.categoryRules.addEventListener("change", handleCategoryChange);
+    els.categoryRules.addEventListener("keydown", handleCategoryKeydown);
+  }
+
   els.fontSearch.addEventListener("input", () => {
     state.fontFilter = els.fontSearch.value;
     renderFontList();
@@ -1459,6 +2176,19 @@ function buildStyleFromState() {
     background: state.background,
     ignored_plugins: [...state.ignoredSelected],
     ignored_plugins_custom: [...state.ignoredCustom],
+    category: {
+      fallback: state.categoryFallback,
+      fallback_color: state.categoryFallbackColor,
+      // 没填名称的分组没有意义，后端也会丢弃；这里先过滤，避免「应用后没变化」
+      rules: state.categoryRules
+        .filter((rule) => rule.name.trim())
+        .map((rule) => ({
+          name: rule.name,
+          keywords: [...rule.keywords],
+          enabled: rule.enabled,
+          color: rule.color,
+        })),
+    },
   };
 }
 
@@ -1598,6 +2328,9 @@ function styleMatchesActive(active, style) {
   const activeIgnored = asObject(active.ignored);
   if (!sameNameSet(activeIgnored.selected, style.ignored_plugins)) return false;
   if (!sameNameSet(activeIgnored.custom, style.ignored_plugins_custom)) return false;
+
+  // 分类规则按签名比较：关键词顺序 / 大小写 / 颜色写法差异不算配置变化
+  if (categorySignature(active.category) !== categorySignature(style.category)) return false;
 
   const currentColors = normalizeColorMap(active.colors);
   for (const [key, value] of Object.entries(normalizeColorMap(style.colors))) {

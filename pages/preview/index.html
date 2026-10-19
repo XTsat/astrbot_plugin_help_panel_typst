@@ -168,6 +168,43 @@
               </div>
             </details>
 
+            <details class="ct-section" id="category-section">
+              <summary>分类与热词</summary>
+              <div class="ct-section-body">
+                <p class="field-hint">
+                  帮助面板按下面的顺序匹配插件名与简介：命中关键词的分组优先，全部未命中时进入兜底分组。点选高频词可直接加入选中的分组。
+                </p>
+                <div class="field">
+                  <div class="field-head">
+                    <span class="field-label">高频热词</span>
+                    <span class="field-value" id="category-hot-target">先选择一个分组</span>
+                  </div>
+                  <div class="hot-word-list" id="category-hot-words" role="group" aria-label="插件高频词"></div>
+                </div>
+                <div class="category-rule-list" id="category-rules" role="group" aria-label="分类规则"></div>
+                <div class="section-actions category-actions">
+                  <button class="text-btn" id="btn-add-category" type="button">添加分组</button>
+                  <button class="text-btn" id="btn-standard-category" type="button">套用标准分类</button>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="category-fallback">兜底分组</label>
+                  <div class="category-fallback-row">
+                    <input type="text" id="category-fallback" maxlength="16" placeholder="其他" />
+                    <select id="category-fallback-color" class="category-color-select" aria-label="兜底分组颜色"></select>
+                    <input
+                      type="color"
+                      id="category-fallback-picker"
+                      class="category-color-picker"
+                      aria-label="兜底分组的固定颜色"
+                      hidden
+                    />
+                  </div>
+                  <p class="field-hint">所有分组都没命中时使用；分类色来自当前主题，可固定为具体颜色。</p>
+                </div>
+                <p class="field-hint" id="category-summary"></p>
+              </div>
+            </details>
+
             <details class="ct-section">
               <summary>版式</summary>
               <div class="ct-section-body">

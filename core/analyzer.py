@@ -129,6 +129,8 @@ def list_installed_plugins(context: Context) -> list[dict[str, Any]]:
         plugins[name] = {
             "name": name,
             "display_name": info["display_name"] or name,
+            # 预览页分类编辑器据此统计高频词, 与分类匹配用的文案保持一致
+            "desc": info["desc"],
             # 激活状态为 False 的插件仍可被屏蔽, 前端只做标记
             "disabled": getattr(star, "activated", True) is False,
         }

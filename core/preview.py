@@ -10,6 +10,7 @@ import copy
 import hashlib
 import io
 import json
+import re
 import time
 import uuid
 from collections import OrderedDict
@@ -22,7 +23,7 @@ from astrbot.api import logger
 from astrbot.api.star import Star
 
 from ..domain import DefaultCFG, InternalCFG, ThemePreset, TypstPluginConfig
-from ..domain.config import HEX_COLOR_REGEX
+from ..domain.config import HEX_COLOR_REGEX, CategoryConfig, CategoryRule
 from ..utils import FontManager, TypstLayout, calculate_hash
 from .renderer import TypstRenderer
 
@@ -182,6 +183,167 @@ def _color_map(colors: dict[str, str]) -> dict[str, str]:
     }
 
 
+_SLOT_COLOR_RE = re.compile(r"slot_\d+")
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
+_LATIN_WORD_RE = re.compile(r"[a-z][a-z0-9]{1,}")
+
+
+def _normalize_slot_or_color(value: Any) -> str:
+    """分类颜色只接受主题色槽 slot_N 或 #RRGGBB，其它值退回「自动分配」"""
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if _SLOT_COLOR_RE.fullmatch(text):
+        return text
+    normalized = _normalize_color(text)
+    return normalized.lower() if normalized is not None else ""
+
+
+def _normalize_keywords(value: Any) -> list[str]:
+    """关键词去空白/空项，按大小写不敏感去重并截断到配置长度上限"""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        keyword = item.strip()[: InternalCFG.PREVIEW_CATEGORY_KEYWORD_MAX]
+        lowered = keyword.lower()
+        if keyword and lowered not in seen:
+            seen.add(lowered)
+            keywords.append(keyword)
+        if len(keywords) >= InternalCFG.PREVIEW_CATEGORY_KEYWORDS_MAX:
+            break
+    return keywords
+
+
+def _plugin_match_text(plugin: dict[str, Any]) -> str:
+    """与 CategoryConfig.match 的匹配文案保持一致：desc + name + display_name"""
+    parts = (plugin.get("desc"), plugin.get("name"), plugin.get("display_name"))
+    return " ".join(
+        str(part).strip() for part in parts if isinstance(part, str) and part.strip()
+    ).lower()
+
+
+def _hot_word_tokens(text: str) -> set[str]:
+    """切候选热词：中文 2~4 字连续片段 + 英文单词，去掉通用停用词"""
+    stopwords = InternalCFG.PREVIEW_HOT_WORD_STOPWORDS
+    tokens: set[str] = set()
+    for run in _CJK_RUN_RE.findall(text):
+        length = len(run)
+        for size in range(
+            InternalCFG.PREVIEW_HOT_WORD_MIN_LEN,
+            InternalCFG.PREVIEW_HOT_WORD_MAX_LEN + 1,
+        ):
+            if size > length:
+                break
+            for index in range(length - size + 1):
+                token = run[index : index + size]
+                if token not in stopwords:
+                    tokens.add(token)
+    for word in _LATIN_WORD_RE.findall(text):
+        if len(word) >= InternalCFG.PREVIEW_HOT_WORD_MIN_LEN:
+            if word not in stopwords:
+                tokens.add(word)
+    return tokens
+
+
+def _extract_hot_words(texts: list[str]) -> list[dict[str, Any]]:
+    """统计热词并按「出现插件数」排序，互相包含的近义词只保留一个"""
+    counts: dict[str, int] = {}
+    for text in texts:
+        for token in _hot_word_tokens(text):
+            counts[token] = counts.get(token, 0) + 1
+
+    ranked = sorted(
+        (
+            {"word": word, "count": count}
+            for word, count in counts.items()
+            if count >= InternalCFG.PREVIEW_HOT_WORD_MIN_COUNT
+        ),
+        # 同频时短词优先: 「图片」比「图片生成」更适合当关键词, 长词会在下面被包含关系剔除
+        key=lambda item: (-item["count"], len(item["word"]), item["word"]),
+    )
+    picked: list[dict[str, Any]] = []
+    for item in ranked:
+        word = item["word"]
+        # 出现次数更高的词已经在列表里时，同频或更低频的「子串/超串」都不再占位，
+        # 否则「查询」「查询天气」「天气查询」会一起挤满热词区
+        if any(
+            (word in kept["word"] or kept["word"] in word)
+            and kept["count"] >= item["count"]
+            for kept in picked
+        ):
+            continue
+        picked.append(item)
+        if len(picked) >= InternalCFG.PREVIEW_HOT_WORD_LIMIT:
+            break
+    return picked
+
+
+def _category_signature(category: dict[str, Any]) -> str:
+    """分类结构归一化后比较：颜色大小写、关键词顺序不构成真实改动"""
+    rules = category.get("rules")
+    return json.dumps(
+        {
+            "fallback": str(category.get("fallback") or ""),
+            "fallback_color": str(category.get("fallback_color") or "").lower(),
+            "rules": [
+                {
+                    "name": str(rule.get("name") or ""),
+                    "keywords": sorted(
+                        str(keyword).lower()
+                        for keyword in rule.get("keywords") or []
+                    ),
+                    "enabled": bool(rule.get("enabled", True)),
+                    "color": str(rule.get("color") or "").lower(),
+                }
+                for rule in (rules if isinstance(rules, list) else [])
+                if isinstance(rule, dict)
+            ],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+@dataclass
+class PreviewCategoryRule:
+    """预览态的单条分类规则，字段与配置面板 category.rules 一一对应"""
+
+    name: str
+    keywords: list[str]
+    enabled: bool = True
+    color: str = ""
+
+    def to_plain(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "keywords": list(self.keywords),
+            "enabled": self.enabled,
+            "color": self.color,
+        }
+
+
+@dataclass
+class PreviewCategory:
+    """预览态的分类配置（规则 + 兜底分类）"""
+
+    fallback: str
+    fallback_color: str
+    rules: list[PreviewCategoryRule]
+
+    def to_plain(self) -> dict[str, Any]:
+        return {
+            "fallback": self.fallback,
+            "fallback_color": self.fallback_color,
+            "rules": [rule.to_plain() for rule in self.rules],
+        }
+
+
 @dataclass
 class PreviewStyle:
     """一次预览请求的样式快照"""
@@ -204,6 +366,8 @@ class PreviewStyle:
     # 生效屏蔽集拆成两路: 面板勾选的已安装插件 + 手填的自定义条目
     ignored_plugins: list[str]
     ignored_plugins_custom: list[str]
+    # 分类规则与兜底分类: 只影响 /helps 的分类归属与卡片标题, 不参与模板配色
+    category: PreviewCategory
 
     def to_plain(self) -> dict[str, Any]:
         return {
@@ -224,6 +388,7 @@ class PreviewStyle:
             "background": self.background,
             "ignored_plugins": self.ignored_plugins,
             "ignored_plugins_custom": self.ignored_plugins_custom,
+            "category": self.category.to_plain(),
         }
 
 
@@ -395,6 +560,7 @@ class PreviewService:
                 if name not in installed
             }
         )
+        category_options = self._build_category_options(plugins)
 
         return {
             "modes": [{"value": mode, "label": label} for mode, label in _MODE_LABELS],
@@ -420,6 +586,7 @@ class PreviewService:
                     "selected": ignored_selected,
                     "custom": ignored_custom,
                 },
+                "category": category_options["active"],
             },
             "fonts": fonts,
             "backgrounds": backgrounds,
@@ -428,6 +595,7 @@ class PreviewService:
                 "selected": ignored_selected,
                 "custom": ignored_custom,
             },
+            "category": category_options,
             "color_groups": self._build_color_groups(colors),
             "limits": {
                 "page_width": {
@@ -500,6 +668,58 @@ class PreviewService:
             if items:
                 groups.append({"id": group_id, "label": label, "colors": items})
         return groups
+
+    def _build_category_options(
+        self, plugins: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """分类编辑器数据：当前规则、标准模板、主题色槽与高频热词"""
+        category = self.base_config.category
+        slots = self.base_config.appearance.get_category_slots()
+        # 热词与命中数只统计真正会出现在面板里的插件，否则本插件与 AstrBot
+        # 内置项的描述会把「帮助」「机器人」这类词拱到最前面
+        ignored = self.base_config.effective_ignored_plugins
+        visible = [
+            plugin
+            for plugin in plugins
+            if str(plugin.get("name") or "") not in ignored
+        ]
+        texts = [_plugin_match_text(plugin) for plugin in visible]
+        return {
+            "active": category.to_plain(),
+            "slots": [
+                {"value": f"slot_{index}", "label": f"槽 {index}", "hex": color}
+                for index, color in enumerate(slots)
+            ],
+            # 标准模板直接取默认分类关键词, 与首次安装时预置到面板的内容一致
+            "standard": [
+                {
+                    "name": name,
+                    "keywords": list(keywords),
+                    "color": DefaultCFG.DEFAULT_CATEGORY_SLOT_BINDINGS.get(name, ""),
+                }
+                for name, keywords in DefaultCFG.DEFAULT_CATEGORY_KEYWORDS.items()
+            ],
+            "fallback_defaults": {
+                "fallback": DefaultCFG.DEFAULT_CATEGORY_FALLBACK,
+                "fallback_color": DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR,
+            },
+            "hot_words": _extract_hot_words(texts),
+            # 前端用这些文案算「某分组命中多少个插件」, 不传插件名以外的原始元信息
+            "match_texts": [
+                {
+                    "name": str(plugin.get("name") or ""),
+                    "text": text[: InternalCFG.PREVIEW_MATCH_TEXT_LIMIT],
+                }
+                for plugin, text in zip(visible, texts)
+            ],
+            "limits": {
+                "name": InternalCFG.PREVIEW_CATEGORY_NAME_MAX,
+                "keyword": InternalCFG.PREVIEW_CATEGORY_KEYWORD_MAX,
+                "rules": InternalCFG.PREVIEW_CATEGORY_RULES_MAX,
+                "keywords": InternalCFG.PREVIEW_CATEGORY_KEYWORDS_MAX,
+                "hot_words": InternalCFG.PREVIEW_HOT_WORD_LIMIT,
+            },
+        }
 
     # ---- render ----
 
@@ -653,6 +873,81 @@ class PreviewService:
 
     # ---- style -> config ----
 
+    def _parse_category(self, raw_category: Any) -> PreviewCategory:
+        """分类规则收敛：键缺失沿用当前配置，传入值按配置面板的规则清洗"""
+        base = self.base_config.category
+
+        def base_rules() -> list[PreviewCategoryRule]:
+            return [
+                PreviewCategoryRule(
+                    name=rule.name,
+                    keywords=list(rule.keywords),
+                    enabled=rule.enabled,
+                    color=rule.color,
+                )
+                for rule in base.rules
+            ]
+
+        if not isinstance(raw_category, dict):
+            return PreviewCategory(
+                fallback=base.fallback,
+                fallback_color=base.fallback_color,
+                rules=base_rules(),
+            )
+
+        raw_fallback = raw_category.get("fallback")
+        fallback = (
+            raw_fallback.strip()[: InternalCFG.PREVIEW_CATEGORY_NAME_MAX]
+            if isinstance(raw_fallback, str)
+            else ""
+        )
+        if not fallback:
+            fallback = DefaultCFG.DEFAULT_CATEGORY_FALLBACK
+
+        raw_fallback_color = raw_category.get("fallback_color")
+        fallback_color = (
+            _normalize_slot_or_color(raw_fallback_color)
+            if isinstance(raw_fallback_color, str)
+            else DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
+        )
+        # 与 config.load 一致：留空等价于默认色槽
+        if not fallback_color:
+            fallback_color = DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
+
+        raw_rules = raw_category.get("rules")
+        if not isinstance(raw_rules, list):
+            rules = base_rules()
+        else:
+            rules = []
+            for item in raw_rules:
+                if not isinstance(item, dict):
+                    continue
+                raw_name = item.get("name")
+                name = (
+                    raw_name.strip()[: InternalCFG.PREVIEW_CATEGORY_NAME_MAX]
+                    if isinstance(raw_name, str)
+                    else ""
+                )
+                if not name:
+                    continue
+                rules.append(
+                    PreviewCategoryRule(
+                        name=name,
+                        keywords=_normalize_keywords(item.get("keywords")),
+                        # 与 config.load 一致：只有显式 false 才关闭
+                        enabled=_as_bool(item.get("enabled"), True),
+                        color=_normalize_slot_or_color(item.get("color")),
+                    )
+                )
+                if len(rules) >= InternalCFG.PREVIEW_CATEGORY_RULES_MAX:
+                    break
+
+        return PreviewCategory(
+            fallback=fallback,
+            fallback_color=fallback_color,
+            rules=rules,
+        )
+
     def _parse_style(self, raw_style: Any) -> PreviewStyle:
         """把前端传来的样式收敛成合法值；非法颜色/字体静默忽略"""
         base_colors = dict(self.base_config.appearance.get_active_colors())
@@ -783,6 +1078,7 @@ class PreviewService:
             background=background,
             ignored_plugins=ignored_plugins,
             ignored_plugins_custom=ignored_custom,
+            category=self._parse_category(style.get("category")),
         )
 
     def _compose_config(
@@ -815,6 +1111,21 @@ class PreviewService:
         # 预览要反映面板里勾选的屏蔽集, 否则勾掉插件后预览图看不到变化
         cfg.ignored_plugins = set(style.ignored_plugins)
         cfg.ignored_plugins_custom = set(style.ignored_plugins_custom)
+
+        # 分类规则决定 /helps 的分组归属与卡片标题，预览必须同步，否则改了规则图不变
+        cfg.category = CategoryConfig(
+            rules=[
+                CategoryRule(
+                    name=rule.name,
+                    keywords=list(rule.keywords),
+                    enabled=rule.enabled,
+                    color=rule.color,
+                )
+                for rule in style.category.rules
+            ],
+            fallback=style.category.fallback,
+            fallback_color=style.category.fallback_color,
+        )
 
         if style.background:
             choices = dict(self.renderer.list_background_choices())
@@ -962,6 +1273,42 @@ class PreviewService:
         ):
             changed.append("屏蔽插件")
 
+        # 分类规则：结构与配置面板的 category 对齐后整体比较；配置侧会丢弃
+        # 「无关键词」与「同名」条目，这里先跳过并提示，避免保存后规则凭空消失
+        category_patch: dict[str, Any] | None = None
+        if _category_signature(base.category.to_plain()) != _category_signature(
+            style.category.to_plain()
+        ):
+            changed.append("分类规则")
+            rules_patch: list[dict[str, Any]] = []
+            seen_names: set[str] = set()
+            for rule in style.category.rules:
+                keywords = [keyword for keyword in rule.keywords if keyword]
+                if not keywords:
+                    warnings.append(f"分类「{rule.name}」没有关键词，已跳过")
+                    continue
+                if rule.name in seen_names:
+                    warnings.append(f"分类「{rule.name}」名称重复，已保留第一条")
+                    continue
+                seen_names.add(rule.name)
+                rules_patch.append(
+                    {
+                        # 设置面板的 template_list 靠模板键渲染条目，缺了会被配置校验拒绝
+                        "__template_key": "standard_category",
+                        "category_name": rule.name,
+                        "enabled": bool(rule.enabled),
+                        "keywords": keywords,
+                        "color": rule.color,
+                    }
+                )
+            if not rules_patch:
+                warnings.append("分组规则全部无效，应用后所有插件都会归入兜底分类")
+            category_patch = {
+                "fallback": style.category.fallback,
+                "fallback_color": style.category.fallback_color,
+                "rules": rules_patch,
+            }
+
         appearance_patch: dict[str, Any] = {
             "active_preset": preset_name,
             "font_order": fonts,
@@ -976,6 +1323,7 @@ class PreviewService:
             "background_path": background_path,
             "ignored_plugins": ignored_selected,
             "ignored_plugins_custom": ignored_custom,
+            "category": category_patch,
             "changed": changed,
             "warnings": warnings,
         }
