@@ -1559,12 +1559,21 @@ function renderHotWords() {
   els.categoryHotWords.appendChild(fragment);
 }
 
+/** 关键词是否命中插件文本：与归类规则一致，英文按整词、中文按片段 */
+function keywordHitsText(keyword, text) {
+  if (!keyword || !text) return false;
+  if (/^[a-z0-9]+$/.test(keyword)) {
+    return (text.match(/[a-z0-9]+/g) || []).includes(keyword);
+  }
+  return text.includes(keyword);
+}
+
 /** 单个关键词实际命中的可见插件数（不考虑分组顺序，和上方热词的计数口径一致） */
 function countKeywordMatches(keyword) {
   const needle = String(keyword || "").toLowerCase();
   if (!needle) return 0;
   return state.categoryOptions.matchTexts.reduce(
-    (total, entry) => total + (entry.text.includes(needle) ? 1 : 0),
+    (total, entry) => total + (keywordHitsText(needle, entry.text) ? 1 : 0),
     0,
   );
 }
@@ -1574,7 +1583,8 @@ function countCategoryMatches(rule) {
   const enabledKeywords = rule.keywords.map((keyword) => keyword.toLowerCase()).filter(Boolean);
   if (!rule.enabled || !enabledKeywords.length) return 0;
   return state.categoryOptions.matchTexts.reduce(
-    (total, entry) => total + (enabledKeywords.some((keyword) => entry.text.includes(keyword)) ? 1 : 0),
+    (total, entry) =>
+      total + (enabledKeywords.some((keyword) => keywordHitsText(keyword, entry.text)) ? 1 : 0),
     0,
   );
 }
