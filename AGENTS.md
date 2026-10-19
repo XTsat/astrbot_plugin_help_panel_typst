@@ -269,7 +269,7 @@ class HelpTypst(Star):
 
 - 读取配置一律经 `TypstPluginConfig.load()`，缺项回退 `DefaultCFG`；不直接散读 `self.config[...]`。
 - `ignored_plugins` 统一转为 `set`，缓存快照中排序后再比较。
-- 分类规则按列表顺序匹配（大小写不敏感的**子串**匹配），命中第一条即返回，全部未命中用兜底分类；缓存快照使用 `CategoryConfig.to_plain()`。
+- 分类规则由 `CategoryConfig.match(title, desc)` 归类：**名称/展示名命中优先**于简短描述/描述命中，同层级**长关键词优先**，长度相同按列表顺序；中文关键词子串匹配，纯英文关键词按整词匹配；全部未命中用兜底分类。缓存快照使用 `CategoryConfig.to_plain()`。
 - 颜色来源：内置主题色板在 `DefaultCFG.PRESETS`，分类色槽为 `cat_slot_0`~`cat_slot_9`；分类规则 `color` 支持 `slot_N`、`#RRGGBB`、留空（按顺序自动分配）。
 
 ### 5.3 运行时数据与持久化

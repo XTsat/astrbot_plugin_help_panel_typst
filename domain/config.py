@@ -9,6 +9,8 @@ from . import DefaultCFG, InternalCFG
 
 # 预编译正则
 HEX_COLOR_REGEX = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
+# 分类关键词匹配: 纯 ASCII 关键词按整词比对, 避免 dev 命中 device、ai 命中 wait
+ASCII_WORD_REGEX = re.compile(r"[a-z0-9]+")
 
 
 def _is_valid_hex(color_str: Any) -> bool:
@@ -251,12 +253,13 @@ class AppearanceConfig:
 class CategoryRule:
     """单条插件分类规则 (设置面板 category.rules 列表条目)
 
-    匹配逻辑: 插件元信息 (desc/name/display_name/tags) 中出现任一关键词即归入该分类。
-    列表顺序即匹配优先级: 命中第一个匹配的规则即返回, 全部未命中时归入兜底分类。
+    匹配逻辑: 插件名称/展示名或简短描述/描述中出现任一关键词即归入该分类。
+    名称/展示名命中优先于简介命中; 同层级下关键词越长越优先 (表情包 > 表情),
+    长度相同再按列表顺序; 全部未命中时归入兜底分类。
     """
 
     name: str  # 分类名 (卡片标题 / 编号分组依据)
-    keywords: list[str]  # 匹配关键词 (大小写不敏感, 子串匹配)
+    keywords: list[str]  # 匹配关键词 (大小写不敏感; 中文子串匹配, 英文整词匹配)
     enabled: bool = True  # 启用开关: 关闭后该规则不参与匹配
     # 分类卡片主题色 (可选): 留空自动分配主题色槽; 填 slot_N 绑定主题色槽 (随主题变化);
     # 填 #RRGGBB 固定颜色 (不随主题)。非法值回退为空串
@@ -277,16 +280,37 @@ class CategoryConfig:
     # 兜底分类卡片颜色: "" 灰蓝 / slot_N 主题色槽 (随主题) / #RRGGBB 固定色
     fallback_color: str = ""
 
-    def match(self, text: str) -> str:
-        """按规则顺序匹配关键词: 命中第一个匹配的规则即返回分类名, 全部未命中返回兜底分类名"""
-        lowered = text.lower()
-        for rule in self.rules:
+    def match(self, title: str, desc: str = "") -> str:
+        """按关键词归类: 名称命中优先于简介, 同层级长词优先, 平票按规则顺序
+
+        title 取插件名称/展示名; desc 取简短描述/描述。英文关键词按整词匹配,
+        中文关键词按子串匹配; 全部未命中返回兜底分类名。
+        """
+        title_text = title.lower()
+        desc_text = desc.lower()
+        title_words = set(ASCII_WORD_REGEX.findall(title_text))
+        desc_words = set(ASCII_WORD_REGEX.findall(desc_text))
+        best_rank: tuple[int, int, int] | None = None
+        best_name = self.fallback
+        for index, rule in enumerate(self.rules):
             if not rule.enabled:
                 continue
-            for kw in rule.keywords:
-                if kw.lower() in lowered:
-                    return rule.name
-        return self.fallback
+            for keyword in rule.keywords:
+                word = keyword.strip().lower()
+                if not word:
+                    continue
+                if ASCII_WORD_REGEX.fullmatch(word):
+                    tier = 2 if word in title_words else (1 if word in desc_words else 0)
+                else:
+                    tier = 2 if word in title_text else (1 if word in desc_text else 0)
+                if not tier:
+                    continue
+                # 层级 → 关键词长度 → 规则顺序 (index 越小越优先)
+                rank = (tier, len(word), -index)
+                if best_rank is None or rank > best_rank:
+                    best_rank = rank
+                    best_name = rule.name
+        return best_name
 
     def get_rule(self, name: str) -> CategoryRule | None:
         """按分类名取规则 (用于解析自定义分类色)"""

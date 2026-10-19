@@ -63,6 +63,7 @@ def get_safe_plugin_info(star_meta: Any) -> dict[str, str | None]:
             "display_name": None,
             "version": "",
             "desc": "",
+            "short_desc": "",
             "author": "",
             "raw_module": None,  # handler 查找, 与正常分支保持同键
         }
@@ -92,6 +93,8 @@ def get_safe_plugin_info(star_meta: Any) -> dict[str, str | None]:
 
     version = str(getattr(star_meta, "version", "")) or ""
     desc = str(getattr(star_meta, "desc", "")) or ""
+    # 简短描述是插件作者手写的摘要, 比长描述更贴近插件用途, 参与分类匹配
+    short_desc = str(getattr(star_meta, "short_desc", "")) or ""
     author = str(getattr(star_meta, "author", "")) or ""
 
     return {
@@ -99,6 +102,7 @@ def get_safe_plugin_info(star_meta: Any) -> dict[str, str | None]:
         "display_name": display,
         "version": version,
         "desc": desc,
+        "short_desc": short_desc,
         "author": author,
         "raw_module": raw_module,  # handler 查找
     }
@@ -130,6 +134,7 @@ def list_installed_plugins(context: Context) -> list[dict[str, Any]]:
             "name": name,
             "display_name": info["display_name"] or name,
             # 预览页分类编辑器据此统计高频词, 与分类匹配用的文案保持一致
+            "short_desc": info["short_desc"],
             "desc": info["desc"],
             # 激活状态为 False 的插件仍可被屏蔽, 前端只做标记
             "disabled": getattr(star, "activated", True) is False,
@@ -275,19 +280,19 @@ class BaseAnalyzer:
         raise NotImplementedError
 
     def _derive_category(self, info: dict[str, str | None]) -> str:
-        """根据插件元信息推断分类: 关键词命中 (desc/name/display_name) → 兜底
+        """根据插件元信息推断分类: 名称命中优先, 其次简短描述/描述, 未命中 → 兜底
 
         分类规则与兜底分类名来自设置面板 category 配置 (默认预置
         DefaultCFG.DEFAULT_CATEGORY_KEYWORDS, 用户可自由增删改)。
         """
-        text_parts = []
-        for key in ("desc", "name", "display_name"):
-            val = info.get(key)
-            if val:
-                text_parts.append(str(val))
-        text = " ".join(text_parts).lower()
+        title = " ".join(
+            str(info[key]) for key in ("name", "display_name") if info.get(key)
+        )
+        desc = " ".join(
+            str(info[key]) for key in ("short_desc", "desc") if info.get(key)
+        )
 
-        return self.cfg.category.match(text)
+        return self.cfg.category.match(title, desc)
 
     def _group_handlers_by_module(self) -> dict[str, list[StarHandlerMetadata]]:
         mapping = defaultdict(list)

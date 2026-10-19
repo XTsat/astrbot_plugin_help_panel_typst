@@ -221,8 +221,13 @@ def _normalize_keywords(value: Any) -> list[str]:
 
 
 def _plugin_match_text(plugin: dict[str, Any]) -> str:
-    """与 CategoryConfig.match 的匹配文案保持一致：desc + name + display_name"""
-    parts = (plugin.get("desc"), plugin.get("name"), plugin.get("display_name"))
+    """与 CategoryConfig.match 的匹配文案保持一致：name + display_name + short_desc + desc"""
+    parts = (
+        plugin.get("name"),
+        plugin.get("display_name"),
+        plugin.get("short_desc"),
+        plugin.get("desc"),
+    )
     return " ".join(
         str(part).strip() for part in parts if isinstance(part, str) and part.strip()
     ).lower()
