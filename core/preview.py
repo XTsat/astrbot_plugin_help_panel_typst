@@ -691,7 +691,7 @@ class PreviewService:
                 "giant_threshold": {
                     "min": DefaultCFG.MIN_GIANT,
                     "max": DefaultCFG.MAX_GIANT,
-                    "step": 50,
+                    "step": 100,
                 },
                 "timeout_analysis": {
                     "min": DefaultCFG.MIN_TIMEOUT_ANALYSIS,
@@ -700,7 +700,7 @@ class PreviewService:
                 },
                 "timeout_compile": {
                     "min": DefaultCFG.MIN_TIMEOUT_COMPILE,
-                    "max": InternalCFG.PREVIEW_COMPILE_TIMEOUT,
+                    "max": DefaultCFG.MAX_TIMEOUT,
                     "step": 1,
                 },
                 "format_max_height": {
@@ -906,7 +906,8 @@ class PreviewService:
         返回一个只复制 JSON 的包装 provider，让 Typst 编译仍然走原有渲染路径。
         """
         json_path = self.data_dir / f"temp_preview_{uuid.uuid4().hex}.json"
-        timeout = max(1.0, float(cfg.rendering.timeout_analysis))
+        # 下限由配置读取/预览样式统一夹紧, 这里不再另设 1s 兜底
+        timeout = float(cfg.rendering.timeout_analysis)
         try:
             count = await asyncio.wait_for(
                 asyncio.to_thread(provider, json_path), timeout=timeout
@@ -1156,7 +1157,7 @@ class PreviewService:
                 style.get("timeout_compile"),
                 float(rendering.timeout_compile),
                 DefaultCFG.MIN_TIMEOUT_COMPILE,
-                InternalCFG.PREVIEW_COMPILE_TIMEOUT,
+                DefaultCFG.MAX_TIMEOUT,
             ),
             plugin_two_lines=_as_bool(
                 style.get("plugin_two_lines"), bool(rendering.plugin_two_lines)
@@ -1191,9 +1192,7 @@ class PreviewService:
         # 分页高度与正式配置保持一致：模板按该上限分页，预览才能反映真实分页位置
         rendering.split_height = min(style.split_height, format_max)
         rendering.timeout_analysis = style.timeout_analysis
-        rendering.timeout_compile = min(
-            style.timeout_compile, InternalCFG.PREVIEW_COMPILE_TIMEOUT
-        )
+        rendering.timeout_compile = style.timeout_compile
         rendering.max_concurrent_tasks = 1
 
         cfg.hero_header = style.hero_header
@@ -1269,13 +1268,6 @@ class PreviewService:
 
         format_max = _format_max_height(style.output_format)
         split_height = min(int(style.split_height), format_max)
-        compile_timeout = style.timeout_compile
-        if (
-            compile_timeout == InternalCFG.PREVIEW_COMPILE_TIMEOUT
-            and rendering.timeout_compile > InternalCFG.PREVIEW_COMPILE_TIMEOUT
-        ):
-            # 面板上限把配置里更长的超时截断了，不代表用户想改小
-            compile_timeout = float(rendering.timeout_compile)
         new_rendering = {
             "page_width": style.page_width,
             "ppi": float(style.ppi),
@@ -1284,7 +1276,7 @@ class PreviewService:
             "giant_threshold": int(round(style.giant_threshold)),
             "output_format": style.output_format,
             "timeout_analysis": style.timeout_analysis,
-            "timeout_compile": compile_timeout,
+            "timeout_compile": style.timeout_compile,
             "plugin_two_lines": style.plugin_two_lines,
         }
         for key, label in (

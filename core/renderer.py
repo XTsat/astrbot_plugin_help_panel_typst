@@ -396,9 +396,8 @@ class TypstRenderer:
                                 asyncio.get_running_loop().run_in_executor(
                                     pool, execute_render_task, task
                                 ),
-                                timeout=max(
-                                    1.0, float(self.cfg.rendering.timeout_compile)
-                                ),
+                                # 下限已由 config.load / 预览样式统一夹紧, 这里不再另设兜底
+                                timeout=float(self.cfg.rendering.timeout_compile),
                             )
                     except asyncio.TimeoutError:
                         logger.warning(

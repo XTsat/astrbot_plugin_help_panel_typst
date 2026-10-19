@@ -56,9 +56,9 @@ const state = {
     ppi: { min: 72, max: 384, step: 8 },
     splitHeight: { min: 1000, max: 65500, step: 1000 },
     singleColumnThreshold: { min: 360, max: 1200, step: 10 },
-    giantThreshold: { min: 100, max: 3000, step: 50 },
-    timeoutAnalysis: { min: 1, max: 60, step: 1 },
-    timeoutCompile: { min: 3, max: 30, step: 1 },
+    giantThreshold: { min: 100, max: 3000, step: 100 },
+    timeoutAnalysis: { min: 3, max: 60, step: 1 },
+    timeoutCompile: { min: 3, max: 60, step: 1 },
     formatMaxHeight: { webp: 16383, png: 32000, jpeg: 65500 },
     maxQueryLen: 80,
   },
@@ -707,16 +707,16 @@ function applyOptions(rawOptions, viewOptions = {}) {
     giantThreshold: {
       min: asNumber(giantLimit.min, 100),
       max: asNumber(giantLimit.max, 3000),
-      step: asNumber(giantLimit.step, 50),
+      step: asNumber(giantLimit.step, 100),
     },
     timeoutAnalysis: {
-      min: asNumber(analysisTimeoutLimit.min, 1),
+      min: asNumber(analysisTimeoutLimit.min, 3),
       max: asNumber(analysisTimeoutLimit.max, 60),
       step: asNumber(analysisTimeoutLimit.step, 1),
     },
     timeoutCompile: {
       min: asNumber(compileTimeoutLimit.min, 3),
-      max: asNumber(compileTimeoutLimit.max, 30),
+      max: asNumber(compileTimeoutLimit.max, 60),
       step: asNumber(compileTimeoutLimit.step, 1),
     },
     formatMaxHeight: normalizeFormatMaxHeight(limits.format_max_height),
@@ -2630,12 +2630,7 @@ function styleMatchesActive(active, style) {
   if (!close(active.giant_threshold, style.giant_threshold)) return false;
   if (!close(active.split_height, style.split_height)) return false;
   if (!close(active.timeout_analysis, style.timeout_analysis)) return false;
-  // 配置里的编译超时可能高于面板上限（面板导入时被截断到上限），此时后端会保留原值
-  const compileCap = asNumber(state.limits.timeoutCompile.max, 30);
-  const activeCompile = asNumber(active.timeout_compile, 30);
-  const styleCompile = asNumber(style.timeout_compile, 30);
-  const compileKept = styleCompile >= compileCap && activeCompile > compileCap;
-  if (!close(activeCompile, styleCompile) && !compileKept) return false;
+  if (!close(active.timeout_compile, style.timeout_compile)) return false;
   if (String(active.output_format || "") !== String(style.output_format || "")) return false;
   if (asBool(active.plugin_two_lines, true) !== asBool(style.plugin_two_lines, true)) return false;
   if (asBool(active.hero_header, true) !== asBool(style.hero_header, true)) return false;

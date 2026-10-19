@@ -265,7 +265,7 @@
         "type": "float",
         "slider": {
           "min": 3,
-          "max": 30,
+          "max": 60,
           "step": 1
         },
         "default": 10.0,

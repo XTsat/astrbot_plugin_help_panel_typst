@@ -145,7 +145,6 @@ class InternalCFG:
     PREVIEW_MAX_SPLIT_HEIGHT: int = 65500
     # 实测 40 个插件最多 4 页, 再多只增加 base64 体积
     PREVIEW_MAX_PAGES: int = 4
-    PREVIEW_COMPILE_TIMEOUT: float = 30.0
     PREVIEW_MAX_QUERY_LEN: int = 80
     # 单次编译约 1.1~1.6s, 防抖太短会让拖动过程排起长队
     PREVIEW_DEBOUNCE_MS: int = 550
@@ -453,8 +452,10 @@ class DefaultCFG:
     MIN_WEBP_LIMIT: int = 1000
     MIN_GIANT: int = 100
     MAX_GIANT: int = 3000
-    MIN_TIMEOUT_ANALYSIS: float = 1.0
-    MIN_TIMEOUT_COMPILE: float = 3.0  # 与面板 slider min 一致
+    # 超时的可编辑范围只有这一份: 设置面板 slider、网页预览 limit 与配置读取夹紧
+    # 都取这里, 三处不一致时会出现「面板存得进、预览改不动」的错位
+    MIN_TIMEOUT_ANALYSIS: float = 3.0
+    MIN_TIMEOUT_COMPILE: float = 3.0
     MAX_TIMEOUT: float = 60.0
     MIN_CONCURRENCY: int = 1
     MAX_CONCURRENCY: int = 10

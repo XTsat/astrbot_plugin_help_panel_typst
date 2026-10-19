@@ -251,7 +251,7 @@
                     <label class="field-label" for="giant-threshold">独占行高度</label>
                     <span class="field-value" id="giant-threshold-value">1500 px</span>
                   </div>
-                  <input type="range" id="giant-threshold" min="100" max="3000" step="50" value="1500" />
+                  <input type="range" id="giant-threshold" min="100" max="3000" step="100" value="1500" />
                   <p class="field-hint">事件 / 过滤器面板中超过该高度的卡片独占一行</p>
                 </div>
                 <label class="switch-row">
@@ -284,7 +284,7 @@
                     <label class="field-label" for="timeout-analysis">数据生成超时</label>
                     <span class="field-value" id="timeout-analysis-value">10 s</span>
                   </div>
-                  <input type="range" id="timeout-analysis" min="1" max="60" step="1" value="10" />
+                  <input type="range" id="timeout-analysis" min="3" max="60" step="1" value="10" />
                   <p class="field-hint">插件较多时可适当调高，超时会返回可读错误</p>
                 </div>
                 <div class="field">
@@ -292,8 +292,8 @@
                     <label class="field-label" for="timeout-compile">编译超时</label>
                     <span class="field-value" id="timeout-compile-value">30 s</span>
                   </div>
-                  <input type="range" id="timeout-compile" min="3" max="30" step="1" value="30" />
-                  <p class="field-hint">预览最多等待 30 秒；正式出图的并发等调度项仍以插件配置为准</p>
+                  <input type="range" id="timeout-compile" min="3" max="60" step="1" value="30" />
+                  <p class="field-hint">与插件设置里的「编译超时」同范围，应用配置时保存</p>
                 </div>
               </div>
             </details>
