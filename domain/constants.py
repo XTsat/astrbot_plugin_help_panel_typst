@@ -191,6 +191,16 @@ class InternalCFG:
         "disabled_cmd": "#C8C8C8",  # 命令名称/次级文本 (更浅灰)
         "disabled_icon": "#B9A5A8",  # 禁用图标 (圆圈 + 斜杠)
     }
+    # 深色主题下的禁用灰化色板: 浅灰底在暗色卡片上会变成刺眼白块, 改为「比卡片略亮的低饱和灰紫」
+    DISABLED_COLORS_DARK: dict[str, str] = {
+        "disabled_card_bg": "#2A2240",  # 禁用插件卡片背景 (略亮于卡片)
+        "disabled_card_border": "#3A3152",  # 禁用插件卡片边框
+        "disabled_badge_bg": "#3B3155",  # 编号徽章背景
+        "disabled_badge_text": "#A79BC2",  # 编号徽章文字
+        "disabled_name": "#9A8FB5",  # 插件名称
+        "disabled_cmd": "#938AAE",  # 命令名称/次级文本
+        "disabled_icon": "#8A80A4",  # 禁用图标
+    }
 
 
 class DefaultCFG:
@@ -285,231 +295,171 @@ class DefaultCFG:
     #   cat_slot_N : 通用分类色槽 (0~9, 分类卡片标题栏取色, 分类规则按槽位绑定; 0 为兜底)
     #   c_*        : 通用颜色 (event/filter/detail 视图使用)
 
-    # --- Ocean Blue 主题: 明亮清爽 (天蓝青 × 深海蓝 × 浅青蓝 × 奶油黄) ---
-    OCEAN_BLUE_COLORS: dict[str, str] = {
+    # --- Forest 主题: 墨竹 (森系墨绿 × 竹青 × 琥珀, 浅色) ---
+    FOREST_COLORS: dict[str, str] = {
         # 品牌色板
-        "brand_sky": "#57CDE3",  # 天空蓝 · 第一主色
-        "brand_navy": "#355A81",  # 深海蓝 · 结构色
-        "brand_mint": "#8AE6E1",  # 浅青蓝 · 高光
-        "brand_cream": "#FADE86",  # 奶油黄 · 强调
-        "brand_gold": "#F0C14B",  # 金黄 · 暖强调
-        "brand_blush": "#A8E9F2",  # 浅天蓝 · 柔和辅助
-        "brand_ink": "#2E2E35",  # 深色
-        "brand_gray": "#808E9D",  # 灰蓝 · 次级文字/disabled
+        "brand_sky": "#3F7D5B",  # 竹青 · 第一主色
+        "brand_navy": "#2C4638",  # 墨绿 · 结构色
+        "brand_mint": "#A8D5BC",  # 嫩竹 · 高光
+        "brand_cream": "#E9D8A0",  # 米黄 · 强调
+        "brand_gold": "#9E7222",  # 琥珀 · 暖强调
+        "brand_blush": "#CBE3D5",  # 浅苔 · 柔和辅助
+        "brand_ink": "#1E2B24",  # 深墨
+        "brand_gray": "#6F8177",  # 灰绿 · 次级文字/disabled
         "brand_card": "#FFFFFF",  # 卡片背景
-        "brand_border": "#DCEFF1",  # 卡片边框
-        "brand_soft": "#E7EFF1",  # 插件行边框 (更浅)
-        "brand_ghost": "#F3F6F7",  # disabled 行背景
-        # 通用分类色槽 (cat_slot_0~9): 分类卡片标题栏统一取色源, 随主题切换变化
-        # 槽位 0 = 兜底分类(其他) 默认色; 1~7 = AI/查询/工具/管理/娱乐/资讯/调试; 8~9 备用
-        "cat_slot_0": "#808E9D",
-        "cat_slot_1": "#57CDE3",
-        "cat_slot_2": "#FADE86",
-        "cat_slot_3": "#2E9BB8",
-        "cat_slot_4": "#355A81",
-        "cat_slot_5": "#8AE6E1",
-        "cat_slot_6": "#A8E9F2",
-        "cat_slot_7": "#6C8CA8",
-        "cat_slot_8": "#F0C14B",
-        "cat_slot_9": "#2E2E35",
+        "brand_border": "#D9E5DC",  # 卡片边框
+        "brand_soft": "#E4EEE7",  # 插件行边框
+        "brand_ghost": "#F0F5F1",  # disabled 行背景
+        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底分类(其他) 默认色, 1~7=默认分类, 8~9 备用
+        "cat_slot_0": "#7C8C82",  # 灰绿 · 兜底「其他」
+        "cat_slot_1": "#3F7D5B",  # 竹青 · AI
+        "cat_slot_2": "#A87C22",  # 琥珀 · 查询
+        "cat_slot_3": "#2F7E86",  # 深青 · 工具
+        "cat_slot_4": "#23483A",  # 墨绿 · 管理
+        "cat_slot_5": "#5E8F42",  # 橄榄 · 娱乐
+        "cat_slot_6": "#4E7FA8",  # 湖蓝 · 资讯
+        "cat_slot_7": "#A85A38",  # 陶土 · 调试
+        "cat_slot_8": "#C9A227",  # 金 · 备用
+        "cat_slot_9": "#1E2B24",  # 深墨 · 备用
         # 通用颜色
-        "page_fill": "#F5FBFC",
-        "c_plugin_name": "#355A81",
-        "c_plugin_id": "#808E9D",
-        "c_group_title": "#355A81",
-        "c_bullet": "#57CDE3",
-        "c_event_icon": "#F0C14B",
-        "c_leaf_text": "#2E2E35",
-        "c_desc_text": "#808E9D",
-        "c_group_bg": "#E8F6F9",
+        "page_fill": "#F4F7F2",
+        "c_plugin_name": "#2C4638",
+        "c_plugin_id": "#6F8177",
+        "c_group_title": "#2C4638",
+        "c_bullet": "#3F7D5B",
+        "c_event_icon": "#9E7222",
+        "c_leaf_text": "#26362C",
+        "c_desc_text": "#6F8177",
+        "c_group_bg": "#E9F1EB",
         "c_rich_bg": "#FFFFFF",
-        "c_box_bg": "#F3F6F7",
-        "c_box_stroke": "#E7EFF1",
-        "c_text_primary": "#355A81",
-        "c_regex_bg": "#FFF6E3",
-        "c_regex_text": "#C99114",
-        "c_regex_icon": "#D4A017",
-        "c_tag_admin": "#2E9BB8",
-        "c_tag_event": "#F0C14B",
-        "c_tag_mcp": "#355A81",
-        "c_tag_id": "#355A81",
-        "c_ver_bg": "#E8F6F9",
-        "c_ver_text": "#355A81",
-        "c_prio_bg": "#FDF6DC",
-        "c_prio_text": "#C99114",
-        "c_highlight_bg": "#FADE86",
-        "c_highlight_text": "#2E2E35",
-        "c_on_light": "#355A81",
+        "c_box_bg": "#F0F5F1",
+        "c_box_stroke": "#E4EEE7",
+        "c_text_primary": "#2C4638",
+        "c_regex_bg": "#FBF3E2",
+        "c_regex_text": "#8A6A1E",
+        "c_regex_icon": "#9E7222",
+        "c_tag_admin": "#2F7E86",
+        "c_tag_event": "#9E7222",
+        "c_tag_mcp": "#2C4638",
+        "c_tag_id": "#4E6B5A",
+        "c_ver_bg": "#E9F1EB",
+        "c_ver_text": "#2C4638",
+        "c_prio_bg": "#F7EFD9",
+        "c_prio_text": "#8A6A1E",
+        "c_highlight_bg": "#E9D8A0",
+        "c_highlight_text": "#1E2B24",
+        "c_on_light": "#1E2B24",
     }
-
-    # --- Night Navy 主题: 深邃夜幕 (深色科技感, 青黄霓虹) ---
-    NIGHT_NAVY_COLORS: dict[str, str] = {
+    # --- Sunset 主题: 落日 (落日橙 × 暖棕 × 琥珀, 浅色) ---
+    SUNSET_COLORS: dict[str, str] = {
         # 品牌色板
-        "brand_sky": "#57CDE3",  # 天空蓝 · 霓虹高光
-        "brand_navy": "#D8E6F5",  # 主文字色 (深底用浅色)
-        "brand_mint": "#8AE6E1",  # 浅青蓝 · 发光边
-        "brand_cream": "#FFE08A",  # 奶油黄 · 点睛
-        "brand_gold": "#FFD54A",  # 金黄 · 强调
-        "brand_blush": "#B7E9F5",  # 亮青 · 柔和辅助
-        "brand_ink": "#E6EEF5",  # 正文文字 (浅色)
-        "brand_gray": "#8AA0B8",  # 次级文字
-        "brand_card": "#1B3048",  # 卡片背景 (深)
-        "brand_border": "#2E4560",  # 卡片边框
-        "brand_soft": "#243C54",  # 插件行边框
-        "brand_ghost": "#16283E",  # disabled 行背景
-        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底, 1~7=默认分类, 8~9 备用
-        "cat_slot_0": "#6B88A3",
-        "cat_slot_1": "#57CDE3",
-        "cat_slot_2": "#FFE08A",
-        "cat_slot_3": "#4A7FB5",
-        "cat_slot_4": "#1F3A5F",
-        "cat_slot_5": "#8AE6E1",
-        "cat_slot_6": "#A8D8F0",
-        "cat_slot_7": "#5B7EA3",
-        "cat_slot_8": "#FFD54A",
-        "cat_slot_9": "#C084FC",
+        "brand_sky": "#D9502C",  # 落日橙 · 第一主色
+        "brand_navy": "#5C3A28",  # 暖棕 · 结构色
+        "brand_mint": "#F2BFA0",  # 浅桃 · 高光
+        "brand_cream": "#F7D08A",  # 沙黄 · 强调
+        "brand_gold": "#B07518",  # 琥珀 · 暖强调
+        "brand_blush": "#F8D9C4",  # 藕粉 · 柔和辅助
+        "brand_ink": "#3B2318",  # 深褐
+        "brand_gray": "#8C7663",  # 灰棕 · 次级文字/disabled
+        "brand_card": "#FFFFFF",  # 卡片背景
+        "brand_border": "#F1DFD2",  # 卡片边框
+        "brand_soft": "#F8EBE1",  # 插件行边框
+        "brand_ghost": "#FDF4ED",  # disabled 行背景
+        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底分类(其他) 默认色, 1~7=默认分类, 8~9 备用
+        "cat_slot_0": "#8C7663",  # 灰棕 · 兜底「其他」
+        "cat_slot_1": "#D9502C",  # 落日橙 · AI
+        "cat_slot_2": "#C4841C",  # 琥珀 · 查询
+        "cat_slot_3": "#2E7F86",  # 深青 · 工具
+        "cat_slot_4": "#6E2A1C",  # 深砖 · 管理
+        "cat_slot_5": "#D2557E",  # 胭脂 · 娱乐
+        "cat_slot_6": "#9A8A2E",  # 橄榄金 · 资讯
+        "cat_slot_7": "#7E3A6E",  # 梅紫 · 调试
+        "cat_slot_8": "#E8A33D",  # 橙金 · 备用
+        "cat_slot_9": "#3B2318",  # 深褐 · 备用
         # 通用颜色
-        "page_fill": "#0E1E31",
-        "c_plugin_name": "#D8E6F5",
-        "c_plugin_id": "#8AA0B8",
-        "c_group_title": "#D8E6F5",
-        "c_bullet": "#57CDE3",
-        "c_event_icon": "#FFD54A",
-        "c_leaf_text": "#E6EEF5",
-        "c_desc_text": "#8AA0B8",
-        "c_group_bg": "#1B3048",
-        "c_rich_bg": "#1B3048",
-        "c_box_bg": "#16283E",
-        "c_box_stroke": "#2E4560",
-        "c_text_primary": "#D8E6F5",
-        "c_regex_bg": "#243C54",
-        "c_regex_text": "#FFE08A",
-        "c_regex_icon": "#FFD54A",
-        "c_tag_admin": "#8AE6E1",
-        "c_tag_event": "#FFD54A",
-        "c_tag_mcp": "#57CDE3",
-        "c_tag_id": "#8AA0B8",
-        "c_ver_bg": "#243C54",
-        "c_ver_text": "#8AE6E1",
-        "c_prio_bg": "#243C54",
-        "c_prio_text": "#FFE08A",
-        "c_highlight_bg": "#2E5A8A",
+        "page_fill": "#FFF8F1",
+        "c_plugin_name": "#5C3A28",
+        "c_plugin_id": "#8C7663",
+        "c_group_title": "#5C3A28",
+        "c_bullet": "#D9502C",
+        "c_event_icon": "#B07518",
+        "c_leaf_text": "#3B2318",
+        "c_desc_text": "#8C7663",
+        "c_group_bg": "#FBEEDF",
+        "c_rich_bg": "#FFFFFF",
+        "c_box_bg": "#FDF4ED",
+        "c_box_stroke": "#F8EBE1",
+        "c_text_primary": "#5C3A28",
+        "c_regex_bg": "#FDF0E2",
+        "c_regex_text": "#9A5A12",
+        "c_regex_icon": "#B07518",
+        "c_tag_admin": "#A93B5B",
+        "c_tag_event": "#B07518",
+        "c_tag_mcp": "#5C3A28",
+        "c_tag_id": "#7E5A44",
+        "c_ver_bg": "#FBEEDF",
+        "c_ver_text": "#5C3A28",
+        "c_prio_bg": "#FCEFD7",
+        "c_prio_text": "#9A5A12",
+        "c_highlight_bg": "#F7D08A",
+        "c_highlight_text": "#3B2318",
+        "c_on_light": "#3B2318",
+    }
+    # --- Amethyst 主题: 夜鸢 (深紫 × 霓虹紫 × 金, 深色) ---
+    AMETHYST_COLORS: dict[str, str] = {
+        # 品牌色板
+        "brand_sky": "#A78BFA",  # 霓虹紫 · 第一主色
+        "brand_navy": "#E4DCF5",  # 浅紫白 · 主文字色 (深底用浅色)
+        "brand_mint": "#9BE3D8",  # 薄荷青 · 高光
+        "brand_cream": "#F5D98B",  # 暖黄 · 强调
+        "brand_gold": "#FFC94D",  # 金 · 暖强调
+        "brand_blush": "#C9B6F5",  # 浅紫 · 柔和辅助
+        "brand_ink": "#EFEAF9",  # 正文文字 (浅色)
+        "brand_gray": "#9A8FB5",  # 灰紫 · 次级文字
+        "brand_card": "#241C33",  # 卡片背景 (深)
+        "brand_border": "#362A4C",  # 卡片边框
+        "brand_soft": "#2C2340",  # 插件行边框
+        "brand_ghost": "#1F1830",  # disabled 行背景
+        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底分类(其他) 默认色, 1~7=默认分类, 8~9 备用
+        "cat_slot_0": "#6F6590",  # 灰紫 · 兜底「其他」
+        "cat_slot_1": "#8A6BE0",  # 霓虹紫 · AI
+        "cat_slot_2": "#FFC94D",  # 金 · 查询
+        "cat_slot_3": "#3FA396",  # 青绿 · 工具
+        "cat_slot_4": "#3B2E63",  # 深靛 · 管理
+        "cat_slot_5": "#C25AAE",  # 品红 · 娱乐
+        "cat_slot_6": "#3E93A3",  # 蓝青 · 资讯
+        "cat_slot_7": "#D06A3C",  # 暖橙 · 调试
+        "cat_slot_8": "#FFC94D",  # 金 · 备用
+        "cat_slot_9": "#B9A7E8",  # 浅紫 · 备用
+        # 通用颜色
+        "page_fill": "#191423",
+        "c_plugin_name": "#E4DCF5",
+        "c_plugin_id": "#9A8FB5",
+        "c_group_title": "#E4DCF5",
+        "c_bullet": "#A78BFA",
+        "c_event_icon": "#FFC94D",
+        "c_leaf_text": "#EFEAF9",
+        "c_desc_text": "#9A8FB5",
+        "c_group_bg": "#241C33",
+        "c_rich_bg": "#241C33",
+        "c_box_bg": "#1F1830",
+        "c_box_stroke": "#362A4C",
+        "c_text_primary": "#E4DCF5",
+        "c_regex_bg": "#2C2340",
+        "c_regex_text": "#F5D98B",
+        "c_regex_icon": "#FFC94D",
+        "c_tag_admin": "#9BE3D8",
+        "c_tag_event": "#FFC94D",
+        "c_tag_mcp": "#A78BFA",
+        "c_tag_id": "#9A8FB5",
+        "c_ver_bg": "#2C2340",
+        "c_ver_text": "#9BE3D8",
+        "c_prio_bg": "#2C2340",
+        "c_prio_text": "#F5D98B",
+        "c_highlight_bg": "#4E3F80",
         "c_highlight_text": "#FFFFFF",
-        "c_on_light": "#10233A",
+        "c_on_light": "#1A1428",
     }
-
-    # --- Soft Mist 主题: 柔和晨雾 (莫兰迪低饱和) ---
-    SOFT_MIST_COLORS: dict[str, str] = {
-        # 品牌色板
-        "brand_sky": "#8FC6D8",  # 天空蓝加灰 · 主色
-        "brand_navy": "#5C7086",  # 深海蓝加灰 · 结构色
-        "brand_mint": "#A8DCD8",  # 浅青加灰 · 高光
-        "brand_cream": "#E5D3A8",  # 奶油黄加灰 · 强调
-        "brand_gold": "#D9BE7E",  # 金黄加灰
-        "brand_blush": "#C4D8E0",  # 淡蓝灰 · 柔和辅助
-        "brand_ink": "#3C4652",  # 深灰蓝
-        "brand_gray": "#8A98A6",  # 灰 · 次级文字
-        "brand_card": "#FFFFFF",  # 卡片背景
-        "brand_border": "#D7E6EC",  # 卡片边框
-        "brand_soft": "#E2EBEF",  # 插件行边框
-        "brand_ghost": "#EEF2F4",  # disabled 行背景
-        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底, 1~7=默认分类, 8~9 备用
-        "cat_slot_0": "#8A98A6",
-        "cat_slot_1": "#8FC6D8",
-        "cat_slot_2": "#E5D3A8",
-        "cat_slot_3": "#6FA3B8",
-        "cat_slot_4": "#5C7086",
-        "cat_slot_5": "#A8DCD8",
-        "cat_slot_6": "#B0C6D4",
-        "cat_slot_7": "#7A8FA6",
-        "cat_slot_8": "#D9BE7E",
-        "cat_slot_9": "#3C4652",
-        # 通用颜色
-        "page_fill": "#F2F7F9",
-        "c_plugin_name": "#5C7086",
-        "c_plugin_id": "#8A98A6",
-        "c_group_title": "#5C7086",
-        "c_bullet": "#8FC6D8",
-        "c_event_icon": "#D9BE7E",
-        "c_leaf_text": "#3C4652",
-        "c_desc_text": "#8A98A6",
-        "c_group_bg": "#E6EEF2",
-        "c_rich_bg": "#FFFFFF",
-        "c_box_bg": "#EEF2F4",
-        "c_box_stroke": "#E2EBEF",
-        "c_text_primary": "#5C7086",
-        "c_regex_bg": "#F4EEE0",
-        "c_regex_text": "#8A7430",
-        "c_regex_icon": "#A08A50",
-        "c_tag_admin": "#6FA3B8",
-        "c_tag_event": "#D9BE7E",
-        "c_tag_mcp": "#5C7086",
-        "c_tag_id": "#5C7086",
-        "c_ver_bg": "#E6EEF2",
-        "c_ver_text": "#5C7086",
-        "c_prio_bg": "#F0EAD8",
-        "c_prio_text": "#8A7430",
-        "c_highlight_bg": "#E5D3A8",
-        "c_highlight_text": "#3C4652",
-        "c_on_light": "#3C4652",
-    }
-
-    # --- Vivid Pop 主题: 活力跃动 (高饱和冲击) ---
-    VIVID_POP_COLORS: dict[str, str] = {
-        # 品牌色板
-        "brand_sky": "#22C8E8",  # 亮天蓝 · 主色
-        "brand_navy": "#1E3A7A",  # 藏青 · 结构色
-        "brand_mint": "#2FE0D0",  # 鲜薄荷青 · 高光
-        "brand_cream": "#FFD54A",  # 亮金黄 · 强调
-        "brand_gold": "#FFC400",  # 金黄
-        "brand_blush": "#B3F0FA",  # 亮青 · 柔和辅助
-        "brand_ink": "#1A2438",  # 深墨蓝
-        "brand_gray": "#7C8AA0",  # 蓝灰 · 次级文字
-        "brand_card": "#FFFFFF",  # 卡片背景
-        "brand_border": "#D8F0F8",  # 卡片边框
-        "brand_soft": "#E3F3F9",  # 插件行边框
-        "brand_ghost": "#F1F8FB",  # disabled 行背景
-        # 通用分类色槽 (cat_slot_0~9): 槽位 0=兜底, 1~7=默认分类, 8~9 备用
-        "cat_slot_0": "#7C8AA0",
-        "cat_slot_1": "#22C8E8",
-        "cat_slot_2": "#FFD54A",
-        "cat_slot_3": "#4A90E2",
-        "cat_slot_4": "#1E3A7A",
-        "cat_slot_5": "#2FE0D0",
-        "cat_slot_6": "#B3F0FA",
-        "cat_slot_7": "#5B7DB5",
-        "cat_slot_8": "#FF5252",
-        "cat_slot_9": "#1A2438",
-        # 通用颜色
-        "page_fill": "#F2FBFF",
-        "c_plugin_name": "#1E3A7A",
-        "c_plugin_id": "#7C8AA0",
-        "c_group_title": "#1E3A7A",
-        "c_bullet": "#22C8E8",
-        "c_event_icon": "#FFC400",
-        "c_leaf_text": "#1A2438",
-        "c_desc_text": "#7C8AA0",
-        "c_group_bg": "#E3F7FD",
-        "c_rich_bg": "#FFFFFF",
-        "c_box_bg": "#F1F8FB",
-        "c_box_stroke": "#E3F3F9",
-        "c_text_primary": "#1E3A7A",
-        "c_regex_bg": "#FFF4D6",
-        "c_regex_text": "#B8860B",
-        "c_regex_icon": "#E6A800",
-        "c_tag_admin": "#4A90E2",
-        "c_tag_event": "#FFC400",
-        "c_tag_mcp": "#1E3A7A",
-        "c_tag_id": "#1E3A7A",
-        "c_ver_bg": "#E3F7FD",
-        "c_ver_text": "#1E3A7A",
-        "c_prio_bg": "#FFF0C2",
-        "c_prio_text": "#B8860B",
-        "c_highlight_bg": "#FFD54A",
-        "c_highlight_text": "#1A2438",
-        "c_on_light": "#1E3A7A",
-    }
-
     # --- zhenxun 主题: 柔和马卡龙粉彩 ---
     ZHENXUN_COLORS: dict[str, str] = {
         # 品牌色板
@@ -568,11 +518,18 @@ class DefaultCFG:
 
     # 预设注册表 (preset_name → 配色), 供 config.py 内置注册
     PRESETS: dict[str, dict[str, str]] = {
-        "Ocean Blue": OCEAN_BLUE_COLORS,
-        "Night Navy": NIGHT_NAVY_COLORS,
-        "Soft Mist": SOFT_MIST_COLORS,
-        "Vivid Pop": VIVID_POP_COLORS,
         "zhenxun": ZHENXUN_COLORS,
+        "Forest": FOREST_COLORS,
+        "Sunset": SUNSET_COLORS,
+        "Amethyst": AMETHYST_COLORS,
+    }
+
+    # 预设中文显示名: 配置面板下拉框与预览页共用, 避免两处各写一份导致改名后对不上
+    PRESET_LABELS: dict[str, str] = {
+        "zhenxun": "真寻",
+        "Forest": "墨竹",
+        "Sunset": "落日",
+        "Amethyst": "夜鸢",
     }
 
     # 6. 插件分类规则 (指令模式 /helps 分类卡片)

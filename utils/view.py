@@ -9,7 +9,13 @@ from typing import Any, TypedDict
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 
-from ..domain import InternalCFG, PluginMetadata, RenderNode, TypstPluginConfig
+from ..domain import (
+    InternalCFG,
+    PluginMetadata,
+    RenderNode,
+    TypstPluginConfig,
+    is_dark_hex,
+)
 
 
 class HelpHint:
@@ -157,9 +163,13 @@ class TypstLayout:
         payload = self._generate_balanced_payload(
             plugins, title, mode, prefixes, font_list
         )
-        # 注入颜色配置 (激活预设配色 + 主题无关的禁用灰化色板)
+        # 注入颜色配置 (激活预设配色 + 禁用灰化色板: 深色主题需要另一套, 否则禁用行是白块)
         colors = dict(self.cfg.appearance.get_active_colors())
-        colors.update(InternalCFG.DISABLED_COLORS)
+        colors.update(
+            InternalCFG.DISABLED_COLORS_DARK
+            if is_dark_hex(colors.get("brand_card", "#FFFFFF"))
+            else InternalCFG.DISABLED_COLORS
+        )
         payload["colors"] = colors
         # 注入 Hero 统计卡片第三列显示名 (人格名称, 空串则不渲染该列)
         payload["system_name"] = system_name

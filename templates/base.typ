@@ -1,7 +1,7 @@
 // ============================================================
 // AstrBot 插件帮助面板 · Typst 渲染模板
 // 指令菜单 (command) / 插件详情 (plugin_detail) / 事件·过滤器 (event/filter)
-// 主题: Modern AstrBot Plugin Dashboard (多主题预设: Ocean Blue / Night Navy / Soft Mist / Vivid Pop / zhenxun)
+// 主题: Modern AstrBot Plugin Dashboard (多主题预设: zhenxun / Forest / Sunset / Amethyst)
 // ============================================================
 
 // === 🔧 参数传入 ===
@@ -729,7 +729,7 @@
   // 禁用色
   let row_bg     = if pdisabled { c_dis_card_bg } else { c_ghost }
   let row_stroke = if pdisabled { c_dis_card_border } else { c_soft }
-  // 插件名: 深色主题下卡片底本身是深色, 再 darken 会让文字几乎不可见 (Night Navy
+  // 插件名: 深色主题下卡片底本身是深色, 再 darken 会让文字几乎不可见 (Amethyst
   // 的 cat_slot_4 只剩约 1.1:1), 因此底色偏深时改为提亮主题色
   let name_fill  = if pdisabled {
     c_dis_name

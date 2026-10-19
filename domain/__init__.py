@@ -7,6 +7,7 @@ from .config import (
     CategoryRule,
     CategoryConfig,
     TypstPluginConfig,
+    is_dark_hex,
 )
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "CategoryRule",
     "CategoryConfig",
     "TypstPluginConfig",
+    "is_dark_hex",
 ]

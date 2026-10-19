@@ -11,6 +11,13 @@ from ..domain import DefaultCFG
 from .schema import write_schema_atomic
 
 
+def _preset_options() -> tuple[list[str], list[str]]:
+    """主题预设下拉的 options 与 labels (面板显示中文名, 存的是预设 key)"""
+    options = list(DefaultCFG.PRESETS.keys()) + [DefaultCFG.CUSTOM_PRESET_KEY]
+    labels = [DefaultCFG.PRESET_LABELS.get(name, name) for name in options]
+    return options, labels
+
+
 class FontManager:
     def __init__(self, font_dirs: list[Path]):
         self.font_dirs = font_dirs
@@ -121,11 +128,12 @@ class FontManager:
             # 1. 内置样式预设下拉项 (与 DefaultCFG.PRESETS 保持同步, 含「自定义」)
             try:
                 target = schema["appearance"]["items"]["active_preset"]
-                options = list(DefaultCFG.PRESETS.keys()) + [
-                    DefaultCFG.CUSTOM_PRESET_KEY
-                ]
+                options, labels = _preset_options()
                 if target.get("options") != options:
                     target["options"] = options
+                    changed = True
+                if target.get("labels") != labels:
+                    target["labels"] = labels
                     changed = True
             except KeyError:
                 pass
@@ -147,24 +155,37 @@ class FontManager:
 
             if changed and self._write_schema_atomic(schema_path, schema):
                 logger.info(
-                    "[HelpTypst] 已更新 Schema 选项，配置面板无需重载即可看到新字体"
+                    "[HelpTypst] 已更新 Schema 选项（字体 / 主题预设），"
+                    "配置面板无需重载即可生效"
                 )
 
             # 同步内存中的 live schema, 立即应用到配置面板 (无需重载插件)
-            # 扫描失败时同样保留内存里的原选项
-            if (
-                live_schema is not None
-                and isinstance(live_schema, dict)
-                and self._last_scan_ok
-            ):
+            # 扫描失败时同样保留内存里的原字体选项
+            if live_schema is not None and isinstance(live_schema, dict):
                 try:
                     live_items = live_schema["appearance"]["items"]
-                    live_font = live_items["font_order"]
-                    new_options = self.get_selectable_families()
-                    if live_font.get("options") != new_options:
-                        live_font["options"] = new_options
                 except (KeyError, TypeError):
-                    pass
+                    live_items = None
+                if isinstance(live_items, dict):
+                    # 预设下拉项与字体扫描无关, 扫描失败也要同步, 否则面板显示旧主题名
+                    try:
+                        live_preset = live_items["active_preset"]
+                        options, labels = _preset_options()
+                        if live_preset.get("options") != options:
+                            live_preset["options"] = options
+                        if live_preset.get("labels") != labels:
+                            live_preset["labels"] = labels
+                    except (KeyError, TypeError, AttributeError):
+                        pass
+                    # 字体选项只在扫描成功时改写, 避免把扫描失败的空集合写进面板
+                    if self._last_scan_ok:
+                        try:
+                            live_font = live_items["font_order"]
+                            new_options = self.get_selectable_families()
+                            if live_font.get("options") != new_options:
+                                live_font["options"] = new_options
+                        except (KeyError, TypeError, AttributeError):
+                            pass
         except Exception as e:
             logger.warning(f"[HelpTypst] Schema 更新失败: {e}")
 

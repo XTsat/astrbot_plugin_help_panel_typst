@@ -18,7 +18,7 @@
 - `/helpss` 详细面板：在每个插件条目下展开指令 / 别名 / 参数标签组，形成「分类 → 插件 → 指令」三级信息。
 - `/events`：按 EventType 分组的事件监听列表，含插件函数工具与 MCP 工具。
 - `/filters`：按过滤器类型分组的详情。
-- 外观：**Hero 品牌横幅**（背景图 + 人格名统计）、5 套内置主题 + 10 个分类色槽、可在设置面板自定义的插件分类规则。
+- 外观：**Hero 品牌横幅**（背景图 + 人格名统计）、4 套内置主题（真寻 / 墨竹 / 落日 / 夜鸢）+ 10 个分类色槽、可在设置面板自定义的插件分类规则。
 - 字体：内置字体 + 自定义目录 + 系统字体库；表情字体固定追加，不出现在选择框。
 - 渲染：Typst（子进程）→ PNG → WebP，超高图自动切片。
 
@@ -128,7 +128,7 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 - `command` / `command_detail`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`enabled_count`、`category_columns`
 - `plugin_detail`：`title`、`mode`、`prefixes`、`fonts`、`plugin`、`admin_commands`、`normal_commands`、`event_listeners`
 - `event` / `filter`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`giants`、`columns`、`singles`
-- 所有模式统一注入 `colors`（激活配色 + `DISABLED_COLORS`）、`system_name`（人格名，空串时模板不渲染该列）、`page_width`（页面总宽度，pt，模板据此设置 `#set page`；缺键按 830pt 兜底）、`content_columns`（卡片内部小块并排列数：页宽 ≥ 830pt 为 3，更窄为 2；缺键按 3 兜底）与 `plugin_two_lines`（插件行双行模式，缺键按 false 兜底）
+- 所有模式统一注入 `colors`（激活配色 + 禁用灰化色板：卡片底色为深色时自动换用 `DISABLED_COLORS_DARK`，否则用 `DISABLED_COLORS`）、`system_name`（人格名，空串时模板不渲染该列）、`page_width`（页面总宽度，pt，模板据此设置 `#set page`；缺键按 830pt 兜底）、`content_columns`（卡片内部小块并排列数：页宽 ≥ 830pt 为 3，更窄为 2；缺键按 3 兜底）与 `plugin_two_lines`（插件行双行模式，缺键按 false 兜底）
 
 `core/worker.py` 向模板传入 `sys_inputs`：恒有 `json_string`、`timestamp`；搜索时额外有 `query_regex`（`re.escape` 后的原始关键词）；背景相关为 `bg_image`（相对模板目录的路径）、`hero_header`（`"true"/"false"`）；品牌资源为 `logo_image`（相对模板目录的路径，空串表示文件缺失）。改 `view.py` / `worker.py` / `base.typ` 时保持键名一致。
 

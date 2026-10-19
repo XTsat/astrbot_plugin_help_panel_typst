@@ -18,6 +18,23 @@ def _is_valid_hex(color_str: Any) -> bool:
     return bool(HEX_COLOR_REGEX.match(color_str))
 
 
+def is_dark_hex(color_str: Any, threshold: float = 0.45) -> bool:
+    """判断底色是否为深色 (WCAG 相对亮度), 用于挑选深/浅两套禁用灰化色板"""
+    if not _is_valid_hex(color_str):
+        return False
+    raw = color_str.lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+
+    def _channel(value: int) -> float:
+        c = value / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (int(raw[i : i + 2], 16) for i in (0, 2, 4))
+    luma = 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
+    return luma < threshold
+
+
 def _as_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     """整数配置收敛: 类型异常回落默认值, 超界截断 (防御手工改坏的配置)"""
     try:
@@ -144,6 +161,14 @@ class AppearanceConfig:
             # 旧配置兼容: 直接引用列表中的自定义预设名
             base = DefaultCFG.DEFAULT_COLORS.copy()
             preset = self.presets.get(self.active_preset)
+            if preset is None:
+                # 静默回落会让用户以为主题失效, 这里点名提示是哪个预设名已不存在;
+                # 同时把值改回默认预设, 否则配置面板下拉框会停在一个已不存在的选项上
+                logger.warning(
+                    f"[HelpTypst] 主题预设 '{self.active_preset}' 已不存在, "
+                    f"已回退到默认预设 '{DefaultCFG.DEFAULT_PRESET}'"
+                )
+                self.active_preset = DefaultCFG.DEFAULT_PRESET
 
         # 2. 列表条目配色覆盖 (缺失/非法值跳过)
         if preset and preset.colors:
@@ -477,6 +502,9 @@ class TypstPluginConfig:
             presets=presets_dict,
             rescan_fonts=_as_bool(raw_appearance.get("rescan_fonts"), False),
         )
+        # 已移除的预设名只有在解析配色时才会被纠正 (见 get_active_colors),
+        # 这里提前触发一次, 让配置面板下拉框在插件加载后就显示成回落后的预设
+        appearance_cfg.get_active_colors()
 
         # Category (插件分类规则)
         # 结构: category = { "fallback": "其他", "fallback_color": "slot_8",

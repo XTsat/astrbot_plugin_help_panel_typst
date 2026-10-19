@@ -47,14 +47,6 @@ _MODE_LABELS: tuple[tuple[str, str], ...] = (
     ("filter", "过滤器"),
 )
 
-_PRESET_LABELS: dict[str, str] = {
-    "zhenxun": "臻讯粉",
-    "Ocean Blue": "海盐蓝",
-    "Night Navy": "午夜蓝",
-    "Soft Mist": "晨雾灰",
-    "Vivid Pop": "活力彩",
-}
-
 _BRAND_COLOR_DEFS: tuple[tuple[str, str], ...] = (
     ("brand_sky", "主色"),
     ("brand_navy", "结构色"),
@@ -350,7 +342,7 @@ class PreviewService:
         presets = [
             {
                 "name": name,
-                "label": _PRESET_LABELS.get(name, name),
+                "label": DefaultCFG.PRESET_LABELS.get(name, name),
                 "colors": dict(DefaultCFG.PRESETS[name]),
             }
             for name in preset_names
@@ -362,7 +354,7 @@ class PreviewService:
             presets.append(
                 {
                     "name": active_preset,
-                    "label": _PRESET_LABELS.get(active_preset, active_preset),
+                    "label": DefaultCFG.PRESET_LABELS.get(active_preset, active_preset),
                     "colors": dict(colors),
                 }
             )
@@ -920,7 +912,7 @@ class PreviewService:
                 preset_name = style.preset
                 clear_enabled = True
                 changed.append(
-                    f"主题预设（{_PRESET_LABELS.get(preset_name, preset_name)}）"
+                    f"主题预设（{DefaultCFG.PRESET_LABELS.get(preset_name, preset_name)}）"
                 )
             else:
                 preset_name = DefaultCFG.CUSTOM_PRESET_KEY

@@ -376,11 +376,17 @@
         "type": "string",
         "default": "zhenxun",
         "options": [
-          "Ocean Blue",
-          "Night Navy",
-          "Soft Mist",
-          "Vivid Pop",
           "zhenxun",
+          "Forest",
+          "Sunset",
+          "Amethyst",
+          "自定义"
+        ],
+        "labels": [
+          "真寻",
+          "墨竹",
+          "落日",
+          "夜鸢",
           "自定义"
         ],
         "hint": "选择要使用的样式：内置预设配色固定；选择「自定义」时使用下方列表中的配置"
