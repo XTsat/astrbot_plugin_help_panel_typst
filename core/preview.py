@@ -13,7 +13,7 @@ import json
 import re
 import time
 import uuid
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -186,6 +186,8 @@ def _color_map(colors: dict[str, str]) -> dict[str, str]:
 _SLOT_COLOR_RE = re.compile(r"slot_\d+")
 _CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
 _LATIN_WORD_RE = re.compile(r"[a-z][a-z0-9]{1,}")
+# 片段位于中文串首尾时没有邻字，用空串占位，避免被当成「总是跟着某个字」
+_HOT_WORD_EDGE = ""
 
 
 def _normalize_slot_or_color(value: Any) -> str:
@@ -233,50 +235,147 @@ def _plugin_match_text(plugin: dict[str, Any]) -> str:
     ).lower()
 
 
-def _hot_word_tokens(text: str) -> set[str]:
-    """切候选热词：中文 2~4 字连续片段 + 英文单词，去掉通用停用词"""
-    stopwords = InternalCFG.PREVIEW_HOT_WORD_STOPWORDS
-    tokens: set[str] = set()
-    for run in _CJK_RUN_RE.findall(text):
-        length = len(run)
-        for size in range(
-            InternalCFG.PREVIEW_HOT_WORD_MIN_LEN,
-            InternalCFG.PREVIEW_HOT_WORD_MAX_LEN + 1,
-        ):
-            if size > length:
-                break
-            for index in range(length - size + 1):
-                token = run[index : index + size]
-                if token not in stopwords:
-                    tokens.add(token)
-    for word in _LATIN_WORD_RE.findall(text):
-        if len(word) >= InternalCFG.PREVIEW_HOT_WORD_MIN_LEN:
-            if word not in stopwords:
-                tokens.add(word)
-    return tokens
+def _hot_word_sources(plugin: dict[str, Any]) -> list[tuple[int, str]]:
+    """热词来源按权重分层：名称/显示名 > 简短描述 > 描述
+
+    作者写在标题与简短描述里的词最能代表插件用途；描述正文常是「支持」「一键」
+    这类营销套话，只做兜底，因此加权而不是「只取标题」——只取标题会让样本量
+    太小的插件集凑不满热词。
+    """
+    title = " ".join(
+        str(plugin.get(key) or "").strip() for key in ("name", "display_name")
+    )
+    sources = (
+        (InternalCFG.PREVIEW_HOT_WORD_TITLE_WEIGHT, title),
+        (InternalCFG.PREVIEW_HOT_WORD_SHORT_DESC_WEIGHT, plugin.get("short_desc")),
+        (InternalCFG.PREVIEW_HOT_WORD_DESC_WEIGHT, plugin.get("desc")),
+    )
+    return [
+        (weight, str(text).lower())
+        for weight, text in sources
+        if isinstance(text, str) and text.strip()
+    ]
 
 
-def _extract_hot_words(texts: list[str]) -> list[dict[str, Any]]:
-    """统计热词并按「出现插件数」排序，互相包含的近义词只保留一个"""
+@dataclass
+class _HotWordStat:
+    """单个候选词的累计信息：命中插件数、来源权重、左右邻字与出现位置数"""
+
+    plugins: int = 0
+    weight: int = 0
+    positions: int = 0
+    left: Counter[str] = field(default_factory=Counter)
+    right: Counter[str] = field(default_factory=Counter)
+
+
+def _collect_hot_word_stats(
+    plugins: list[dict[str, Any]],
+) -> tuple[dict[str, _HotWordStat], dict[str, int]]:
+    """统计 2~POOL_MAX_LEN 字片段，返回（候选词明细, 全部片段的命中插件数）
+
+    统计池比候选池多留一个字：判断「器人」是否碎片时要知道它被更长的「机器人」
+    包住，而「机器人」本身可能因停用词过滤或超过候选长度而不进最终列表。
+    """
+    stats: dict[str, _HotWordStat] = {}
     counts: dict[str, int] = {}
-    for text in texts:
-        for token in _hot_word_tokens(text):
-            counts[token] = counts.get(token, 0) + 1
+    for plugin in plugins:
+        seen: set[str] = set()
+        for weight, text in _hot_word_sources(plugin):
+            for run in _CJK_RUN_RE.findall(text):
+                length = len(run)
+                for size in range(
+                    InternalCFG.PREVIEW_HOT_WORD_MIN_LEN,
+                    InternalCFG.PREVIEW_HOT_WORD_POOL_MAX_LEN + 1,
+                ):
+                    if size > length:
+                        break
+                    for index in range(length - size + 1):
+                        token = run[index : index + size]
+                        first_seen = token not in seen
+                        if first_seen:
+                            seen.add(token)
+                            counts[token] = counts.get(token, 0) + 1
+                        if size > InternalCFG.PREVIEW_HOT_WORD_MAX_LEN:
+                            continue
+                        stat = stats.get(token)
+                        if stat is None:
+                            stat = stats[token] = _HotWordStat()
+                        if first_seen:
+                            stat.plugins += 1
+                            stat.weight += weight
+                        stat.positions += 1
+                        stat.left[run[index - 1] if index > 0 else _HOT_WORD_EDGE] += 1
+                        stat.right[
+                            run[index + size]
+                            if index + size < length
+                            else _HOT_WORD_EDGE
+                        ] += 1
+            for word in _LATIN_WORD_RE.findall(text):
+                if word in seen:
+                    continue
+                seen.add(word)
+                counts[word] = counts.get(word, 0) + 1
+                stat = stats.get(word)
+                if stat is None:
+                    stat = stats[word] = _HotWordStat()
+                stat.plugins += 1
+                stat.weight += weight
+    return stats, counts
 
-    ranked = sorted(
-        (
-            {"word": word, "count": count}
-            for word, count in counts.items()
-            if count >= InternalCFG.PREVIEW_HOT_WORD_MIN_COUNT
-        ),
-        # 同频时短词优先: 「图片」比「图片生成」更适合当关键词, 长词会在下面被包含关系剔除
-        key=lambda item: (-item["count"], len(item["word"]), item["word"]),
+
+def _is_hot_word_fragment(
+    token: str, stat: _HotWordStat, counts: dict[str, int]
+) -> bool:
+    """片段是否几乎总是跟着同一个邻字出现：「器人」几乎都长在「机器人」里"""
+    ratio = InternalCFG.PREVIEW_HOT_WORD_FRAGMENT_RATIO
+    if stat.positions <= 0:
+        return False
+    for neighbors, attach_left in ((stat.right, False), (stat.left, True)):
+        char, hits = neighbors.most_common(1)[0]
+        if char == _HOT_WORD_EDGE or hits / stat.positions < ratio:
+            continue
+        extended = char + token if attach_left else token + char
+        if counts.get(extended, 0) >= stat.plugins * ratio:
+            return True
+    return False
+
+
+def _extract_hot_words(plugins: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """从插件元信息里提炼可点击的分类关键词
+
+    候选词 = 中文 2~3 字片段 + 英文单词，过滤停用词、半个词与碎片；按来源权重
+    （标题 > 简短描述 > 描述）排序，让作者自己写的用途词排在「一键」「支持」
+    这类正文套话前面；同一批插件里互相包含的词只保留更常见的那个。
+    """
+    stats, counts = _collect_hot_word_stats(plugins)
+    stopwords = InternalCFG.PREVIEW_HOT_WORD_STOPWORDS
+    noise = InternalCFG.PREVIEW_HOT_WORD_LATIN_NOISE
+    edge_chars = InternalCFG.PREVIEW_HOT_WORD_EDGE_CHARS
+    candidates: list[dict[str, Any]] = []
+    for word, stat in stats.items():
+        if stat.plugins < InternalCFG.PREVIEW_HOT_WORD_MIN_COUNT:
+            continue
+        if word in stopwords or word in noise:
+            continue
+        if _CJK_RUN_RE.fullmatch(word):
+            if _is_hot_word_fragment(word, stat, counts):
+                continue
+            if word[0] in edge_chars or word[-1] in edge_chars:
+                continue
+        candidates.append({"word": word, "count": stat.plugins, "weight": stat.weight})
+
+    candidates.sort(
+        key=lambda item: (
+            -item["weight"],
+            -item["count"],
+            len(item["word"]),
+            item["word"],
+        )
     )
     picked: list[dict[str, Any]] = []
-    for item in ranked:
+    for item in candidates:
         word = item["word"]
-        # 出现次数更高的词已经在列表里时，同频或更低频的「子串/超串」都不再占位，
-        # 否则「查询」「查询天气」「天气查询」会一起挤满热词区
+        # 更常见（出现插件数更多）的包含词已经入列时，同频或更低频的子串/超串都不再占位
         if any(
             (word in kept["word"] or kept["word"] in word)
             and kept["count"] >= item["count"]
@@ -286,7 +385,7 @@ def _extract_hot_words(texts: list[str]) -> list[dict[str, Any]]:
         picked.append(item)
         if len(picked) >= InternalCFG.PREVIEW_HOT_WORD_LIMIT:
             break
-    return picked
+    return [{"word": item["word"], "count": item["count"]} for item in picked]
 
 
 def _category_signature(category: dict[str, Any]) -> str:
@@ -778,7 +877,7 @@ class PreviewService:
                 "fallback": DefaultCFG.DEFAULT_CATEGORY_FALLBACK,
                 "fallback_color": DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR,
             },
-            "hot_words": _extract_hot_words(texts),
+            "hot_words": _extract_hot_words(visible),
             # 前端用这些文案算「某分组命中多少个插件」, 不传插件名以外的原始元信息
             "match_texts": [
                 {

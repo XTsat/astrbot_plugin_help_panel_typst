@@ -1466,7 +1466,7 @@ function buildCategoryRuleCard(rule, index) {
   const keywords = document.createElement("div");
   keywords.className = "category-keywords";
   for (const keyword of rule.keywords) {
-    keywords.appendChild(buildKeywordChip(keyword));
+    keywords.appendChild(buildKeywordChip(keyword, countKeywordMatches(keyword)));
   }
 
   const input = document.createElement("input");
@@ -1484,13 +1484,20 @@ function buildCategoryRuleCard(rule, index) {
   return card;
 }
 
-function buildKeywordChip(keyword) {
+function buildKeywordChip(keyword, matches) {
+  const hits = Number.isFinite(matches) ? matches : countKeywordMatches(keyword);
   const chip = document.createElement("span");
   chip.className = "category-keyword";
+  chip.title = `「${keyword}」命中 ${hits} 个插件`;
 
   const text = document.createElement("span");
   text.className = "category-keyword-text";
   text.textContent = keyword;
+
+  const count = document.createElement("span");
+  count.className = "category-keyword-count";
+  count.classList.toggle("is-zero", hits === 0);
+  count.textContent = String(hits);
 
   const remove = document.createElement("button");
   remove.type = "button";
@@ -1500,7 +1507,7 @@ function buildKeywordChip(keyword) {
   remove.title = `移除关键词「${keyword}」`;
   remove.textContent = "×";
 
-  chip.append(text, remove);
+  chip.append(text, count, remove);
   return chip;
 }
 
@@ -1536,7 +1543,7 @@ function renderHotWords() {
     button.type = "button";
     button.className = "hot-word";
     button.dataset.word = entry.word;
-    button.title = `出现 ${entry.count} 次，点击加入选中的分组`;
+    button.title = `命中 ${entry.count} 个插件，点击加入选中的分组`;
     button.classList.toggle("is-used", used.has(entry.word.toLowerCase()));
     // 按出现次数做轻微字号分级，一眼看出哪些词更常见
     button.style.fontSize = `${11 + Math.round(2.5 * (entry.count / maxCount))}px`;
@@ -1550,6 +1557,16 @@ function renderHotWords() {
     fragment.appendChild(button);
   }
   els.categoryHotWords.appendChild(fragment);
+}
+
+/** 单个关键词实际命中的可见插件数（不考虑分组顺序，和上方热词的计数口径一致） */
+function countKeywordMatches(keyword) {
+  const needle = String(keyword || "").toLowerCase();
+  if (!needle) return 0;
+  return state.categoryOptions.matchTexts.reduce(
+    (total, entry) => total + (entry.text.includes(needle) ? 1 : 0),
+    0,
+  );
 }
 
 /** 当前关键词能命中多少个插件（仅作参考：最终归属还受规则顺序影响） */

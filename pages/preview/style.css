@@ -1460,9 +1460,22 @@ textarea:focus {
 }
 
 .category-keyword-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.category-keyword-count {
+  flex: 0 0 auto;
+  margin-left: 5px;
+  color: var(--muted-2);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.category-keyword-count.is-zero {
+  opacity: 0.55;
 }
 
 .category-keyword-remove {

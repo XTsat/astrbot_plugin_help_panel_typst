@@ -161,12 +161,30 @@ class InternalCFG:
     PREVIEW_CATEGORY_NAME_MAX: int = 16
     PREVIEW_CATEGORY_KEYWORD_MAX: int = 24
     PREVIEW_CATEGORY_KEYWORDS_MAX: int = 60
-    # 热词提取: 统计所有插件「描述 + 插件名 + 显示名」里重复出现的 2~3 字词,
-    # 只保留出现次数 >= MIN_COUNT 的词, 避免只出现一次的片段把列表塞满
+    # 热词提取: 统计插件「名称/显示名 + 简短描述 + 描述」里的 2~3 字片段与英文词,
+    # 只保留出现插件数 >= MIN_COUNT 的词, 避免只出现一次的片段把列表塞满;
+    # 名称/简短描述里的词权重更高, 描述正文里的套话排在后面
     PREVIEW_HOT_WORD_LIMIT: int = 48
     PREVIEW_HOT_WORD_MIN_COUNT: int = 2
     PREVIEW_HOT_WORD_MIN_LEN: int = 2
     PREVIEW_HOT_WORD_MAX_LEN: int = 3
+    # 碎片过滤: 有些词只作为更长词的一部分出现（「器人」几乎都来自「机器人」），
+    # 统计池比候选词多留 1 个字，才能在长词自身被停用词/长度过滤掉之后仍认出碎片
+    PREVIEW_HOT_WORD_POOL_MAX_LEN: int = 4
+    # 某侧邻字占比达到该比例，且带该邻字的更长片段覆盖同样多的插件，就按碎片丢弃
+    PREVIEW_HOT_WORD_FRAGMENT_RATIO: float = 0.9
+    # 来源权重: 名称/显示名最能代表插件用途, 简短描述其次, 描述正文多是营销套话
+    PREVIEW_HOT_WORD_TITLE_WEIGHT: int = 3
+    PREVIEW_HOT_WORD_SHORT_DESC_WEIGHT: int = 2
+    PREVIEW_HOT_WORD_DESC_WEIGHT: int = 1
+    # 片段首尾是这些虚词时基本是半个词（「的群」「自定」），直接丢弃
+    PREVIEW_HOT_WORD_EDGE_CHARS: frozenset[str] = frozenset(
+        "的了和与或在是被把而并让给这那其之所也又很更最再还只你我他她它们吗呢吧啊呀哦嗯且若则即由向往按依等以从对就都"
+    )
+    # 插件名/仓库名一类的通用英文词, 不构成分类关键词
+    PREVIEW_HOT_WORD_LATIN_NOISE: frozenset[str] = frozenset(
+        {"astrbot", "plugin", "plugins", "astrbotplugin"}
+    )
     # 前端要按关键词算命中插件的数量, 单条文案过长会撑大 options 响应, 截断即可
     PREVIEW_MATCH_TEXT_LIMIT: int = 400
     # 高频词里没有信息量的通用词: 不排除的话「插件」「功能」「支持」会霸榜
