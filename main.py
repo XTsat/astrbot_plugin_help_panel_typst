@@ -652,11 +652,11 @@ class HelpTypst(Star):
         rendering.update(plan["rendering"])
         appearance = dict(raw.get("appearance") or {})
         appearance.update(plan["appearance"])
-        if plan["colors"] is not None or plan["clear_enabled"]:
+        if plan["preset_entries"]:
             appearance["presets"] = self._merge_preset_entries(
                 appearance.get("presets"),
-                plan["colors"],
-                bool(plan["clear_enabled"]),
+                plan["preset_entries"],
+                plan["enabled_preset"],
             )
         patch: dict[str, Any] = {
             "rendering": rendering,
@@ -678,40 +678,62 @@ class HelpTypst(Star):
     def _merge_preset_entries(
         self,
         raw_presets: Any,
-        colors: dict[str, str] | None,
-        clear_enabled: bool,
+        entries: list[dict[str, Any]],
+        enabled_preset: str | None,
     ) -> list[dict[str, Any]]:
-        """维护 appearance.presets 模板列表。
+        """按面板提交的条目重建 appearance.presets 模板列表。
 
-        - colors 非空：更新/追加「自定义」预设，并只启用它
-        - colors 为空：只清除其它预设的「启用」开关（切回内置预设）
+        - 顺序与面板一致，首条固定取名「自定义」（面板配色改动的落点）
+        - 复用原条目的模板字段（__template_key 等），只覆盖名字/颜色/启用开关
+        - enabled_preset 对应条目启用，其余取消；为空时全部取消（切回内置预设）
         """
-        entries: list[dict[str, Any]] = []
-        if isinstance(raw_presets, list):
-            entries = [dict(item) for item in raw_presets if isinstance(item, dict)]
+        raw_entries = (
+            [item for item in raw_presets if isinstance(item, dict)]
+            if isinstance(raw_presets, list)
+            else []
+        )
 
-        target: dict[str, Any] | None = None
-        if colors is not None:
-            target = next(
-                (
-                    entry
-                    for entry in entries
-                    if entry.get("preset_name") == DefaultCFG.CUSTOM_PRESET_KEY
-                ),
-                None,
+        names: list[str] = []
+        for index, entry in enumerate(entries):
+            name = str(entry.get("name") or "").strip()
+            if index == 0:
+                name = DefaultCFG.CUSTOM_PRESET_KEY
+            elif not name:
+                name = f"{DefaultCFG.CUSTOM_PRESET_KEY} {index + 1}"
+            names.append(name)
+
+        # 先按名字认领原条目；首条改名后名字对不上，剩余原条目按位置补齐，
+        # 这样既保留条目上的其它字段，也不会丢掉用户已有条目
+        sources: list[dict[str, Any] | None] = [None] * len(entries)
+        used: set[int] = set()
+        for index, name in enumerate(names):
+            for raw_index, raw in enumerate(raw_entries):
+                if raw_index not in used and raw.get("preset_name") == name:
+                    sources[index] = raw
+                    used.add(raw_index)
+                    break
+        spare = [raw_index for raw_index in range(len(raw_entries)) if raw_index not in used]
+        for index, source in enumerate(sources):
+            if source is None and spare:
+                sources[index] = raw_entries[spare.pop(0)]
+
+        merged: list[dict[str, Any]] = []
+        for index, name in enumerate(names):
+            target = (
+                dict(sources[index])
+                if sources[index] is not None
+                else self._preset_entry_template()
             )
-            if target is None:
-                target = self._preset_entry_template()
-                entries.append(target)
-            for key in DefaultCFG.DEFAULT_COLORS:
-                if key in colors:
-                    target[key] = colors[key]
-            target["preset_name"] = DefaultCFG.CUSTOM_PRESET_KEY
-
-        if clear_enabled or colors is not None:
-            for entry in entries:
-                entry["enabled"] = entry is target
-        return entries
+            target["preset_name"] = name
+            colors = entries[index].get("colors")
+            if isinstance(colors, dict):
+                for key in DefaultCFG.DEFAULT_COLORS:
+                    value = colors.get(key)
+                    if isinstance(value, str) and value.strip():
+                        target[key] = value.strip()
+            target["enabled"] = enabled_preset is not None and name == enabled_preset
+            merged.append(target)
+        return merged
 
     def _preset_entry_template(self) -> dict[str, Any]:
         """以 schema 里的预设模板为蓝本，避免手写字段与设置面板脱节"""

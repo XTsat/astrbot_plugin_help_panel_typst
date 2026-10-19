@@ -389,7 +389,7 @@
           "夜鸢",
           "自定义"
         ],
-        "hint": "选择要使用的样式：内置预设配色固定；选择「自定义」时使用下方列表中的配置"
+        "hint": "选择要使用的样式：内置预设配色固定；选择「自定义」时使用下方列表第一条（固定名为「自定义」）的配色"
       },
       "font_order": {
         "description": "字体优先级排序",
@@ -414,7 +414,7 @@
         "default": [
           {
             "__template_key": "standard_theme",
-            "preset_name": "zhenxun",
+            "preset_name": "自定义",
             "enabled": false,
             "brand_sky": "#F36F88",
             "brand_navy": "#3A3A3A",
@@ -470,7 +470,7 @@
         "templates": {
           "standard_theme": {
             "name": "自定义预设",
-            "hint": "勾选条目「启用」或把上方预设切到「自定义」后生效；直接改内置预设条目无效",
+            "hint": "列表第一条固定名为「自定义」，是预览页「自定义」模板的配色存储位；其余条目可在预览页新增/改名/删除。勾选「启用」或把上方预设切到「自定义」后生效，内置预设条目只读、改动会被写入第一条",
             "items": {
               "preset_name": {
                 "description": "预设名称 (ID)",

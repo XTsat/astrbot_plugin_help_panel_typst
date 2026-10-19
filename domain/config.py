@@ -129,6 +129,9 @@ class AppearanceConfig:
     active_preset: str
     font_order: list[str]
     presets: dict[str, ThemePreset]  # 内置预设注册 (兼容旧配置中的自定义预设)
+    # 按配置列表原顺序保存的条目: 预览页把首条当「自定义」模板管理, 需要顺序与重名容忍度,
+    # 而 presets 字典既会按内置名占位、又会因重名互相覆盖, 无法还原列表形态
+    preset_entries: list[ThemePreset] = field(default_factory=list)
     # 一次性「重新扫描字体」开关: 勾选保存后, 插件重载时自动扫描一次字体并自动关闭
     rescan_fonts: bool = False
     # 内部缓存字段
@@ -466,6 +469,7 @@ class TypstPluginConfig:
 
         raw_presets_list = raw_appearance.get("presets", [])  # 旧配置兼容
         presets_dict = {}
+        preset_entries: list[ThemePreset] = []
 
         # 内置预设注册 (配色由 DefaultCFG.PRESETS 提供, 此处仅登记名称)
         for preset_name in DefaultCFG.PRESETS:
@@ -495,11 +499,13 @@ class TypstPluginConfig:
                     colors=p_colors,
                     enabled=p_enabled,
                 )
+                preset_entries.append(presets_dict[p_name])
 
         appearance_cfg = AppearanceConfig(
             active_preset=active_preset_name,
             font_order=font_order,
             presets=presets_dict,
+            preset_entries=preset_entries,
             rescan_fonts=_as_bool(raw_appearance.get("rescan_fonts"), False),
         )
         # 已移除的预设名只有在解析配色时才会被纠正 (见 get_active_colors),

@@ -42,6 +42,11 @@ const state = {
 
   modes: [],
   presets: [],
+  // 自定义模板：与内置预设分开管理，首条固定叫「自定义」，是配色改动的落脚点
+  customPresets: [],
+  customPresetMeta: { label: "自定义", max: 8, nameMax: 20 },
+  renamingIndex: -1,
+  pendingDeleteIndex: -1,
   colorGroups: [],
   fonts: [],
   backgrounds: [],
@@ -334,6 +339,20 @@ function normalizePresets(rawPresets) {
       label: String(item.label || item.name),
       colors: normalizeColorMap(item.colors),
     }));
+}
+
+// 自定义模板只关心名字与配色：颜色缺失的条目无法出卡，直接丢弃
+function normalizeCustomPresets(rawPresets) {
+  return asArray(rawPresets)
+    .filter((item) => item && typeof item === "object")
+    .map((item, index) => ({
+      name:
+        index === 0
+          ? state.customPresetMeta.label
+          : String(item.name || "").trim() || `${state.customPresetMeta.label} ${index + 1}`,
+      colors: normalizeColorMap(item.colors),
+    }))
+    .filter((item) => Object.keys(item.colors).length > 0);
 }
 
 function normalizeColorGroups(rawGroups) {
@@ -639,7 +658,16 @@ function applyOptions(rawOptions, viewOptions = {}) {
 
   state.options = options;
   state.modes = normalizeModes(options.modes, String(active.mode || "command"));
+  const customMeta = asObject(options.custom_preset);
+  state.customPresetMeta = {
+    label: String(customMeta.label || "自定义"),
+    max: Math.max(1, Math.round(asNumber(customMeta.max, 8))),
+    nameMax: Math.max(4, Math.round(asNumber(customMeta.name_max, 20))),
+  };
   state.presets = normalizePresets(options.presets);
+  state.customPresets = normalizeCustomPresets(options.custom_presets);
+  state.renamingIndex = -1;
+  state.pendingDeleteIndex = -1;
   state.colorGroups = normalizeColorGroups(options.color_groups);
   state.categoryOptions = normalizeCategoryOptions(options.category);
   state.fonts = normalizeFontList(options.fonts);
@@ -710,6 +738,7 @@ function applyOptions(rawOptions, viewOptions = {}) {
   } else {
     applyActive(active);
   }
+  ensureCustomPreset();
   buildControls();
 }
 
@@ -848,40 +877,173 @@ function syncModeControl() {
   }
 }
 
+function presetLabel(preset) {
+  return preset.label || preset.name;
+}
+
+function findPreset(name) {
+  return (
+    state.presets.find((item) => item.name === name) ||
+    state.customPresets.find((item) => item.name === name) ||
+    null
+  );
+}
+
+function isBuiltinPreset(name) {
+  return state.presets.some((item) => item.name === name);
+}
+
+// 面板至少保留一张自定义卡：它承接「改内置模板」后的配色，也是保存配置时的落点
+function ensureCustomPreset() {
+  const label = state.customPresetMeta.label;
+  if (!state.customPresets.length) {
+    const colors = Object.keys(state.colors).length ? { ...state.colors } : {};
+    state.customPresets = [{ name: label, colors }];
+  }
+  state.customPresets[0].name = label;
+  if (state.preset && !findPreset(state.preset)) {
+    state.preset = state.customPresets[0].name;
+  }
+}
+
+function nextCustomPresetName() {
+  const taken = new Set(state.customPresets.map((item) => item.name));
+  const label = state.customPresetMeta.label;
+  let counter = 2;
+  let name = `${label} ${counter}`;
+  while (taken.has(name)) {
+    counter += 1;
+    name = `${label} ${counter}`;
+  }
+  return name;
+}
+
 function buildPresetControl() {
   els.presetList.replaceChildren();
-  if (!state.presets.length) {
-    const empty = document.createElement("p");
-    empty.className = "preset-empty";
-    empty.textContent = "没有可用的主题预设";
-    els.presetList.appendChild(empty);
-    return;
-  }
-  for (const preset of state.presets) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "preset-card";
-    card.dataset.preset = preset.name;
-    card.setAttribute("aria-pressed", "false");
-    card.title = preset.label;
 
+  if (state.presets.length) {
+    const group = document.createElement("div");
+    group.className = "preset-group";
+    const heading = document.createElement("span");
+    heading.className = "preset-group-label";
+    heading.textContent = "内置模板";
+    const cards = document.createElement("div");
+    cards.className = "preset-cards";
+    for (const preset of state.presets) {
+      cards.appendChild(createPresetCard(preset));
+    }
+    group.append(heading, cards);
+    els.presetList.appendChild(group);
+  }
+
+  const customGroup = document.createElement("div");
+  customGroup.className = "preset-group";
+  const customHeading = document.createElement("span");
+  customHeading.className = "preset-group-label";
+  customHeading.textContent = "自定义模板";
+  const customCards = document.createElement("div");
+  customCards.className = "preset-cards";
+  state.customPresets.forEach((preset, index) => {
+    customCards.appendChild(createPresetCard(preset, index));
+  });
+  customGroup.append(customHeading, customCards, createAddPresetButton());
+  els.presetList.appendChild(customGroup);
+
+  syncPresetControl();
+}
+
+function createPresetCard(preset, customIndex = -1) {
+  const isCustom = customIndex >= 0;
+  const item = document.createElement("div");
+  item.className = "preset-item";
+  item.dataset.preset = preset.name;
+  if (isCustom) item.dataset.customIndex = String(customIndex);
+
+  // 改名用卡片内联输入框：内置模板不可改名，首条自定义模板名固定；
+  // 输入框不能嵌在 <button> 里（交互元素嵌套会让焦点与点击失效），改名时卡片降级成 div
+  const renaming = isCustom && customIndex > 0 && state.renamingIndex === customIndex;
+
+  const card = document.createElement(renaming ? "div" : "button");
+  card.className = "preset-card";
+  card.dataset.preset = preset.name;
+  if (renaming) {
+    card.classList.add("is-renaming");
+  } else {
+    card.type = "button";
+    card.setAttribute("aria-pressed", "false");
+    card.title = isCustom ? `套用「${preset.name}」的配色` : presetLabel(preset);
+  }
+
+  if (renaming) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "preset-rename";
+    input.value = preset.name;
+    input.maxLength = state.customPresetMeta.nameMax;
+    input.dataset.renameIndex = String(customIndex);
+    input.setAttribute("aria-label", "模板名称，回车保存，Esc 取消");
+    card.appendChild(input);
+  } else {
     const name = document.createElement("span");
     name.className = "preset-name";
-    name.textContent = preset.label;
-
-    const dots = document.createElement("span");
-    dots.className = "preset-dots";
-    for (const color of Object.values(preset.colors).slice(0, 5)) {
-      const dot = document.createElement("span");
-      dot.className = "preset-dot";
-      dot.style.background = color;
-      dots.appendChild(dot);
-    }
-
-    card.append(name, dots);
-    els.presetList.appendChild(card);
+    name.textContent = isCustom ? preset.name : presetLabel(preset);
+    card.appendChild(name);
   }
-  syncPresetControl();
+
+  const dots = document.createElement("span");
+  dots.className = "preset-dots";
+  for (const color of Object.values(preset.colors).slice(0, 5)) {
+    const dot = document.createElement("span");
+    dot.className = "preset-dot";
+    dot.style.background = color;
+    dots.appendChild(dot);
+  }
+  card.appendChild(dots);
+  item.appendChild(card);
+
+  if (isCustom && customIndex > 0) {
+    item.appendChild(createPresetActions(customIndex));
+  }
+  return item;
+}
+
+function createPresetActions(index) {
+  const actions = document.createElement("div");
+  actions.className = "preset-actions";
+
+  const rename = document.createElement("button");
+  rename.type = "button";
+  rename.className = "preset-action";
+  rename.dataset.action = "rename-preset";
+  rename.dataset.presetIndex = String(index);
+  rename.textContent = "改名";
+  actions.appendChild(rename);
+
+  // 删除需要二次确认：第一次点击只改写按钮文案，避免误删用户配好的模板
+  const confirming = state.pendingDeleteIndex === index;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "preset-action is-danger";
+  remove.dataset.action = "delete-preset";
+  remove.dataset.presetIndex = String(index);
+  remove.dataset.confirm = confirming ? "1" : "0";
+  remove.textContent = confirming ? "确认删除" : "删除";
+  actions.appendChild(remove);
+  return actions;
+}
+
+function createAddPresetButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "preset-add";
+  button.dataset.action = "add-preset";
+  button.textContent = "＋ 新建模板";
+  const full = state.customPresets.length >= state.customPresetMeta.max;
+  button.disabled = full;
+  button.title = full
+    ? `自定义模板最多 ${state.customPresetMeta.max} 个`
+    : "用当前配色新建一个自定义模板";
+  return button;
 }
 
 function syncPresetControl() {
@@ -889,10 +1051,20 @@ function syncPresetControl() {
     const name = card.dataset.preset;
     const isActive = name === state.preset;
     card.classList.toggle("is-active", isActive);
-    card.setAttribute("aria-pressed", String(isActive));
-    const preset = state.presets.find((item) => item.name === name);
-    const modified = Boolean(isActive && preset && !colorsMatchPreset(preset));
+    // 改名时的卡片是 div（输入框不能嵌在 button 里），不能挂 aria-pressed
+    if (card.tagName === "BUTTON") {
+      card.setAttribute("aria-pressed", String(isActive));
+    }
+    const preset = findPreset(name);
+    if (!preset) continue;
+    // 只有内置模板才提示「已调整」：自定义模板本身就是可改的工作副本
+    const modified = Boolean(isActive && isBuiltinPreset(name) && !colorsMatchPreset(preset));
     card.classList.toggle("is-modified", modified);
+    const dots = card.querySelectorAll(".preset-dot");
+    const values = Object.values(preset.colors).slice(0, 5);
+    dots.forEach((dot, index) => {
+      if (values[index]) dot.style.background = values[index];
+    });
   }
 }
 
@@ -900,6 +1072,105 @@ function colorsMatchPreset(preset) {
   const entries = Object.entries(preset.colors);
   if (!entries.length) return false;
   return entries.every(([key, value]) => normalizeHex(state.colors[key]) === normalizeHex(value));
+}
+
+// 改色时把配色落到自定义模板：首条自定义模板承接「内置模板被改」的改动，
+// 这样内置预设永远不会被写脏，也符合「保存到第一条自定义模板」的约定
+function syncActivePresetColors() {
+  const active = state.customPresets.find((item) => item.name === state.preset);
+  const target = active || state.customPresets[0];
+  if (!target) return;
+  const converted = !active && isBuiltinPreset(state.preset);
+  target.colors = { ...state.colors };
+  if (!active) state.preset = target.name;
+  syncPresetControl();
+  if (converted) setNotice(`已将改动转存到「${target.name}」模板`);
+}
+
+function startRenamePreset(index) {
+  if (index <= 0 || index >= state.customPresets.length) return;
+  state.renamingIndex = index;
+  state.pendingDeleteIndex = -1;
+  buildPresetControl();
+  const input = els.presetList.querySelector(`input[data-rename-index="${index}"]`);
+  if (input) {
+    input.focus();
+    input.select();
+  }
+}
+
+function normalizeCustomPresetName(rawValue, index) {
+  if (index === 0) return state.customPresetMeta.label;
+  const trimmed = String(rawValue || "").trim().slice(0, state.customPresetMeta.nameMax);
+  if (!trimmed) return "";
+  const taken = new Set([state.customPresetMeta.label]);
+  for (const preset of state.presets) {
+    taken.add(preset.name);
+    taken.add(presetLabel(preset));
+  }
+  state.customPresets.forEach((item, itemIndex) => {
+    if (itemIndex !== index) taken.add(item.name);
+  });
+  let candidate = trimmed;
+  let counter = 2;
+  while (taken.has(candidate)) {
+    candidate = `${trimmed} ${counter}`;
+    counter += 1;
+  }
+  return candidate.slice(0, state.customPresetMeta.nameMax);
+}
+
+function commitRenamePreset(index, rawValue) {
+  if (state.renamingIndex !== index) return;
+  const preset = state.customPresets[index];
+  state.renamingIndex = -1;
+  if (!preset) {
+    buildPresetControl();
+    return;
+  }
+  const name = normalizeCustomPresetName(rawValue, index);
+  if (!name || name === preset.name) {
+    buildPresetControl();
+    return;
+  }
+  if (state.preset === preset.name) state.preset = name;
+  preset.name = name;
+  buildPresetControl();
+  markDirty();
+  setNotice(`模板已改名为「${name}」`);
+}
+
+function addCustomPreset() {
+  if (state.customPresets.length >= state.customPresetMeta.max) return;
+  const colors = Object.keys(state.colors).length
+    ? { ...state.colors }
+    : { ...(state.customPresets[0]?.colors || {}) };
+  state.customPresets.push({ name: nextCustomPresetName(), colors });
+  state.pendingDeleteIndex = -1;
+  buildPresetControl();
+  markDirty();
+  setNotice("已用当前配色新建自定义模板");
+}
+
+function removeCustomPreset(index) {
+  if (index <= 0 || index >= state.customPresets.length) return;
+  if (state.pendingDeleteIndex !== index) {
+    state.pendingDeleteIndex = index;
+    buildPresetControl();
+    setNotice("再次点击「确认删除」移除该模板");
+    return;
+  }
+  const [removed] = state.customPresets.splice(index, 1);
+  state.pendingDeleteIndex = -1;
+  state.renamingIndex = -1;
+  if (state.preset === removed.name) {
+    state.preset = state.customPresets[0].name;
+    Object.assign(state.colors, state.customPresets[0].colors);
+    syncColorInputs();
+  }
+  buildPresetControl();
+  markDirty();
+  setNotice(`已删除模板「${removed.name}」`);
 }
 
 function buildBackgroundControl() {
@@ -1880,9 +2151,43 @@ function bindStaticEvents() {
   });
 
   els.presetList.addEventListener("click", (event) => {
-    const card = event.target instanceof Element ? event.target.closest(".preset-card") : null;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target.closest(".preset-rename")) return;
+    const action = target.closest("[data-action]");
+    if (action) {
+      const index = Number(action.dataset.presetIndex);
+      if (action.dataset.action === "add-preset") addCustomPreset();
+      else if (action.dataset.action === "rename-preset") startRenamePreset(index);
+      else if (action.dataset.action === "delete-preset") removeCustomPreset(index);
+      return;
+    }
+    const card = target.closest(".preset-card");
     if (!card) return;
+    if (state.pendingDeleteIndex >= 0) {
+      state.pendingDeleteIndex = -1;
+      buildPresetControl();
+    }
     applyPreset(card.dataset.preset);
+  });
+
+  // 改名输入框：回车保存、Esc 取消、失焦保存（改完直接点别处也不丢）
+  els.presetList.addEventListener("keydown", (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || input.dataset.renameIndex === undefined) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      state.renamingIndex = -1;
+      buildPresetControl();
+    }
+  });
+  els.presetList.addEventListener("focusout", (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || input.dataset.renameIndex === undefined) return;
+    commitRenamePreset(Number(input.dataset.renameIndex), input.value);
   });
 
   els.pageWidthInput.addEventListener("input", () => {
@@ -2096,7 +2401,8 @@ function handleColorInput(event) {
     pair.swatch.value = value;
   }
 
-  syncPresetControl();
+  // 改色一律落到自定义模板：内置预设只读，首条自定义模板承接改动
+  syncActivePresetColors();
   markDirty();
 }
 
@@ -2111,7 +2417,7 @@ function handleColorCommit(event) {
 }
 
 function applyPreset(name) {
-  const preset = state.presets.find((item) => item.name === name);
+  const preset = findPreset(name);
   if (!preset) return;
   state.preset = preset.name;
   Object.assign(state.colors, preset.colors);
@@ -2122,14 +2428,14 @@ function applyPreset(name) {
 
 function restorePresetColors() {
   const preset =
-    state.presets.find((item) => item.name === state.preset) || state.presets[0];
+    findPreset(state.preset) || state.presets[0] || state.customPresets[0] || null;
   if (!preset) return;
   state.preset = preset.name;
   Object.assign(state.colors, preset.colors);
   syncColorInputs();
   syncPresetControl();
   markDirty();
-  setNotice(`已套用「${preset.label}」主题色`);
+  setNotice(`已套用「${presetLabel(preset)}」主题色`);
 }
 
 function toggleFont(name) {
@@ -2157,8 +2463,8 @@ function removeFont(name) {
    配置同步：从当前配置导入 / 应用配置
    ========================================================================== */
 
-function buildStyleFromState() {
-  return {
+function buildStyleFromState(includePresets = false) {
+  const style = {
     preset: state.preset,
     colors: { ...state.colors },
     fonts: [...state.selectedFonts],
@@ -2190,6 +2496,14 @@ function buildStyleFromState() {
         })),
     },
   };
+  // 预览渲染不关心模板清单，只有保存配置时才带上，避免模板改名/增删触发无谓的重渲染
+  if (includePresets) {
+    style.custom_presets = state.customPresets.map((item) => ({
+      name: item.name,
+      colors: { ...item.colors },
+    }));
+  }
+  return style;
 }
 
 function readStoredTestPpi() {
@@ -2217,6 +2531,9 @@ function sleep(ms) {
 function resetToDefaults() {
   if (!state.options || state.fatalError || state.importing || state.applying) return;
   applyActive(asObject(state.options.active));
+  state.customPresets = normalizeCustomPresets(state.options.custom_presets);
+  ensureCustomPreset();
+  buildPresetControl();
   syncControls();
   markDirty();
   setNotice("已恢复默认样式");
@@ -2226,7 +2543,7 @@ function resetToDefaults() {
 async function importCurrentConfig() {
   if (!bridge || !state.options || state.importing || state.applying) return;
   cancelScheduledRender();
-  const before = JSON.stringify(buildStyleFromState());
+  const before = JSON.stringify(buildStyleFromState(true));
   state.importing = true;
   state.renderError = "";
   clearNotice();
@@ -2234,7 +2551,7 @@ async function importCurrentConfig() {
   try {
     const options = await bridge.apiGet("preview/options");
     applyOptions(options, { keepView: true });
-    const changed = JSON.stringify(buildStyleFromState()) !== before;
+    const changed = JSON.stringify(buildStyleFromState(true)) !== before;
     state.importing = false;
     if (changed) await requestRender();
     setNotice("已导入当前配置");
@@ -2262,7 +2579,7 @@ async function applyConfig() {
   clearNotice();
   renderPreview();
   try {
-    const result = asObject(await bridge.apiPost("preview/apply", buildPayload()));
+    const result = asObject(await bridge.apiPost("preview/apply", buildPayload(true)));
     const changed = asArray(result.changed).map((item) => String(item));
     const warnings = asArray(result.warnings).map((item) => String(item));
     if (!changed.length) {
@@ -2373,11 +2690,11 @@ function cancelScheduledRender() {
   }
 }
 
-function buildPayload() {
+function buildPayload(includePresets = false) {
   return {
     mode: state.mode,
     query: state.query.trim(),
-    style: buildStyleFromState(),
+    style: buildStyleFromState(includePresets),
   };
 }
 

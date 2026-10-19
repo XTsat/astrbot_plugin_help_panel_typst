@@ -759,13 +759,38 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 
 /* 预设卡 */
 .preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preset-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preset-group-label {
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.preset-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
+.preset-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .preset-card {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 8px;
   padding: 10px;
@@ -783,10 +808,15 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   border-color: var(--muted-2);
 }
 
-.preset-card.is-active {
+.preset-card.is-active,
+.preset-card.is-renaming {
   border-color: var(--accent);
   background: var(--surface);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.preset-card.is-renaming {
+  cursor: default;
 }
 
 .preset-name {
@@ -805,6 +835,23 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   content: "已调整";
 }
 
+.preset-rename {
+  width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.preset-rename:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 .preset-dots {
   display: flex;
   gap: 4px;
@@ -817,11 +864,60 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   border-radius: 50%;
 }
 
-.preset-empty {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--muted-2);
+.preset-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.preset-action {
+  flex: 1;
+  padding: 3px 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.preset-action:hover {
+  border-color: var(--muted-2);
+  color: var(--text);
+}
+
+.preset-action.is-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.preset-action.is-danger[data-confirm="1"] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* 新建模板：虚线框弱化存在感，避免和可选中的模板卡混淆 */
+.preset-add {
+  padding: 7px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
   font-size: 11.5px;
+  cursor: pointer;
+}
+
+.preset-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.preset-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 开关 */
@@ -1847,7 +1943,7 @@ textarea:focus {
     display: none;
   }
 
-  .preset-list {
+  .preset-cards {
     grid-template-columns: minmax(0, 1fr);
   }
 

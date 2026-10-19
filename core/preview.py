@@ -15,7 +15,7 @@ import time
 import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -344,6 +344,33 @@ class PreviewCategory:
         }
 
 
+def _preset_palette_colors(raw_colors: Any) -> dict[str, str]:
+    """把条目里的部分颜色补全成完整色板: 旧配置常只存被微调过的键"""
+    palette = dict(DefaultCFG.DEFAULT_COLORS)
+    if isinstance(raw_colors, dict):
+        for key, value in raw_colors.items():
+            if key not in palette:
+                continue
+            normalized = _normalize_color(value)
+            if normalized is not None:
+                palette[key] = normalized
+    return palette
+
+
+def _unique_preset_name(raw: Any, used: set[str]) -> str:
+    """收敛自定义模板名: 去空白、限长, 并避开内置预设名与已用名"""
+    name = str(raw or "").strip()[: InternalCFG.PREVIEW_PRESET_NAME_MAX]
+    reserved = set(DefaultCFG.PRESETS) | set(DefaultCFG.PRESET_LABELS.values())
+    reserved.add(DefaultCFG.CUSTOM_PRESET_KEY)
+    base = name or DefaultCFG.CUSTOM_PRESET_KEY
+    candidate = base
+    counter = 2
+    while candidate in used or candidate in reserved:
+        candidate = f"{base} {counter}"
+        counter += 1
+    return candidate
+
+
 @dataclass
 class PreviewStyle:
     """一次预览请求的样式快照"""
@@ -368,6 +395,9 @@ class PreviewStyle:
     ignored_plugins_custom: list[str]
     # 分类规则与兜底分类: 只影响 /helps 的分类归属与卡片标题, 不参与模板配色
     category: PreviewCategory
+    # 面板自定义模板列表(顺序即配置列表顺序, 首条固定「自定义」); 只在应用配置时使用,
+    # 不进 to_plain(), 否则改名/增删模板会让预览缓存无故失效
+    custom_presets: list[dict[str, Any]] = field(default_factory=list)
 
     def to_plain(self) -> dict[str, Any]:
         return {
@@ -487,6 +517,41 @@ class PreviewService:
 
     # ---- options ----
 
+    def _conf_preset_entries(self) -> list[dict[str, Any]]:
+        """按配置列表顺序读出自定义模板(含启用标记): 首条即面板上的「自定义」"""
+        entries: list[dict[str, Any]] = []
+        used: set[str] = {DefaultCFG.CUSTOM_PRESET_KEY}
+        for index, preset in enumerate(self.base_config.appearance.preset_entries):
+            if index == 0:
+                name = DefaultCFG.CUSTOM_PRESET_KEY
+            else:
+                name = _unique_preset_name(preset.name, used)
+                used.add(name)
+            entries.append(
+                {
+                    "name": name,
+                    "colors": _preset_palette_colors(preset.colors),
+                    "enabled": preset.enabled,
+                }
+            )
+        return entries
+
+    def _resolve_active_preset(self, custom_presets: list[dict[str, Any]]) -> str:
+        """把配置里的激活预设映射成面板卡片名(内置名或自定义模板名)"""
+        enabled = next(
+            (item["name"] for item in custom_presets if item.get("enabled")), None
+        )
+        if enabled is not None:
+            return enabled
+        active = self.base_config.appearance.active_preset or DefaultCFG.DEFAULT_PRESET
+        if active in DefaultCFG.PRESETS:
+            return active
+        names = {item["name"] for item in custom_presets}
+        # 「自定义」与旧配置里的自定义条目名都落到第一张自定义卡
+        return active if active in names and active != DefaultCFG.CUSTOM_PRESET_KEY else (
+            custom_presets[0]["name"]
+        )
+
     def build_options(self) -> dict[str, Any]:
         """返回预览页初始化所需的全部选项"""
         appearance = self.base_config.appearance
@@ -513,16 +578,14 @@ class PreviewService:
             for name in preset_names
             if name in DefaultCFG.PRESETS
         ]
-        # 当前使用的是自定义配色时也给它一张可回选的卡片, 否则预设区没有任何选中项
-        active_preset = appearance.active_preset or DefaultCFG.DEFAULT_PRESET
-        if active_preset not in {item["name"] for item in presets}:
-            presets.append(
-                {
-                    "name": active_preset,
-                    "label": DefaultCFG.PRESET_LABELS.get(active_preset, active_preset),
-                    "colors": dict(colors),
-                }
-            )
+        # 自定义模板交给独立列表管理: 首条固定「自定义」, 其余沿用配置里的名字;
+        # 配置里没有条目时也补一张卡, 否则预设区没有任何可编辑项
+        custom_presets = self._conf_preset_entries()
+        if not custom_presets:
+            custom_presets = [
+                {"name": DefaultCFG.CUSTOM_PRESET_KEY, "colors": dict(colors)}
+            ]
+        active_preset = self._resolve_active_preset(custom_presets)
 
         backgrounds = [
             {"name": name} for name, _ in self.renderer.list_background_choices()
@@ -565,6 +628,13 @@ class PreviewService:
         return {
             "modes": [{"value": mode, "label": label} for mode, label in _MODE_LABELS],
             "presets": presets,
+            "custom_presets": custom_presets,
+            # 面板「自定义模板」区的文案与上限（名字长度、模板数量）
+            "custom_preset": {
+                "label": DefaultCFG.CUSTOM_PRESET_KEY,
+                "max": InternalCFG.PREVIEW_CUSTOM_PRESET_MAX,
+                "name_max": InternalCFG.PREVIEW_PRESET_NAME_MAX,
+            },
             "active": {
                 "mode": "command",
                 "preset": active_preset,
@@ -948,6 +1018,25 @@ class PreviewService:
             rules=rules,
         )
 
+    def _normalize_custom_presets(self, raw: Any) -> list[dict[str, Any]]:
+        """收敛面板自定义模板: 保留顺序, 首条固定「自定义」, 其余名字去重限长"""
+        entries: list[dict[str, Any]] = []
+        if not isinstance(raw, list):
+            return entries
+        used: set[str] = {DefaultCFG.CUSTOM_PRESET_KEY}
+        for index, item in enumerate(raw[: InternalCFG.PREVIEW_CUSTOM_PRESET_MAX]):
+            if not isinstance(item, dict):
+                continue
+            if index == 0:
+                name = DefaultCFG.CUSTOM_PRESET_KEY
+            else:
+                name = _unique_preset_name(item.get("name"), used)
+                used.add(name)
+            entries.append(
+                {"name": name, "colors": _preset_palette_colors(item.get("colors"))}
+            )
+        return entries
+
     def _parse_style(self, raw_style: Any) -> PreviewStyle:
         """把前端传来的样式收敛成合法值；非法颜色/字体静默忽略"""
         base_colors = dict(self.base_config.appearance.get_active_colors())
@@ -1079,6 +1168,7 @@ class PreviewService:
             ignored_plugins=ignored_plugins,
             ignored_plugins_custom=ignored_custom,
             category=self._parse_category(style.get("category")),
+            custom_presets=self._normalize_custom_presets(style.get("custom_presets")),
         )
 
     def _compose_config(
@@ -1166,7 +1256,8 @@ class PreviewService:
     def build_apply_plan(self, payload: Any) -> dict[str, Any]:
         """把面板样式整理成写入插件配置的补丁计划（只计算，不落盘）。
 
-        颜色改动写入一张「自定义」预设并启用；背景图仅在面板选了与当前
+        配色改动落到「自定义模板」：面板把内置预设改出差别后会切到自定义卡，
+        保存时写回预设列表（首条固定名「自定义」）；背景图仅在面板选了与当前
         生效背景不同的图片时才固定，未改动时保留配置里的随机背景。
         """
         style = self._parse_style(payload.get("style"))
@@ -1210,26 +1301,10 @@ class PreviewService:
             if new_rendering[key] != getattr(rendering, key):
                 changed.append(label)
 
-        # 配色：仅当有效色板变化时才动预设；能对上某个预设色板就切预设名，
-        # 否则写一张「自定义」预设，避免把内置预设“改脏”
-        base_colors = _color_map(appearance.get_active_colors())
-        style_colors = _color_map(style.colors)
-        plan_colors: dict[str, str] | None = None
-        clear_enabled = False
-        preset_name = appearance.active_preset
-        if style_colors != base_colors:
-            palette = self._preset_palette(style.preset, base_colors)
-            if palette is not None and palette == style_colors:
-                preset_name = style.preset
-                clear_enabled = True
-                changed.append(
-                    f"主题预设（{DefaultCFG.PRESET_LABELS.get(preset_name, preset_name)}）"
-                )
-            else:
-                preset_name = DefaultCFG.CUSTOM_PRESET_KEY
-                plan_colors = dict(style_colors)
-                clear_enabled = True
-                changed.append("自定义配色")
+        # 配色：能对上内置预设色板就切预设名，否则把改动收进自定义模板列表，
+        # 避免把内置预设「改脏」；具体条目与启用项由 _plan_preset_entries 统一决定
+        preset_plan = self._plan_preset_entries(style)
+        changed.extend(preset_plan["changed"])
 
         active_fonts = list(appearance.get_active_font_order())
         parsed_fonts = list(style.fonts)
@@ -1310,15 +1385,15 @@ class PreviewService:
             }
 
         appearance_patch: dict[str, Any] = {
-            "active_preset": preset_name,
+            "active_preset": preset_plan["active_preset"],
             "font_order": fonts,
         }
 
         return {
             "rendering": new_rendering,
             "appearance": appearance_patch,
-            "colors": plan_colors,
-            "clear_enabled": clear_enabled,
+            "preset_entries": preset_plan["preset_entries"],
+            "enabled_preset": preset_plan["enabled_preset"],
             "hero_header": bool(style.hero_header),
             "background_path": background_path,
             "ignored_plugins": ignored_selected,
@@ -1328,21 +1403,96 @@ class PreviewService:
             "warnings": warnings,
         }
 
-    def _preset_palette(
-        self, name: str, base_colors: dict[str, str]
-    ) -> dict[str, str] | None:
-        """返回预设的完整色板；未知预设返回 None"""
-        if name in DefaultCFG.PRESETS:
-            return _color_map(DefaultCFG.PRESETS[name])
-        preset = self.base_config.appearance.presets.get(name)
-        if preset is None:
-            return None
-        colors = dict(base_colors)
-        for key, value in preset.colors.items():
-            normalized = _normalize_color(value)
-            if key in colors and normalized is not None:
-                colors[key] = normalized.lower()
-        return colors
+    def _plan_preset_entries(self, style: PreviewStyle) -> dict[str, Any]:
+        """决定这次应用要写回的预设列表、启用项与激活预设名
+
+        面板带 custom_presets 时以它为准（可增删改名）；旧页面不带时只在现有
+        条目上改颜色。内置预设永远不直接写入，配色改动一律落到自定义条目。
+        """
+        appearance = self.base_config.appearance
+        base_colors = _color_map(appearance.get_active_colors())
+        style_colors = _color_map(style.colors)
+        current_entries = self._conf_preset_entries()
+        current_enabled = next(
+            (item["name"] for item in current_entries if item.get("enabled")), None
+        )
+
+        if style.custom_presets:
+            entries = [
+                {"name": item["name"], "colors": dict(item["colors"])}
+                for item in style.custom_presets
+            ]
+        else:
+            # 旧页面不带条目列表: 只能在现有条目上改色, 名字与数量保持不变
+            entries = [
+                {"name": item["name"], "colors": dict(item["colors"])}
+                for item in current_entries
+            ]
+            if not entries:
+                entries = [
+                    {
+                        "name": DefaultCFG.CUSTOM_PRESET_KEY,
+                        "colors": dict(DefaultCFG.DEFAULT_COLORS),
+                    }
+                ]
+
+        names = [item["name"] for item in entries]
+        active_name = style.preset if style.preset in names else None
+        if active_name is None and style.preset == DefaultCFG.CUSTOM_PRESET_KEY:
+            # 旧页面把「自定义」当预设名传, 对应面板第一张自定义卡
+            active_name = names[0]
+
+        enabled_preset: str | None
+        if style.preset in DefaultCFG.PRESETS and style_colors == _color_map(
+            DefaultCFG.PRESETS[style.preset]
+        ):
+            active_preset = style.preset
+            enabled_preset = None
+        elif active_name is not None:
+            entries[names.index(active_name)]["colors"] = dict(style.colors)
+            enabled_preset = active_name
+            active_preset = DefaultCFG.CUSTOM_PRESET_KEY
+        elif style_colors != base_colors:
+            # 旧页面只带改过的颜色: 按既定约定写进第一条自定义模板
+            entries[0]["colors"] = dict(style.colors)
+            enabled_preset = names[0]
+            active_preset = DefaultCFG.CUSTOM_PRESET_KEY
+        else:
+            # 没选卡片也没改色: 保持配置里的激活项
+            active_preset = appearance.active_preset or DefaultCFG.DEFAULT_PRESET
+            enabled_preset = None
+
+        structure_changed = names != [item["name"] for item in current_entries]
+        colors_changed = len(entries) != len(current_entries) or any(
+            _color_map(entry["colors"]) != _color_map(base_entry["colors"])
+            for entry, base_entry in zip(entries, current_entries)
+        )
+
+        labels: list[str] = []
+        if style.preset in DefaultCFG.PRESETS and active_preset == style.preset:
+            if (
+                style.preset != (appearance.active_preset or DefaultCFG.DEFAULT_PRESET)
+                or current_enabled is not None
+            ):
+                labels.append(
+                    f"主题预设（{DefaultCFG.PRESET_LABELS.get(style.preset, style.preset)}）"
+                )
+        elif style.custom_presets:
+            if structure_changed:
+                labels.append("自定义模板")
+            elif colors_changed or enabled_preset != current_enabled:
+                labels.append("自定义配色")
+        elif style_colors != base_colors or (
+            enabled_preset is not None and enabled_preset != current_enabled
+        ):
+            labels.append("自定义配色")
+
+        return {
+            "preset_entries": entries,
+            "enabled_preset": enabled_preset,
+            "active_preset": active_preset,
+            "changed": labels,
+        }
 
     # ---- cache ----
 
