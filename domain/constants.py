@@ -76,6 +76,8 @@ class InternalCFG:
         # 插件行双行模式改变行高与文本排布, 同样影响出图
         "plugin_two_lines",
         "ignored_plugins",
+        # 自定义屏蔽名与上面的勾选项取并集后生效, 漏登记会让改名后的屏蔽不刷新
+        "ignored_plugins_custom",
         "effective_colors",
         "header_background",
         "background_dir",
@@ -260,15 +262,21 @@ class DefaultCFG:
 
     # 4. 过滤设置
     # config.py 负责 list → set
+    # 只预置一定会出现在插件列表里的项 (本体 / 内置指令组 / 本插件自己):
+    # 勾选框只列注册表中的插件, 不在列表里的名字预置进来会变成看不见的勾选
     IGNORED_PLUGINS: set[str] = {
         "astrbot",
+        "builtin_commands",
+        "astrbot_plugin_help_panel_typst",
+    }
+    # 其余内置插件由 AstrBot 本体直接承载、不注册为插件, 连同本插件旧名一起
+    # 放进自定义条目: 那里是纯文本, 不依赖插件列表
+    IGNORED_PLUGINS_CUSTOM: set[str] = {
+        "session_controller",
         "astrbot-web-searcher",
         "astrbot-python-interpreter",
-        "session_controller",
-        "builtin_commands",
         "astrbot-reminder",
         "astrbot_plugin_help_typst",
-        "astrbot_plugin_help_panel_typst",
     }
 
     # 5. 内置主题预设 (preset_name → 完整配色)

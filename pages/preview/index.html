@@ -137,6 +137,38 @@
             </details>
 
             <details class="ct-section" open>
+              <summary>屏蔽插件</summary>
+              <div class="ct-section-body">
+                <p class="field-hint">勾选不想在帮助面板里展示的插件；未安装的插件名请填在下面的自定义条目里。</p>
+                <input
+                  type="search"
+                  id="plugin-search"
+                  class="font-search"
+                  placeholder="搜索插件…"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div class="plugin-list" id="plugin-list" role="group" aria-label="已安装插件"></div>
+                <p class="plugin-empty" id="plugin-empty" hidden>
+                  未读取到已安装插件，请在下方自定义条目中手动填写插件名
+                </p>
+                <p class="field-hint" id="plugin-self-hint" hidden>
+                  屏蔽本插件会让帮助面板不再展示自己，通常不需要勾选。
+                </p>
+                <div class="field">
+                  <label class="field-label" for="plugin-custom">自定义条目</label>
+                  <textarea
+                    id="plugin-custom"
+                    rows="3"
+                    placeholder="每行一个插件名，例如 astrbot_plugin_old_name"
+                  ></textarea>
+                  <p class="field-hint">自定义条目按原样屏蔽，不做名称校验；每行一个。</p>
+                </div>
+                <p class="field-hint" id="plugin-summary">当前不屏蔽任何插件</p>
+              </div>
+            </details>
+
+            <details class="ct-section" open>
               <summary>版式</summary>
               <div class="ct-section-body">
                 <div class="field">

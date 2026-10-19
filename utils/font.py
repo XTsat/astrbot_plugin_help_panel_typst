@@ -8,6 +8,7 @@ import typst
 from astrbot.api import logger
 
 from ..domain import DefaultCFG
+from .schema import write_schema_atomic
 
 
 class FontManager:
@@ -92,26 +93,8 @@ class FontManager:
         return sorted(f for f in self.available_families if f != DefaultCFG.EMOJI_FONT)
 
     def _write_schema_atomic(self, schema_path: Path, schema: dict[str, Any]) -> bool:
-        """原子写回 Schema 文件 (同目录 .tmp + os.replace)
-
-        直接 open(..., "w") 中途异常会留下半截 JSON, 使配置面板整体不可用;
-        此处先写临时文件再替换, 失败时清理临时文件并保留原文件。
-        """
-        tmp_path = schema_path.with_name(f"{schema_path.name}.tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(schema, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, schema_path)
-            return True
-        except Exception as e:
-            logger.warning(f"[HelpTypst] Schema 写入失败，已保留原文件: {e}")
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            return False
+        # 与屏蔽插件选项共用同一套原子写, 避免两处实现漂移
+        return write_schema_atomic(schema_path, schema)
 
     def update_json_schema(
         self, schema_path: Path, live_schema: dict[str, Any] | None = None

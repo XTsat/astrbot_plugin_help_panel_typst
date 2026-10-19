@@ -6,19 +6,26 @@
     "hint": "开启后，生成图片时会发送'正在搜索/渲染...'，并在完成后撤回"
   },
   "ignored_plugins": {
-    "description": "黑名单插件 ID",
+    "description": "屏蔽插件",
     "type": "list",
+    "hint": "勾选不想在帮助面板中展示的插件；未安装或旧名字的插件请填在下方「自定义屏蔽插件名」中",
     "default": [
       "astrbot",
+      "builtin_commands",
+      "astrbot_plugin_help_panel_typst"
+    ]
+  },
+  "ignored_plugins_custom": {
+    "description": "自定义屏蔽插件名",
+    "type": "list",
+    "default": [
+      "session_controller",
       "astrbot-web-searcher",
       "astrbot-python-interpreter",
-      "session_controller",
-      "builtin_commands",
       "astrbot-reminder",
-      "astrbot_plugin_help_typst",
-      "astrbot_plugin_help_panel_typst"
+      "astrbot_plugin_help_typst"
     ],
-    "hint": "屏蔽不想展示、导致问题的插件菜单 (使用 name 字段)"
+    "hint": "每行一个插件名，用于屏蔽未安装或旧名字的插件；与上面的勾选项合并生效"
   },
   "custom_font_path": {
     "description": "自定义字体目录",

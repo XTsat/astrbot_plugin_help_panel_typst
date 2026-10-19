@@ -7,6 +7,7 @@ from .image import (
     process_image_to_output,
 )
 from .view import HelpHint, MsgRecall, TypstLayout
+from .schema import sync_plugin_options, write_schema_atomic
 
 __all__ = [
     "FontManager",
@@ -18,4 +19,6 @@ __all__ = [
     "verify_image_format_matches_extension",
     "get_image_dimensions",
     "process_image_to_output",
+    "sync_plugin_options",
+    "write_schema_atomic",
 ]

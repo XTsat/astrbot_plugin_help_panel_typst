@@ -28,8 +28,9 @@ from .renderer import TypstRenderer
 
 DataProvider = Callable[[Path], int]
 ProviderBuilder = Callable[
-    [str, str | None, TypstLayout, list[str], str], DataProvider
+    [str, str | None, TypstLayout, list[str], str, TypstPluginConfig], DataProvider
 ]
+PluginLister = Callable[[], list[dict[str, Any]]]
 PersonaGetter = Callable[[], Awaitable[str]]
 
 
@@ -153,6 +154,25 @@ def _normalize_color(value: Any) -> str | None:
     return color if HEX_COLOR_REGEX.match(color) else None
 
 
+def _normalize_names(value: Any) -> list[str]:
+    """插件名列表归一化: 去空白、去空项、去重并保留原顺序"""
+    # 与配置读取的解析保持一致: 单个字符串按一个名字处理, 其它类型视为空
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
 def _format_max_height(output_format: str) -> int:
     """所选格式能承载的最大单图高度（配置上限与格式硬限制取小）"""
     max_side = InternalCFG.FORMAT_MAX_SIDE.get(
@@ -189,6 +209,9 @@ class PreviewStyle:
     plugin_two_lines: bool
     hero_header: bool
     background: str
+    # 生效屏蔽集拆成两路: 面板勾选的已安装插件 + 手填的自定义条目
+    ignored_plugins: list[str]
+    ignored_plugins_custom: list[str]
 
     def to_plain(self) -> dict[str, Any]:
         return {
@@ -207,6 +230,8 @@ class PreviewStyle:
             "plugin_two_lines": self.plugin_two_lines,
             "hero_header": self.hero_header,
             "background": self.background,
+            "ignored_plugins": self.ignored_plugins,
+            "ignored_plugins_custom": self.ignored_plugins_custom,
         }
 
 
@@ -287,6 +312,7 @@ class PreviewService:
         renderer: TypstRenderer,
         provider_builder: ProviderBuilder,
         persona_getter: PersonaGetter,
+        plugin_lister: PluginLister,
     ) -> None:
         self.star = star
         self.data_dir = data_dir
@@ -297,6 +323,7 @@ class PreviewService:
         self.renderer = renderer
         self.provider_builder = provider_builder
         self.persona_getter = persona_getter
+        self.plugin_lister = plugin_lister
         self._cache = _PreviewCache()
         # 预览编译串行化：Typst 子进程本身不便宜，并发请求只会互相拖慢
         self._render_lock = asyncio.Lock()
@@ -361,6 +388,22 @@ class PreviewService:
             )
         )
 
+        # 屏蔽项拆成「已安装插件勾选」与「自定义条目」两路：面板多选只列已安装的，
+        # 未安装的旧名字放进自定义条目，保证每个值都可见、可删
+        plugins = self.plugin_lister()
+        installed = {str(item.get("name") or "") for item in plugins}
+        ignored_selected = sorted(
+            name for name in self.base_config.ignored_plugins if name in installed
+        )
+        ignored_custom = sorted(
+            self.base_config.ignored_plugins_custom
+            | {
+                name
+                for name in self.base_config.ignored_plugins
+                if name not in installed
+            }
+        )
+
         return {
             "modes": [{"value": mode, "label": label} for mode, label in _MODE_LABELS],
             "presets": presets,
@@ -380,9 +423,19 @@ class PreviewService:
                 "plugin_two_lines": bool(rendering.plugin_two_lines),
                 "hero_header": bool(self.base_config.hero_header),
                 "background": active_background.name if active_background else "",
+                # 应用配置后前端靠这里比对「保存后的值」，缺了会让重载确认轮询永远不匹配
+                "ignored": {
+                    "selected": ignored_selected,
+                    "custom": ignored_custom,
+                },
             },
             "fonts": fonts,
             "backgrounds": backgrounds,
+            "plugins": plugins,
+            "ignored": {
+                "selected": ignored_selected,
+                "custom": ignored_custom,
+            },
             "color_groups": self._build_color_groups(colors),
             "limits": {
                 "page_width": {
@@ -490,6 +543,7 @@ class PreviewService:
             layout,
             cfg.appearance.get_active_font_order(),
             persona_name,
+            cfg,
         )
         # 先把面板数据落成 JSON 并取内容 hash: 缓存必须随插件/指令变化失效，
         # 否则安装或禁用插件后预览会一直返回旧图。
@@ -654,6 +708,18 @@ class PreviewService:
         if output_format not in DefaultCFG.OUTPUT_FORMATS:
             output_format = DefaultCFG.OUTPUT_FORMAT
 
+        # 屏蔽集：键缺失表示前端没带这项(沿用配置)，带了就按传入值(可能是空列表=全部取消)
+        ignored_plugins = (
+            _normalize_names(style.get("ignored_plugins"))
+            if "ignored_plugins" in style
+            else sorted(self.base_config.ignored_plugins)
+        )
+        ignored_custom = (
+            _normalize_names(style.get("ignored_plugins_custom"))
+            if "ignored_plugins_custom" in style
+            else sorted(self.base_config.ignored_plugins_custom)
+        )
+
         return PreviewStyle(
             preset=str(style.get("preset") or appearance.active_preset or ""),
             colors=colors,
@@ -723,6 +789,8 @@ class PreviewService:
                 style.get("hero_header"), bool(self.base_config.hero_header)
             ),
             background=background,
+            ignored_plugins=ignored_plugins,
+            ignored_plugins_custom=ignored_custom,
         )
 
     def _compose_config(
@@ -752,6 +820,9 @@ class PreviewService:
 
         cfg.hero_header = style.hero_header
         cfg.background_random = False
+        # 预览要反映面板里勾选的屏蔽集, 否则勾掉插件后预览图看不到变化
+        cfg.ignored_plugins = set(style.ignored_plugins)
+        cfg.ignored_plugins_custom = set(style.ignored_plugins_custom)
 
         if style.background:
             choices = dict(self.renderer.list_background_choices())
@@ -889,6 +960,16 @@ class PreviewService:
                 background_path = str(picked)
                 changed.append("背景图")
 
+        # 屏蔽集：面板把「已安装插件」与「自定义条目」分开存，两个键各自整体替换。
+        # 旧配置里未安装的名字会被前端归入自定义条目，应用时顺带完成迁移。
+        ignored_selected = sorted(set(style.ignored_plugins))
+        ignored_custom = sorted(set(style.ignored_plugins_custom))
+        if (
+            set(ignored_selected) != base.ignored_plugins
+            or set(ignored_custom) != base.ignored_plugins_custom
+        ):
+            changed.append("屏蔽插件")
+
         appearance_patch: dict[str, Any] = {
             "active_preset": preset_name,
             "font_order": fonts,
@@ -901,6 +982,8 @@ class PreviewService:
             "clear_enabled": clear_enabled,
             "hero_header": bool(style.hero_header),
             "background_path": background_path,
+            "ignored_plugins": ignored_selected,
+            "ignored_plugins_custom": ignored_custom,
             "changed": changed,
             "warnings": warnings,
         }

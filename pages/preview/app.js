@@ -45,6 +45,7 @@ const state = {
   colorGroups: [],
   fonts: [],
   backgrounds: [],
+  plugins: [],
   limits: {
     pageWidth: { min: 360, max: 1200, step: 10 },
     ppi: { min: 72, max: 384, step: 8 },
@@ -77,6 +78,9 @@ const state = {
   heroHeader: true,
   background: "",
   fontFilter: "",
+  ignoredSelected: [],
+  ignoredCustom: [],
+  pluginFilter: "",
 
   // 预览状态
   images: [],
@@ -146,6 +150,13 @@ const els = {
   fontChips: document.getElementById("font-chips"),
   fontSearch: document.getElementById("font-search"),
   fontList: document.getElementById("font-list"),
+
+  pluginSearch: document.getElementById("plugin-search"),
+  pluginList: document.getElementById("plugin-list"),
+  pluginEmpty: document.getElementById("plugin-empty"),
+  pluginCustom: document.getElementById("plugin-custom"),
+  pluginSummary: document.getElementById("plugin-summary"),
+  pluginSelfHint: document.getElementById("plugin-self-hint"),
 
   colorGroups: document.getElementById("color-groups"),
   restoreColors: document.getElementById("btn-restore-colors"),
@@ -343,6 +354,56 @@ function normalizeBackgrounds(rawBackgrounds) {
   return names;
 }
 
+/** 插件名列表（屏蔽名单）去空白、去空项、去重，保留首次出现顺序 */
+function normalizeNameList(rawNames) {
+  const seen = new Set();
+  const names = [];
+  for (const item of asArray(rawNames)) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
+/** 已安装插件归一成 { name, displayName, disabled }，渲染层不再判断后端字段形态 */
+function normalizePlugins(rawPlugins) {
+  const seen = new Set();
+  const plugins = [];
+  for (const item of asArray(rawPlugins)) {
+    const source = asObject(item);
+    const name = typeof source.name === "string" ? source.name.trim() : "";
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const displayName = typeof source.display_name === "string" ? source.display_name.trim() : "";
+    plugins.push({
+      name,
+      displayName: displayName || name,
+      disabled: asBool(source.disabled, false),
+    });
+  }
+  // 列表按展示名排序，名字只在展示名相同时兜底，保证每次渲染顺序稳定
+  plugins.sort((left, right) => {
+    const byDisplay = left.displayName.toLowerCase().localeCompare(right.displayName.toLowerCase());
+    if (byDisplay !== 0) return byDisplay;
+    return left.name.toLowerCase().localeCompare(right.name.toLowerCase());
+  });
+  return plugins;
+}
+
+/** 屏蔽名单按集合比较：勾选顺序变化不算配置变化 */
+function sameNameSet(left, right) {
+  const a = new Set(normalizeNameList(left));
+  const b = new Set(normalizeNameList(right));
+  if (a.size !== b.size) return false;
+  for (const name of a) {
+    if (!b.has(name)) return false;
+  }
+  return true;
+}
+
 /* ==========================================================================
    初始化
    ========================================================================== */
@@ -443,6 +504,16 @@ function applyOptions(rawOptions, viewOptions = {}) {
   state.colorGroups = normalizeColorGroups(options.color_groups);
   state.fonts = normalizeFontList(options.fonts);
   state.backgrounds = normalizeBackgrounds(options.backgrounds);
+  // 老版本 AstrBot 或读取失败时 plugins 可能缺失/非数组，按空数组降级
+  state.plugins = normalizePlugins(options.plugins);
+  // options.ignored 与 active.ignored 同源；旧后端只给 active 时仍要能回填
+  const ignoredSource = asObject(options.ignored);
+  const ignored =
+    ignoredSource.selected !== undefined || ignoredSource.custom !== undefined
+      ? ignoredSource
+      : asObject(active.ignored);
+  state.ignoredSelected = normalizeNameList(ignored.selected);
+  state.ignoredCustom = normalizeNameList(ignored.custom);
 
   state.limits = {
     pageWidth: {
@@ -563,7 +634,11 @@ function importActiveStyle(rawActive) {
   state.pluginTwoLines = asBool(active.plugin_two_lines, true);
   state.heroHeader = asBool(active.hero_header, true);
   state.background = typeof active.background === "string" ? active.background : "";
+  const ignored = asObject(active.ignored);
+  state.ignoredSelected = normalizeNameList(ignored.selected);
+  state.ignoredCustom = normalizeNameList(ignored.custom);
   state.fontFilter = "";
+  state.pluginFilter = "";
 }
 
 function applyActive(rawActive) {
@@ -580,6 +655,7 @@ function buildControls() {
   buildModeControl();
   buildPresetControl();
   buildBackgroundControl();
+  buildPluginControl();
   buildOutputFormatControl();
   buildColorControl();
   configureRanges();
@@ -701,6 +777,117 @@ function syncBackgroundControl() {
   option.textContent = `${state.background}（未找到）`;
   els.backgroundSelect.appendChild(option);
   els.backgroundSelect.value = state.background;
+}
+
+function buildPluginControl() {
+  renderPluginList();
+  updatePluginSummary();
+}
+
+function syncPluginControl() {
+  if (!els.pluginList) return;
+  // 搜索框正在输入时不要回写，否则光标会跳回末尾
+  if (els.pluginSearch && document.activeElement !== els.pluginSearch) {
+    if (els.pluginSearch.value !== state.pluginFilter) {
+      els.pluginSearch.value = state.pluginFilter;
+    }
+  }
+  // 自定义条目同理：只在值真的不同时写回，避免每次同步都重置光标
+  if (els.pluginCustom) {
+    const text = state.ignoredCustom.join("\n");
+    if (els.pluginCustom.value !== text) els.pluginCustom.value = text;
+  }
+  renderPluginList();
+  updatePluginSummary();
+}
+
+function renderPluginList() {
+  if (!els.pluginList) return;
+  const keyword = state.pluginFilter.trim().toLowerCase();
+  const pool = keyword
+    ? state.plugins.filter(
+        (plugin) =>
+          plugin.name.toLowerCase().includes(keyword) ||
+          plugin.displayName.toLowerCase().includes(keyword),
+      )
+    : state.plugins;
+
+  const fragment = document.createDocumentFragment();
+  for (const plugin of pool) {
+    fragment.appendChild(buildPluginRow(plugin));
+  }
+  els.pluginList.replaceChildren(fragment);
+  if (!pool.length && state.plugins.length) {
+    const empty = document.createElement("p");
+    empty.className = "plugin-list-empty";
+    empty.textContent = "没有匹配的插件";
+    els.pluginList.appendChild(empty);
+  }
+
+  // 只有「一个插件都没读到」才提示手动填写；搜索无结果不算
+  show(els.pluginEmpty, !state.plugins.length);
+  // 没有可选项时收起列表与搜索框，避免留下空边框让人以为加载失败
+  show(els.pluginList, state.plugins.length > 0);
+  if (els.pluginSearch) els.pluginSearch.disabled = !state.plugins.length;
+  updatePluginSelfHint();
+}
+
+function buildPluginRow(plugin) {
+  const row = document.createElement("label");
+  row.className = "plugin-item";
+  row.dataset.plugin = plugin.name;
+  row.classList.toggle("is-disabled", plugin.disabled);
+
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.className = "plugin-check";
+  check.value = plugin.name;
+  check.checked = state.ignoredSelected.includes(plugin.name);
+
+  const text = document.createElement("span");
+  text.className = "plugin-text";
+
+  const line = document.createElement("span");
+  line.className = "plugin-line";
+
+  const name = document.createElement("span");
+  name.className = "plugin-name";
+  name.textContent = plugin.displayName;
+  line.appendChild(name);
+
+  if (plugin.disabled) {
+    // 已禁用的插件仍可勾选：屏蔽与否和插件是否启用无关
+    const tag = document.createElement("span");
+    tag.className = "plugin-tag";
+    tag.textContent = "（已禁用）";
+    line.appendChild(tag);
+  }
+
+  const id = document.createElement("span");
+  id.className = "plugin-id";
+  id.textContent = plugin.name;
+
+  text.append(line, id);
+  row.append(check, text);
+  return row;
+}
+
+function updatePluginSummary() {
+  const selected = state.ignoredSelected.length;
+  const custom = state.ignoredCustom.length;
+  if (!selected && !custom) {
+    setText(els.pluginSummary, "当前不屏蔽任何插件");
+    return;
+  }
+  const parts = [];
+  if (selected) parts.push(`已勾选 ${selected} 个已安装插件`);
+  if (custom) parts.push(`另有 ${custom} 条自定义条目`);
+  setText(els.pluginSummary, parts.join("，"));
+}
+
+function updatePluginSelfHint() {
+  const selfNames = ["help_panel_typst", "astrbot_plugin_help_panel_typst"];
+  show(els.pluginSelfHint, state.ignoredSelected.some((name) => selfNames.includes(name)));
 }
 
 function buildColorControl() {
@@ -882,6 +1069,7 @@ function syncControls() {
   els.toggleHero.checked = state.heroHeader;
   updateBackgroundVisibility();
   syncBackgroundControl();
+  syncPluginControl();
 
   els.fontSearch.value = "";
   renderFontList();
@@ -1093,6 +1281,32 @@ function bindStaticEvents() {
     markDirty();
   });
 
+  els.pluginSearch.addEventListener("input", () => {
+    state.pluginFilter = els.pluginSearch.value;
+    // 搜索只过滤显示，不影响渲染结果，所以不 markDirty
+    renderPluginList();
+  });
+  els.pluginList.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+    const name = target.value;
+    if (!name) return;
+    const index = state.ignoredSelected.indexOf(name);
+    if (target.checked) {
+      if (index < 0) state.ignoredSelected.push(name);
+    } else if (index >= 0) {
+      state.ignoredSelected.splice(index, 1);
+    }
+    updatePluginSelfHint();
+    updatePluginSummary();
+    markDirty();
+  });
+  els.pluginCustom.addEventListener("input", () => {
+    state.ignoredCustom = normalizeNameList(els.pluginCustom.value.split(/\r?\n/));
+    updatePluginSummary();
+    markDirty();
+  });
+
   els.fontSearch.addEventListener("input", () => {
     state.fontFilter = els.fontSearch.value;
     renderFontList();
@@ -1243,6 +1457,8 @@ function buildStyleFromState() {
     plugin_two_lines: state.pluginTwoLines,
     hero_header: state.heroHeader,
     background: state.background,
+    ignored_plugins: [...state.ignoredSelected],
+    ignored_plugins_custom: [...state.ignoredCustom],
   };
 }
 
@@ -1377,6 +1593,11 @@ function styleMatchesActive(active, style) {
   if (asBool(active.plugin_two_lines, true) !== asBool(style.plugin_two_lines, true)) return false;
   if (asBool(active.hero_header, true) !== asBool(style.hero_header, true)) return false;
   if (style.background && String(active.background || "") !== String(style.background)) return false;
+
+  // 屏蔽名单按集合比较，勾选顺序不同不算配置变化
+  const activeIgnored = asObject(active.ignored);
+  if (!sameNameSet(activeIgnored.selected, style.ignored_plugins)) return false;
+  if (!sameNameSet(activeIgnored.custom, style.ignored_plugins_custom)) return false;
 
   const currentColors = normalizeColorMap(active.colors);
   for (const [key, value] of Object.entries(normalizeColorMap(style.colors))) {

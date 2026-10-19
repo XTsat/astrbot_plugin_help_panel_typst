@@ -65,6 +65,21 @@ def _as_choice(value: Any, default: str, allowed: tuple[str, ...]) -> str:
     return default
 
 
+def _parse_name_list(value: Any) -> set[str]:
+    """插件名列表解析: 单个字符串按一项处理, 非字符串项丢弃
+
+    面板可能把单条目存成字符串; 这里与 ignored_plugins 的口径保持一致,
+    避免 set("abc") 被拆成字符集。
+    """
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return set()
+    return {
+        name.strip() for name in value if isinstance(name, str) and name.strip()
+    }
+
+
 @dataclass
 class RenderingConfig:
     timeout_analysis: float
@@ -274,7 +289,10 @@ class TypstPluginConfig:
     """插件全局配置聚合根"""
 
     enable_waiting_message: bool
+    # 面板多选命中的已安装插件（配置面板的勾选项）
     ignored_plugins: set[str]
+    # 用户手填的自定义屏蔽名（未安装/旧名），与 ignored_plugins 取并集后生效
+    ignored_plugins_custom: set[str]
     custom_font_path: str
     header_background: str
     background_dir: str
@@ -285,6 +303,15 @@ class TypstPluginConfig:
     appearance: AppearanceConfig
     category: CategoryConfig
 
+    @property
+    def effective_ignored_plugins(self) -> set[str]:
+        """实际生效的屏蔽集 = 面板勾选的已安装插件 + 自定义条目
+
+        分两个键存是为了让配置面板能把「已安装插件」做成多选、
+        把未安装的名字放进自由输入框；渲染侧只关心并集。
+        """
+        return self.ignored_plugins | self.ignored_plugins_custom
+
     @classmethod
     def load(cls, raw_config: AstrBotConfig) -> "TypstPluginConfig":
         """工厂方法：从 AstrBotConfig 加载配置，未配置项回退到 DefaultCFG"""
@@ -293,16 +320,21 @@ class TypstPluginConfig:
         # 黑名单: 字符串按单个插件名处理 (面板误存/手工配置 → 不能被 set() 拆成字符集),
         # 混入的非字符串项过滤掉, 否则缓存快照的 sorted() 会抛 TypeError
         raw_ignored = raw_config.get("ignored_plugins")
-        if isinstance(raw_ignored, str):
-            raw_ignored = [raw_ignored]
-        if isinstance(raw_ignored, list):
-            ignored_set = {
-                name.strip()
-                for name in raw_ignored
-                if isinstance(name, str) and name.strip()
-            }
+        if isinstance(raw_ignored, (list, str)):
+            ignored_set = _parse_name_list(raw_ignored)
         else:
             ignored_set = set(DefaultCFG.IGNORED_PLUGINS)
+
+        # 自定义屏蔽名: 新键缺失时的兜底要看老配置的形态——老配置的屏蔽项全在
+        # ignored_plugins 里, 此时预置模板默认会把用户删掉的名字又加回来;
+        # 只有连 ignored_plugins 都没有(全新配置)才用模板默认值
+        raw_custom = raw_config.get("ignored_plugins_custom")
+        if isinstance(raw_custom, (list, str)):
+            ignored_custom_set = _parse_name_list(raw_custom)
+        elif isinstance(raw_ignored, (list, str)):
+            ignored_custom_set = set()
+        else:
+            ignored_custom_set = set(DefaultCFG.IGNORED_PLUGINS_CUSTOM)
 
         # Rendering (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)
         raw_render = raw_config.get("rendering")
@@ -555,6 +587,7 @@ class TypstPluginConfig:
         return cls(
             enable_waiting_message=enable_wait,
             ignored_plugins=ignored_set,
+            ignored_plugins_custom=ignored_custom_set,
             custom_font_path=custom_font_path,
             header_background=header_background,
             background_dir=background_dir,

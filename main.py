@@ -16,6 +16,7 @@ from .utils import (
     HelpHint,
     MsgRecall,
     TypstLayout,
+    sync_plugin_options,
 )
 from .core import (
     BaseAnalyzer,
@@ -25,6 +26,7 @@ from .core import (
     PreviewError,
     PreviewService,
     TypstRenderer,
+    list_installed_plugins,
 )
 
 
@@ -114,6 +116,7 @@ class HelpTypst(Star):
             renderer=self.renderer,
             provider_builder=self._build_preview_provider,
             persona_getter=self._get_persona_name,
+            plugin_lister=lambda: list_installed_plugins(self.context),
         )
         self._register_preview_apis()
 
@@ -199,6 +202,32 @@ class HelpTypst(Star):
 
         except Exception as e:
             logger.warning(f"[HelpTypst] 资源重载失败: {e}")
+        finally:
+            # 插件屏蔽选项与字体扫描互不依赖: 扫描失败也要让面板的多选项保持可用
+            self._sync_plugin_options()
+
+    def _sync_plugin_options(self) -> None:
+        """把已安装插件写进屏蔽项的 Schema 选项 (磁盘 + 内存)
+
+        额外保留配置里未安装的旧名字: 面板只显示 options 内的值, 缺失会变成
+        「看不见也删不掉」的幽灵屏蔽。
+        """
+        try:
+            plugins = list_installed_plugins(self.context)
+            installed = {str(item.get("name") or "") for item in plugins}
+            extra = sorted(
+                name
+                for name in self.plugin_config.ignored_plugins
+                if name not in installed
+            )
+            sync_plugin_options(
+                self.schema_path,
+                getattr(self.config, "schema", None),
+                plugins,
+                extra,
+            )
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 同步屏蔽插件选项失败: {e}")
 
     def _import_default_backgrounds(self):
         """安装时从 resources/images 导入内置图片到默认背景图目录。
@@ -500,19 +529,24 @@ class HelpTypst(Star):
         layout: TypstLayout,
         font_order: list[str],
         persona_name: str,
+        cfg: TypstPluginConfig,
     ) -> Callable[[Path], int]:
-        """网页预览的数据流构造器 (由 PreviewService 调用)"""
+        """网页预览的数据流构造器 (由 PreviewService 调用)
+
+        分析器按预览合成的 cfg 重建: 屏蔽集/配色等只在预览里改动, 复用插件启动时
+        的分析器会拿旧配置过滤插件, 预览图看不到屏蔽项的变化。
+        """
         if mode == "command":
-            analyzer, title = CommandAnalyzer(self.context, self.plugin_config), "AstrBot 指令菜单"
+            analyzer, title = CommandAnalyzer(self.context, cfg), "AstrBot 指令菜单"
         elif mode == "command_detail":
             analyzer, title = (
-                CommandAnalyzer(self.context, self.plugin_config),
+                CommandAnalyzer(self.context, cfg),
                 "AstrBot 指令菜单(详细)",
             )
         elif mode == "event":
-            analyzer, title = EventAnalyzer(self.context, self.plugin_config), "AstrBot 事件监听"
+            analyzer, title = EventAnalyzer(self.context, cfg), "AstrBot 事件监听"
         elif mode == "filter":
-            analyzer, title = FilterAnalyzer(self.context, self.plugin_config), "AstrBot 过滤器分析"
+            analyzer, title = FilterAnalyzer(self.context, cfg), "AstrBot 过滤器分析"
         else:
             raise ValueError(f"不支持的预览模式: {mode}")
 
@@ -632,6 +666,9 @@ class HelpTypst(Star):
         # 只有面板里明确换了背景图才固定单文件；否则保留原配置（含随机背景）
         if plan["background_path"]:
             patch["header_background"] = plan["background_path"]
+        # 屏蔽集分成两个键写入：勾选项与自定义条目各自整体替换
+        patch["ignored_plugins"] = list(plan["ignored_plugins"])
+        patch["ignored_plugins_custom"] = list(plan["ignored_plugins_custom"])
         return patch
 
     def _merge_preset_entries(

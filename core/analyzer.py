@@ -55,6 +55,86 @@ def _extract_command_keywords(desc: str) -> list[str]:
     return [k for k in keywords if 1 <= len(k) <= 16]
 
 
+def get_safe_plugin_info(star_meta: Any) -> dict[str, str | None]:
+    """针对不规范的插件元信息进行防御性编程"""
+    if not star_meta:
+        return {
+            "name": "Unknown",
+            "display_name": None,
+            "version": "",
+            "desc": "",
+            "author": "",
+            "raw_module": None,  # handler 查找, 与正常分支保持同键
+        }
+
+    # 智能名称
+    raw_name = getattr(
+        star_meta, "name", None
+    )  # 标准插件名 (metadata.yaml 或 @register)
+    raw_root_dir = getattr(star_meta, "root_dir_name", None)  # 目录名
+    raw_module = getattr(star_meta, "module_path", None)  # 模块路径
+
+    # 决策树
+    if raw_name:
+        safe_name = str(raw_name)
+    elif raw_root_dir:
+        safe_name = str(raw_root_dir)
+    elif raw_module:
+        parts = str(raw_module).split(".")
+        safe_name = parts[-2] if len(parts) > 2 and parts[-1] == "main" else parts[-1]
+    else:
+        safe_name = f"Unknown_{id(star_meta)}"  # 正常不应走到这，因为无标识符插件根本加载不了
+
+    # 其他字段
+    display = getattr(star_meta, "display_name", None)
+    if not display:
+        display = None
+
+    version = str(getattr(star_meta, "version", "")) or ""
+    desc = str(getattr(star_meta, "desc", "")) or ""
+    author = str(getattr(star_meta, "author", "")) or ""
+
+    return {
+        "name": safe_name,
+        "display_name": display,
+        "version": version,
+        "desc": desc,
+        "author": author,
+        "raw_module": raw_module,  # handler 查找
+    }
+
+
+def list_installed_plugins(context: Context) -> list[dict[str, Any]]:
+    """列出已安装插件, 供配置面板/预览页把屏蔽项做成多选
+
+    取 context.get_all_stars() 而非 handler 注册表: 后者只包含已加载成功的插件,
+    被禁用的插件仍应出现在屏蔽列表里 (禁用了也可能想屏蔽)。加载失败的插件
+    根本不在列表里, 由自定义条目兜底。
+    """
+    try:
+        stars = context.get_all_stars()
+    except Exception as exc:
+        logger.warning(f"[HelpTypst] 读取已安装插件列表失败, 屏蔽项回退为手动填写: {exc}")
+        return []
+
+    plugins: dict[str, dict[str, Any]] = {}
+    for star in stars or []:
+        info = get_safe_plugin_info(star)
+        name = info["name"]
+        if not name or name.startswith("Unknown_"):
+            continue
+        # 同名去重: 同一插件可能因多次加载出现在列表里
+        if name in plugins:
+            continue
+        plugins[name] = {
+            "name": name,
+            "display_name": info["display_name"] or name,
+            # 激活状态为 False 的插件仍可被屏蔽, 前端只做标记
+            "disabled": getattr(star, "activated", True) is False,
+        }
+    return sorted(plugins.values(), key=lambda item: str(item["name"]))
+
+
 class BaseAnalyzer:
     def __init__(self, context: Context, config: TypstPluginConfig):
         self.context = context
@@ -291,54 +371,7 @@ class BaseAnalyzer:
         return best_plugin
 
     def _get_safe_plugin_info(self, star_meta: Any) -> dict[str, str | None]:
-        """针对不规范的插件元信息进行防御性编程"""
-        if not star_meta:
-            return {
-                "name": "Unknown",
-                "display_name": None,
-                "version": "",
-                "desc": "",
-                "author": "",
-                "raw_module": None,  # handler 查找, 与正常分支保持同键
-            }
-
-        # 智能名称
-        raw_name = getattr(
-            star_meta, "name", None
-        )  # 标准插件名 (metadata.yaml 或 @register)
-        raw_root_dir = getattr(star_meta, "root_dir_name", None)  # 目录名
-        raw_module = getattr(star_meta, "module_path", None)  # 模块路径
-
-        # 决策树
-        if raw_name:
-            safe_name = str(raw_name)
-        elif raw_root_dir:
-            safe_name = str(raw_root_dir)
-        elif raw_module:
-            parts = str(raw_module).split(".")
-            safe_name = (
-                parts[-2] if len(parts) > 2 and parts[-1] == "main" else parts[-1]
-            )
-        else:
-            safe_name = f"Unknown_{id(star_meta)}"  # 正常不应走到这，因为无标识符插件根本加载不了
-
-        # 其他字段
-        display = getattr(star_meta, "display_name", None)
-        if not display:
-            display = None
-
-        version = str(getattr(star_meta, "version", "")) or ""
-        desc = str(getattr(star_meta, "desc", "")) or ""
-        author = str(getattr(star_meta, "author", "")) or ""
-
-        return {
-            "name": safe_name,
-            "display_name": display,
-            "version": version,
-            "desc": desc,
-            "author": author,
-            "raw_module": raw_module,  # handler 查找
-        }
+        return get_safe_plugin_info(star_meta)
 
 
 class CommandAnalyzer(BaseAnalyzer):
@@ -364,7 +397,7 @@ class CommandAnalyzer(BaseAnalyzer):
             category = self._derive_category(info)
 
             # 黑名单
-            if safe_name in self.cfg.ignored_plugins:
+            if safe_name in self.cfg.effective_ignored_plugins:
                 continue
 
             # --- 构建指令树 (即使无指令也展示插件卡片) ---
@@ -683,7 +716,7 @@ class EventAnalyzer(BaseAnalyzer):
                         tool.handler_module_path, module_to_plugin
                     )
                     if plugin:
-                        if plugin.name in self.cfg.ignored_plugins:
+                        if plugin.name in self.cfg.effective_ignored_plugins:
                             continue
                         source_name = plugin.name
                         source_display = getattr(plugin, "display_name", None)
@@ -725,7 +758,7 @@ class EventAnalyzer(BaseAnalyzer):
             if plugin is None:
                 continue
             info = self._get_safe_plugin_info(plugin)
-            if info["name"] in self.cfg.ignored_plugins:
+            if info["name"] in self.cfg.effective_ignored_plugins:
                 continue  # 黑名单
             if not plugin.activated:
                 continue
@@ -867,7 +900,7 @@ class FilterAnalyzer(BaseAnalyzer):
             if plugin is None:
                 continue
             p_info = self._get_safe_plugin_info(plugin)
-            if p_info["name"] in self.cfg.ignored_plugins:
+            if p_info["name"] in self.cfg.effective_ignored_plugins:
                 continue  # 黑名单
             if not plugin.activated:
                 continue
