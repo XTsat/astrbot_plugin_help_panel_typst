@@ -673,64 +673,33 @@ class TypstLayout:
         detail: bool = False,
         columns: int = 2,
     ) -> list[list[dict[str, Any]]]:
-        """将分类卡片按估算高度分到多列, 使各列高度接近
+        """将分类卡片按全局编号顺序切分到各列
 
-        分类数量通常很少 (<20), 两列时采用子集和 DP 求最接近等高的一列, 而非贪心;
-        单列原样返回, 三列及以上退化为按高度贪心装填 (当前指令模式最多两列)。
+        指令模式最多两列, 两列时必须连续切分: 左列取前 k 个分类、右列接续剩余分类,
+        这样从上到下、从左到右读到的编号始终递增; 若按高度自由组合, 左栏读完十几号会
+        突然跳回右栏的中间号。k 取估算高度最接近对半的位置, 尽量让两列等高。
+        单列原样返回, 三列及以上退化为按高度贪心装填 (事件/过滤器模式无全局编号)。
         估算高度按模板的实际排版参数折算, 见 _estimate_category_height。
         """
         if not categories:
             return []
-        if columns <= 1:
+        if columns <= 1 or len(categories) == 1:
             return [list(categories)]
         if columns > 2:
             return self._balance_categories_greedy(categories, detail, columns)
 
-        n = len(categories)
         heights = [self._estimate_category_height(c, detail) for c in categories]
         total = sum(heights)
-        target = total // 2
-
-        # 子集和 DP: 找到高度和 <= target 的最大子集 (作为第一列)
-        # dp[s] = 能否用前 i 个分类凑出高度 s (滚动数组存可达)
-        reachable = [False] * (target + 1)
-        reachable[0] = True
-        # 回溯记录: prev[s] = 凑出高度 s 时最后一个分类的索引
-        prev: list[int] = [-1] * (target + 1)
-
-        for i in range(n):
-            h = heights[i]
-            for s in range(target, h - 1, -1):
-                if not reachable[s] and reachable[s - h]:
-                    reachable[s] = True
-                    prev[s] = i
-
-        # 取最接近 target 的可达高度
-        best = 0
-        for s in range(target, -1, -1):
-            if reachable[s]:
-                best = s
-                break
-
-        # 回溯出第一列的分类索引集合
-        col1_idx: set[int] = set()
-        s = best
-        while s > 0:
-            i = prev[s]
-            if i < 0:
-                break
-            col1_idx.add(i)
-            s -= heights[i]
-
-        col1 = [categories[i] for i in range(n) if i in col1_idx]
-        col2 = [categories[i] for i in range(n) if i not in col1_idx]
-
-        # 保证较高的列放在左侧, 视觉更稳定
-        h1 = sum(self._estimate_category_height(c, detail) for c in col1)
-        h2 = sum(self._estimate_category_height(c, detail) for c in col2)
-        if h1 >= h2:
-            return [col1, col2]
-        return [col2, col1]
+        best_k = 1
+        best_gap = total
+        left_height = 0
+        for k in range(1, len(categories)):
+            left_height += heights[k - 1]
+            gap = abs(total - 2 * left_height)
+            if gap < best_gap:
+                best_gap = gap
+                best_k = k
+        return [list(categories[:best_k]), list(categories[best_k:])]
 
     def _balance_categories_greedy(
         self,
