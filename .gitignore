@@ -211,3 +211,6 @@ __marimo__/
 # DSH 工具临时目录
 .dsh-vision-router/
 .dsh-vision-toolkit/
+
+# 本地审查报告（不入库）
+review/

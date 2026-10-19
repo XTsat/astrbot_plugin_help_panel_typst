@@ -123,6 +123,35 @@ class InternalCFG:
     # 默认背景图目录 (数据目录下的子目录, 与字体目录一致)
     NAME_BACKGROUND_DIR: str = "backgrounds"
 
+    # ---- 网页实时预览 (pages/preview) ----
+    # 预览默认按插件设置里的清晰度渲染, 可在面板里临时调低换取更短等待时间
+    PREVIEW_SUPPORTED_MODES: tuple[str, ...] = (
+        "command",
+        "command_detail",
+        "event",
+        "filter",
+    )
+    PREVIEW_MIN_PPI: float = 72.0
+    PREVIEW_MAX_PPI: float = 384.0
+    # 渲染用测试精度：只决定预览渲染分辨率，调低更快，不写回正式配置
+    PREVIEW_TEST_PPI: float = 144.0
+    PREVIEW_MIN_PAGE_WIDTH: float = 360.0
+    PREVIEW_MAX_PAGE_WIDTH: float = 1200.0
+    # 预览的分页高度默认跟随插件配置，保证预览与正式发图的分页位置一致；
+    # 上限取配置项全范围，实际值再按输出格式的单图上限收敛
+    PREVIEW_MIN_SPLIT_HEIGHT: int = 1000
+    PREVIEW_MAX_SPLIT_HEIGHT: int = 65500
+    # 实测 40 个插件最多 4 页, 再多只增加 base64 体积
+    PREVIEW_MAX_PAGES: int = 4
+    PREVIEW_COMPILE_TIMEOUT: float = 30.0
+    PREVIEW_MAX_QUERY_LEN: int = 80
+    # 单次编译约 1.1~1.6s, 防抖太短会让拖动过程排起长队
+    PREVIEW_DEBOUNCE_MS: int = 550
+    # 预览缓存: 同一套样式反复调整时直接复用图片, 避免重复编译
+    PREVIEW_CACHE_TTL: float = 600.0
+    PREVIEW_CACHE_MAX_ENTRIES: int = 12
+    PREVIEW_CACHE_MAX_BYTES: int = 32 * 1024 * 1024
+
     # 时序
     DELAY_SEND: float = 1
 
@@ -185,7 +214,7 @@ class DefaultCFG:
     MAX_PPI: float = 384.0
     MIN_SPLIT_HEIGHT: int = 200  # image.py 按此高度切片, 过小无意义, 0 会除零
     # 页面总宽度 (pt): 越窄同 PPI 下出图越窄、文字相对越大, 聊天窗口里更易读
-    LIMIT_WIDTH: float = 540.0
+    LIMIT_WIDTH: float = 600.0
     # 页面宽度低于该值时改单列 (两列/三列在窄页宽下会挤成一团)
     LIMIT_SINGLE_COLUMN_THRESHOLD: float = 480.0
     # 360 是实测下限: Hero 统计卡 3×76pt + 26pt 左偏移占 274pt, 页面再窄 (≈330pt 以下) 就会溢出

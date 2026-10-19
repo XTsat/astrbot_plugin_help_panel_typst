@@ -1,7 +1,8 @@
 import asyncio
 import shutil
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
+from typing import Any
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
@@ -9,13 +10,20 @@ from astrbot.core.star.filter.command import GreedyStr
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.message_components import Image
 
-from .domain import InternalCFG, TypstPluginConfig
-from .utils import FontManager, HelpHint, MsgRecall, TypstLayout
+from .domain import DefaultCFG, InternalCFG, TypstPluginConfig
+from .utils import (
+    FontManager,
+    HelpHint,
+    MsgRecall,
+    TypstLayout,
+)
 from .core import (
     BaseAnalyzer,
     CommandAnalyzer,
     EventAnalyzer,
     FilterAnalyzer,
+    PreviewError,
+    PreviewService,
     TypstRenderer,
 )
 
@@ -93,6 +101,56 @@ class HelpTypst(Star):
 
         # /typst font 触发的自重载: terminate 跳过重复字体扫描 (新实例 initialize 会再扫)
         self._skip_rescan_on_terminate = False
+
+        # 6. 网页样式预览 (pages/preview): 老版本 AstrBot 没有 register_web_api,
+        # 此时跳过注册, 插件其余功能不受影响
+        self.preview_service = PreviewService(
+            star=self,
+            data_dir=self.data_dir,
+            template_path=self.template_path,
+            font_dirs=self.font_manager.get_search_paths(),
+            base_config=self.plugin_config,
+            font_manager=self.font_manager,
+            renderer=self.renderer,
+            provider_builder=self._build_preview_provider,
+            persona_getter=self._get_persona_name,
+        )
+        self._register_preview_apis()
+
+    def _register_preview_apis(self) -> None:
+        """注册插件页 API；注册失败只影响预览页，不阻断插件加载"""
+        register = getattr(self.context, "register_web_api", None)
+        if not callable(register):
+            logger.info(
+                "[HelpTypst] 当前 AstrBot 版本不支持插件页面 Web API，样式预览页不可用"
+            )
+            return
+
+        plugin_name = self.plugin_dir.name
+        for route, handler, methods, desc in (
+            (
+                f"/{plugin_name}/preview/options",
+                self.api_preview_options,
+                ["GET"],
+                "获取样式预览可选项",
+            ),
+            (
+                f"/{plugin_name}/preview/render",
+                self.api_preview_render,
+                ["POST"],
+                "按样式渲染预览图",
+            ),
+            (
+                f"/{plugin_name}/preview/apply",
+                self.api_preview_apply,
+                ["POST"],
+                "把预览样式写入插件配置",
+            ),
+        ):
+            try:
+                register(route, handler, methods, desc)
+            except Exception as e:
+                logger.warning(f"[HelpTypst] 注册预览接口 {route} 失败: {e}")
 
     async def initialize(self):
         """异步初始化"""
@@ -316,11 +374,66 @@ class HelpTypst(Star):
             )
             wait_msg_id = await self.msg.send_wait(event, hint_text)
 
-        # 提前获取人格名称 (async), 供 data_pipeline 闭包注入 (空串则第三列不渲染)
+        # 提前获取人格名称 (async), 供数据流注入 (空串则第三列不渲染)
         persona_name = await self._get_persona_name()
+        data_pipeline = self._make_data_pipeline(
+            analyzer=analyzer,
+            title=title,
+            mode=mode,
+            query=query,
+            is_detail=is_detail,
+            layout=self.layout,
+            font_order=self.plugin_config.appearance.get_active_font_order(),
+            persona_name=persona_name,
+        )
+
+        # 2. 执行渲染
+        result, error = await self.renderer.render(data_pipeline, mode, query)
+
+        # 3. 处理结果; 等待提示在结果发出后撤回 (finally), 避免用户先等一次撤回延迟
+        try:
+            if result:
+                try:
+                    yield event.chain_result(
+                        [Image.fromFileSystem(p) for p in result.images]
+                    )
+                finally:
+                    # 后台任务清理文件列表
+                    if result.temp_files:
+                        asyncio.create_task(self._cleanup_task(result.temp_files))
+            else:
+                # 错误处理
+                if error == "empty":
+                    yield event.plain_result(self.hint.msg_empty_result(mode, query))
+                else:
+                    yield event.plain_result(error)
+        finally:
+            if wait_msg_id:
+                try:
+                    await self.msg.recall(event, wait_msg_id)
+                except Exception as e:
+                    # 撤回失败不影响已发出的结果
+                    logger.debug(f"[HelpTypst] 撤回等待提示失败: {e}")
+
+    def _make_data_pipeline(
+        self,
+        *,
+        analyzer: BaseAnalyzer,
+        title: str,
+        mode: str,
+        query: str | None,
+        is_detail: bool,
+        layout: TypstLayout,
+        font_order: list[str],
+        persona_name: str,
+    ) -> Callable[[Path], int]:
+        """构造「分析 → 布局 JSON」数据流
+
+        指令与网页预览共用这段逻辑；预览使用自己的临时布局与字体，
+        因此 layout / font_order / persona_name 全部显式传入，不读 self。
+        """
 
         def data_pipeline(save_path: Path) -> int:
-            """数据流转"""
             # 数据层：获取对象。意图已由 _parse_menu_query 判定, 此处不再按内容猜测:
             # 编号详情走显式 API, 关键词搜索/全量走 get_plugins
             if is_detail:
@@ -364,12 +477,9 @@ class HelpTypst(Star):
                             )
                             p.event_nodes = []
 
-            user_fonts = (
-                self.plugin_config.appearance.get_active_font_order()
-            )  # 预设字体配置
-            final_font_list = self.font_manager.get_render_font_list(user_fonts)  # 校验
+            final_font_list = self.font_manager.get_render_font_list(font_order)  # 校验
 
-            self.layout.dump_layout_json(
+            layout.dump_layout_json(
                 plugins=plugins,
                 save_path=save_path,
                 title=display_title,
@@ -381,33 +491,240 @@ class HelpTypst(Star):
 
             return len(plugins)
 
-        # 2. 执行渲染
-        result, error = await self.renderer.render(data_pipeline, mode, query)
+        return data_pipeline
 
-        # 3. 处理结果; 等待提示在结果发出后撤回 (finally), 避免用户先等一次撤回延迟
+    def _build_preview_provider(
+        self,
+        mode: str,
+        query: str | None,
+        layout: TypstLayout,
+        font_order: list[str],
+        persona_name: str,
+    ) -> Callable[[Path], int]:
+        """网页预览的数据流构造器 (由 PreviewService 调用)"""
+        if mode == "command":
+            analyzer, title = CommandAnalyzer(self.context, self.plugin_config), "AstrBot 指令菜单"
+        elif mode == "command_detail":
+            analyzer, title = (
+                CommandAnalyzer(self.context, self.plugin_config),
+                "AstrBot 指令菜单(详细)",
+            )
+        elif mode == "event":
+            analyzer, title = EventAnalyzer(self.context, self.plugin_config), "AstrBot 事件监听"
+        elif mode == "filter":
+            analyzer, title = FilterAnalyzer(self.context, self.plugin_config), "AstrBot 过滤器分析"
+        else:
+            raise ValueError(f"不支持的预览模式: {mode}")
+
+        return self._make_data_pipeline(
+            analyzer=analyzer,
+            title=title,
+            mode=mode,
+            query=query,
+            is_detail=False,
+            layout=layout,
+            font_order=font_order,
+            persona_name=persona_name,
+        )
+
+    async def api_preview_options(self) -> Any:
+        """插件页 API：返回预览页的全部可调选项"""
+        from astrbot.api.web import error_response, json_response
+
         try:
-            if result:
-                try:
-                    yield event.chain_result(
-                        [Image.fromFileSystem(p) for p in result.images]
-                    )
-                finally:
-                    # 后台任务清理文件列表
-                    if result.temp_files:
-                        asyncio.create_task(self._cleanup_task(result.temp_files))
-            else:
-                # 错误处理
-                if error == "empty":
-                    yield event.plain_result(self.hint.msg_empty_result(mode, query))
+            data = await asyncio.to_thread(self.preview_service.build_options)
+            return json_response(data)
+        except Exception as e:
+            logger.error(f"[HelpTypst] 读取预览选项失败: {e}", exc_info=True)
+            return error_response("读取预览选项失败，请查看插件日志")
+
+    async def api_preview_render(self) -> Any:
+        """插件页 API：按样式渲染预览图"""
+        from astrbot.api.web import error_response, json_response, request
+
+        try:
+            payload = await request.json(default={})
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 解析预览请求失败: {e}")
+            return error_response("请求内容解析失败")
+
+        try:
+            data = await self.preview_service.render(payload)
+            return json_response(data)
+        except PreviewError as e:
+            return error_response(str(e))
+        except Exception as e:
+            logger.error(f"[HelpTypst] 预览渲染失败: {e}", exc_info=True)
+            return error_response("预览渲染失败，请查看插件日志")
+
+    async def api_preview_apply(self) -> Any:
+        """插件页 API：把预览样式写入插件配置并热重载插件"""
+        from astrbot.api.web import error_response, json_response, request
+
+        try:
+            payload = await request.json(default={})
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 解析应用配置请求失败: {e}")
+            return error_response("请求内容解析失败")
+
+        try:
+            plan = await asyncio.to_thread(
+                self.preview_service.build_apply_plan, payload
+            )
+        except PreviewError as e:
+            return error_response(str(e))
+        except Exception as e:
+            logger.error(f"[HelpTypst] 解析待应用样式失败: {e}", exc_info=True)
+            return error_response("配置解析失败，请查看插件日志")
+
+        if not plan["changed"]:
+            return json_response(
+                {
+                    "changed": [],
+                    "warnings": plan["warnings"],
+                    "reload": False,
+                    "reload_in_ms": 0,
+                }
+            )
+
+        try:
+            patch = self._build_config_patch(plan)
+            await self._save_config_patch(patch)
+        except Exception as e:
+            logger.error(f"[HelpTypst] 保存预览样式失败: {e}", exc_info=True)
+            return error_response("配置保存失败，请查看插件日志")
+
+        logger.info(f"[HelpTypst] 已应用预览样式: {', '.join(plan['changed'])}")
+        scheduled = self._schedule_plugin_reload()
+        if not scheduled:
+            logger.warning(
+                "[HelpTypst] 未获取到插件管理器，样式已保存但需手动重载插件后生效"
+            )
+        return json_response(
+            {
+                "changed": plan["changed"],
+                "warnings": plan["warnings"],
+                "reload": scheduled,
+                "reload_in_ms": (
+                    int(InternalCFG.DELAY_SEND * 1000) if scheduled else 0
+                ),
+            }
+        )
+
+    def _build_config_patch(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """把应用计划转成配置补丁：只覆盖计划里的键，其余保持原样"""
+        raw: dict[str, Any] = self.config if isinstance(self.config, dict) else {}
+        rendering = dict(raw.get("rendering") or {})
+        rendering.update(plan["rendering"])
+        appearance = dict(raw.get("appearance") or {})
+        appearance.update(plan["appearance"])
+        if plan["colors"] is not None or plan["clear_enabled"]:
+            appearance["presets"] = self._merge_preset_entries(
+                appearance.get("presets"),
+                plan["colors"],
+                bool(plan["clear_enabled"]),
+            )
+        patch: dict[str, Any] = {
+            "rendering": rendering,
+            "appearance": appearance,
+            "hero_header": bool(plan["hero_header"]),
+        }
+        # 只有面板里明确换了背景图才固定单文件；否则保留原配置（含随机背景）
+        if plan["background_path"]:
+            patch["header_background"] = plan["background_path"]
+        return patch
+
+    def _merge_preset_entries(
+        self,
+        raw_presets: Any,
+        colors: dict[str, str] | None,
+        clear_enabled: bool,
+    ) -> list[dict[str, Any]]:
+        """维护 appearance.presets 模板列表。
+
+        - colors 非空：更新/追加「自定义」预设，并只启用它
+        - colors 为空：只清除其它预设的「启用」开关（切回内置预设）
+        """
+        entries: list[dict[str, Any]] = []
+        if isinstance(raw_presets, list):
+            entries = [dict(item) for item in raw_presets if isinstance(item, dict)]
+
+        target: dict[str, Any] | None = None
+        if colors is not None:
+            target = next(
+                (
+                    entry
+                    for entry in entries
+                    if entry.get("preset_name") == DefaultCFG.CUSTOM_PRESET_KEY
+                ),
+                None,
+            )
+            if target is None:
+                target = self._preset_entry_template()
+                entries.append(target)
+            for key in DefaultCFG.DEFAULT_COLORS:
+                if key in colors:
+                    target[key] = colors[key]
+            target["preset_name"] = DefaultCFG.CUSTOM_PRESET_KEY
+
+        if clear_enabled or colors is not None:
+            for entry in entries:
+                entry["enabled"] = entry is target
+        return entries
+
+    def _preset_entry_template(self) -> dict[str, Any]:
+        """以 schema 里的预设模板为蓝本，避免手写字段与设置面板脱节"""
+        schema = getattr(self.config, "schema", None) or {}
+        try:
+            defaults = schema["appearance"]["items"]["presets"]["default"]
+            if isinstance(defaults, list):
+                for item in defaults:
+                    if isinstance(item, dict):
+                        return dict(item)
+        except (KeyError, TypeError):
+            pass
+        template: dict[str, Any] = {
+            "__template_key": "standard_theme",
+            "preset_name": DefaultCFG.CUSTOM_PRESET_KEY,
+            "enabled": True,
+        }
+        template.update(DefaultCFG.DEFAULT_COLORS)
+        return template
+
+    async def _save_config_patch(self, patch: dict[str, Any]) -> None:
+        """持久化配置补丁：优先异步保存，旧版本 AstrBot 回落到线程里的同步保存"""
+        save_async = getattr(self.config, "save_config_async", None)
+        if callable(save_async):
+            if not await save_async(patch):
+                raise RuntimeError("配置写入被更新的保存请求覆盖")
+            return
+        save = getattr(self.config, "save_config", None)
+        if not callable(save):
+            raise RuntimeError("当前 AstrBot 版本不支持保存插件配置")
+        try:
+            await asyncio.to_thread(save, patch)
+        except TypeError:
+            # 旧版本 save_config 不接受补丁参数：先合并到内存配置再落盘
+            for key, value in patch.items():
+                current = self.config.get(key)
+                if isinstance(current, dict) and isinstance(value, dict):
+                    merged = dict(current)
+                    merged.update(value)
+                    self.config[key] = merged
                 else:
-                    yield event.plain_result(error)
-        finally:
-            if wait_msg_id:
-                try:
-                    await self.msg.recall(event, wait_msg_id)
-                except Exception as e:
-                    # 撤回失败不影响已发出的结果
-                    logger.debug(f"[HelpTypst] 撤回等待提示失败: {e}")
+                    self.config[key] = value
+            await asyncio.to_thread(save)
+
+    def _schedule_plugin_reload(self) -> bool:
+        """延迟重载插件：先让 HTTP 响应返回，避免请求被重载过程打断"""
+        pm = getattr(self.context, "_star_manager", None)
+        if pm is None:
+            return False
+        plugin_name = getattr(self, "name", None) or self.plugin_dir.name
+        # 字体未变化，重载的卸载阶段无需再全盘扫描
+        self._skip_rescan_on_terminate = True
+        asyncio.create_task(self._safe_reload(pm, plugin_name))
+        return True
 
     async def _cleanup_task(self, files: list[Path]):
         """异步清理任务"""

@@ -1,0 +1,1773 @@
+/**
+ * 帮助面板「实时预览」页
+ *
+ * 页面由 AstrBot dashboard 以 iframe 加载，通信统一走注入的 bridge：
+ *   bridge.ready() / bridge.apiGet("preview/options") / bridge.apiPost("preview/render", payload)
+ *
+ * 设计要点：
+ * - 所有可变状态集中在 state，控件渲染（renderControls/sync*）与预览渲染（renderStage/renderPreview）分层
+ * - 渲染请求串行化：同一时刻最多一个在途请求，期间的新改动标记 pending，响应回来后用最新状态再发一次（latest-wins）
+ * - 旧预览图永远保留，直到新结果成功返回，避免切换模式/搜索时整块闪烁
+ */
+
+const bridge = window.AstrBotPluginPage || window.AstrBotPluginView || null;
+
+const HEX_PATTERN = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.1;
+const DEFAULT_DEBOUNCE_MS = 550;
+const READY_TIMEOUT_MS = 15000;
+const NOTICE_DURATION_MS = 4000;
+/** 「渲染用测试精度」只保存在本机，换浏览器/清缓存后回到 144 */
+const TEST_PPI_KEY = "helpTypst.previewTestPpi";
+
+/** 当前渲染在途的 Promise；用于合并并发请求 */
+let inFlight = null;
+/** color key -> { swatch, hex }，避免每次改色都重新查询 DOM */
+const colorInputs = new Map();
+
+const state = {
+  options: null,
+  ready: false,
+  fatalError: "",
+  importing: false,
+  applying: false,
+  renderError: "",
+  warnings: [],
+  notice: "",
+  noticeTimer: null,
+  debounceTimer: null,
+  listenersBound: false,
+
+  modes: [],
+  presets: [],
+  colorGroups: [],
+  fonts: [],
+  backgrounds: [],
+  limits: {
+    pageWidth: { min: 360, max: 1200, step: 10 },
+    ppi: { min: 72, max: 384, step: 8 },
+    splitHeight: { min: 1000, max: 65500, step: 1000 },
+    singleColumnThreshold: { min: 360, max: 1200, step: 10 },
+    giantThreshold: { min: 100, max: 3000, step: 50 },
+    timeoutAnalysis: { min: 1, max: 60, step: 1 },
+    timeoutCompile: { min: 3, max: 30, step: 1 },
+    formatMaxHeight: { webp: 16383, png: 32000, jpeg: 65500 },
+    maxQueryLen: 80,
+  },
+  preview: { ppi: 144, maxPages: 4, debounceMs: DEFAULT_DEBOUNCE_MS },
+
+  // 表单状态
+  mode: "command",
+  query: "",
+  preset: "",
+  colors: {},
+  selectedFonts: [],
+  pageWidth: 600,
+  ppi: 128,
+  testPpi: readStoredTestPpi(),
+  splitHeight: 16000,
+  singleColumnThreshold: 480,
+  giantThreshold: 1500,
+  outputFormat: "webp",
+  timeoutAnalysis: 10,
+  timeoutCompile: 30,
+  pluginTwoLines: true,
+  heroHeader: true,
+  background: "",
+  fontFilter: "",
+
+  // 预览状态
+  images: [],
+  lastRender: null,
+  rendering: false,
+  dirty: false,
+  pendingRerender: false,
+  requestSeq: 0,
+  zoom: 1,
+  fitWidth: true,
+};
+
+const els = {
+  app: document.getElementById("app"),
+  topbarStatus: document.getElementById("topbar-status"),
+  topbarStatusText: document.getElementById("topbar-status-text"),
+
+  zoomOut: document.getElementById("zoom-out"),
+  zoomValue: document.getElementById("zoom-value"),
+  zoomIn: document.getElementById("zoom-in"),
+  zoomFit: document.getElementById("zoom-fit"),
+  metaPages: document.getElementById("meta-pages"),
+  metaRender: document.getElementById("meta-render"),
+  openImage: document.getElementById("btn-open-image"),
+
+  error: document.getElementById("preview-error"),
+  errorTitle: document.getElementById("preview-error-title"),
+  errorText: document.getElementById("preview-error-text"),
+  errorRetry: document.getElementById("preview-error-retry"),
+
+  viewport: document.getElementById("preview-viewport"),
+  skeleton: document.getElementById("preview-skeleton"),
+  skeletonText: document.getElementById("preview-skeleton-text"),
+  stage: document.getElementById("preview-stage"),
+  empty: document.getElementById("preview-empty"),
+  loading: document.getElementById("preview-loading"),
+  previewHint: document.getElementById("preview-hint"),
+
+  controlsBody: document.getElementById("controls-body"),
+  modeSegmented: document.getElementById("mode-segmented"),
+  queryInput: document.getElementById("query-input"),
+  queryClear: document.getElementById("query-clear"),
+  presetList: document.getElementById("preset-list"),
+
+  pageWidthInput: document.getElementById("page-width"),
+  pageWidthValue: document.getElementById("page-width-value"),
+  splitHeightInput: document.getElementById("split-height"),
+  splitHeightValue: document.getElementById("split-height-value"),
+  ppiInput: document.getElementById("ppi"),
+  ppiValue: document.getElementById("ppi-value"),
+  previewPpiInput: document.getElementById("preview-ppi"),
+  previewPpiValue: document.getElementById("preview-ppi-value"),
+  singleColumnThresholdInput: document.getElementById("single-column-threshold"),
+  singleColumnThresholdValue: document.getElementById("single-column-threshold-value"),
+  giantThresholdInput: document.getElementById("giant-threshold"),
+  giantThresholdValue: document.getElementById("giant-threshold-value"),
+  outputFormatSelect: document.getElementById("output-format"),
+  timeoutAnalysisInput: document.getElementById("timeout-analysis"),
+  timeoutAnalysisValue: document.getElementById("timeout-analysis-value"),
+  timeoutCompileInput: document.getElementById("timeout-compile"),
+  timeoutCompileValue: document.getElementById("timeout-compile-value"),
+  toggleTwoLines: document.getElementById("toggle-two-lines"),
+  toggleHero: document.getElementById("toggle-hero"),
+  backgroundRow: document.getElementById("background-row"),
+  backgroundSelect: document.getElementById("background-select"),
+
+  fontChips: document.getElementById("font-chips"),
+  fontSearch: document.getElementById("font-search"),
+  fontList: document.getElementById("font-list"),
+
+  colorGroups: document.getElementById("color-groups"),
+  restoreColors: document.getElementById("btn-restore-colors"),
+
+  footerStatus: document.getElementById("footer-status"),
+  footerStatusText: document.getElementById("footer-status-text"),
+  footerCached: document.getElementById("footer-cached"),
+  footerError: document.getElementById("footer-error"),
+  btnReset: document.getElementById("btn-reset"),
+  btnImport: document.getElementById("btn-import"),
+  btnApply: document.getElementById("btn-apply"),
+  btnRefresh: document.getElementById("btn-refresh"),
+};
+
+/* ==========================================================================
+   通用工具
+   ========================================================================== */
+
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function asNumber(value, fallback) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function asBool(value, fallback) {
+  if (typeof value === "boolean") return value;
+  if (value === "true" || value === 1 || value === "1") return true;
+  if (value === "false" || value === 0 || value === "0") return false;
+  return fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function setText(node, value) {
+  if (node && node.textContent !== value) node.textContent = value;
+}
+
+function show(node, visible) {
+  if (node) node.hidden = !visible;
+}
+
+function errorMessage(error) {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error || "未知错误");
+}
+
+function formatSeconds(milliseconds) {
+  return `${(milliseconds / 1000).toFixed(2)} s`;
+}
+
+/** 把 #RGB / #RRGGBB 统一成小写 #rrggbb；非法值返回 null（调用方据此拒绝写入状态） */
+function normalizeHex(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!HEX_PATTERN.test(text)) return null;
+  const hex = text.slice(1);
+  if (hex.length === 3) {
+    return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`.toLowerCase();
+  }
+  return `#${hex.toLowerCase()}`;
+}
+
+function normalizeColorMap(value) {
+  const source = asObject(value);
+  const colors = {};
+  for (const [key, raw] of Object.entries(source)) {
+    const hex = normalizeHex(raw);
+    if (hex) colors[key] = hex;
+  }
+  return colors;
+}
+
+function withTimeout(promise, milliseconds, message) {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), milliseconds);
+    Promise.resolve(promise).then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function base64ToBlob(base64, mime) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+function extensionForMime(mime) {
+  if (mime === "image/png") return "png";
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/gif") return "gif";
+  return "img";
+}
+
+function clearNotice() {
+  state.notice = "";
+  if (state.noticeTimer !== null) {
+    window.clearTimeout(state.noticeTimer);
+    state.noticeTimer = null;
+  }
+}
+
+function setNotice(message) {
+  state.notice = message;
+  if (state.noticeTimer !== null) window.clearTimeout(state.noticeTimer);
+  state.noticeTimer = window.setTimeout(() => {
+    state.notice = "";
+    state.noticeTimer = null;
+    updateStatus();
+  }, NOTICE_DURATION_MS);
+  updateStatus();
+}
+
+/* ==========================================================================
+   接口数据归一化
+   ========================================================================== */
+
+function normalizeModes(rawModes, fallbackValue) {
+  const modes = asArray(rawModes)
+    .filter((item) => item && typeof item === "object" && typeof item.value === "string")
+    .map((item) => ({ value: item.value, label: String(item.label || item.value) }));
+  if (modes.length) return modes;
+  return [{ value: fallbackValue, label: fallbackValue }];
+}
+
+function normalizePresets(rawPresets) {
+  return asArray(rawPresets)
+    .filter((item) => item && typeof item === "object" && typeof item.name === "string")
+    .map((item) => ({
+      name: item.name,
+      label: String(item.label || item.name),
+      colors: normalizeColorMap(item.colors),
+    }));
+}
+
+function normalizeColorGroups(rawGroups) {
+  return asArray(rawGroups)
+    .filter((group) => group && typeof group === "object" && typeof group.id === "string")
+    .map((group) => ({
+      id: group.id,
+      label: String(group.label || group.id),
+      colors: asArray(group.colors)
+        .filter((item) => item && typeof item === "object" && typeof item.key === "string")
+        .map((item) => ({
+          key: item.key,
+          label: String(item.label || item.key),
+          value: normalizeHex(item.value) || "#000000",
+        })),
+    }))
+    .filter((group) => group.colors.length > 0);
+}
+
+function normalizeFontList(rawFonts) {
+  const seen = new Set();
+  const fonts = [];
+  for (const item of asArray(rawFonts)) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    fonts.push(name);
+  }
+  return fonts;
+}
+
+function normalizeBackgrounds(rawBackgrounds) {
+  const seen = new Set();
+  const names = [];
+  for (const item of asArray(rawBackgrounds)) {
+    const name = typeof item === "string" ? item : item && typeof item.name === "string" ? item.name : "";
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
+/* ==========================================================================
+   初始化
+   ========================================================================== */
+
+function applyThemeFallback() {
+  if (!bridge) return;
+  const root = document.documentElement;
+  const apply = (isDark) => {
+    if (typeof isDark !== "boolean") return;
+    // data-theme 由 dashboard 注入且优先级更高；这里只在属性缺失时兜底
+    if (!root.getAttribute("data-theme")) {
+      root.setAttribute("data-theme", isDark ? "dark" : "light");
+    }
+  };
+  try {
+    const context = typeof bridge.getContext === "function" ? bridge.getContext() : null;
+    if (context) apply(context.isDark);
+  } catch {
+    // 主题兜底失败不影响页面主流程，CSS 会回落到默认亮色
+  }
+  if (typeof bridge.onContext === "function") {
+    try {
+      bridge.onContext((context) => {
+        if (context) apply(context.isDark);
+      });
+    } catch {
+      // 同上：拿不到上下文时保持 CSS 默认主题
+    }
+  }
+}
+
+function setFatal(message) {
+  state.fatalError = message;
+  state.rendering = false;
+  renderPreview();
+}
+
+async function init() {
+  bindStaticEvents();
+  applyThemeFallback();
+
+  if (!bridge) {
+    setFatal(
+      "未检测到 AstrBot 页面桥接，无法加载预览。请从 AstrBot 管理面板的「插件页面」打开本页；如果你是直接打开了本地文件，请改用插件页面访问。",
+    );
+    return;
+  }
+
+  setText(els.skeletonText, "正在连接 AstrBot…");
+  try {
+    await withTimeout(bridge.ready(), READY_TIMEOUT_MS, "连接 AstrBot 超时");
+  } catch (error) {
+    setFatal(`连接 AstrBot 失败：${errorMessage(error)}。请刷新页面重试。`);
+    return;
+  }
+
+  try {
+    const options = await bridge.apiGet("preview/options");
+    applyOptions(options);
+  } catch (error) {
+    setFatal(`加载预览选项失败：${errorMessage(error)}。请确认插件已启用，然后刷新页面重试。`);
+    return;
+  }
+
+  state.ready = true;
+  state.fatalError = "";
+  renderPreview();
+  void requestRender();
+}
+
+/* ==========================================================================
+   选项应用与控件构建
+   ========================================================================== */
+
+/**
+ * 应用服务端选项。options.keepView 为 true 时只导入样式，
+ * 保留当前面板类型 / 搜索词 / 预览清晰度（「导入当前配置」用）。
+ */
+function applyOptions(rawOptions, viewOptions = {}) {
+  if (!rawOptions || typeof rawOptions !== "object") {
+    throw new Error("预览选项格式不正确");
+  }
+  const options = rawOptions;
+  const active = asObject(options.active);
+  const preview = asObject(options.preview);
+  const limits = asObject(options.limits);
+  const widthLimit = asObject(limits.page_width);
+  const ppiLimit = asObject(limits.ppi);
+  const splitLimit = asObject(limits.split_height);
+  const singleColumnLimit = asObject(limits.single_column_threshold);
+  const giantLimit = asObject(limits.giant_threshold);
+  const analysisTimeoutLimit = asObject(limits.timeout_analysis);
+  const compileTimeoutLimit = asObject(limits.timeout_compile);
+
+  state.options = options;
+  state.modes = normalizeModes(options.modes, String(active.mode || "command"));
+  state.presets = normalizePresets(options.presets);
+  state.colorGroups = normalizeColorGroups(options.color_groups);
+  state.fonts = normalizeFontList(options.fonts);
+  state.backgrounds = normalizeBackgrounds(options.backgrounds);
+
+  state.limits = {
+    pageWidth: {
+      min: asNumber(widthLimit.min, 360),
+      max: asNumber(widthLimit.max, 1200),
+      step: asNumber(widthLimit.step, 10),
+    },
+    ppi: {
+      min: asNumber(ppiLimit.min, 72),
+      max: asNumber(ppiLimit.max, 384),
+      step: asNumber(ppiLimit.step, 8),
+    },
+    splitHeight: {
+      min: asNumber(splitLimit.min, 1000),
+      max: asNumber(splitLimit.max, 65500),
+      step: asNumber(splitLimit.step, 1000),
+    },
+    singleColumnThreshold: {
+      min: asNumber(singleColumnLimit.min, 360),
+      max: asNumber(singleColumnLimit.max, 1200),
+      step: asNumber(singleColumnLimit.step, 10),
+    },
+    giantThreshold: {
+      min: asNumber(giantLimit.min, 100),
+      max: asNumber(giantLimit.max, 3000),
+      step: asNumber(giantLimit.step, 50),
+    },
+    timeoutAnalysis: {
+      min: asNumber(analysisTimeoutLimit.min, 1),
+      max: asNumber(analysisTimeoutLimit.max, 60),
+      step: asNumber(analysisTimeoutLimit.step, 1),
+    },
+    timeoutCompile: {
+      min: asNumber(compileTimeoutLimit.min, 3),
+      max: asNumber(compileTimeoutLimit.max, 30),
+      step: asNumber(compileTimeoutLimit.step, 1),
+    },
+    formatMaxHeight: normalizeFormatMaxHeight(limits.format_max_height),
+    // 后端会拒绝超长关键词，输入框直接按同一上限截断，避免白跑一次请求
+    maxQueryLen: Math.max(1, asNumber(limits.max_query_len, 80)),
+  };
+  state.preview = {
+    ppi: clamp(asNumber(preview.ppi, 144), 36, 512),
+    maxPages: asNumber(preview.max_pages, 4),
+    debounceMs: clamp(asNumber(preview.debounce_ms, DEFAULT_DEBOUNCE_MS), 80, 2000),
+  };
+
+  if (viewOptions.keepView) {
+    // 导入当前配置：只覆盖样式，保留正在预览的面板类型与搜索词
+    importActiveStyle(active);
+    if (!state.modes.some((mode) => mode.value === state.mode)) {
+      state.mode = state.modes[0]?.value || "command";
+    }
+  } else {
+    applyActive(active);
+  }
+  buildControls();
+}
+
+function normalizeFormatMaxHeight(raw) {
+  const source = asObject(raw);
+  const fallback = { webp: 16383, png: 32000, jpeg: 65500 };
+  const normalized = {};
+  for (const format of ["webp", "png", "jpeg"]) {
+    normalized[format] = Math.max(1000, asNumber(source[format], fallback[format]));
+  }
+  return normalized;
+}
+
+function splitHeightMax() {
+  const formatMax = state.limits.formatMaxHeight[state.outputFormat];
+  return Math.min(state.limits.splitHeight.max, asNumber(formatMax, state.limits.splitHeight.max));
+}
+
+// 把插件当前配置里的样式字段写进表单状态；面板类型 / 搜索词由调用方决定是否重置
+function importActiveStyle(rawActive) {
+  const active = asObject(rawActive);
+  state.colors = normalizeColorMap(active.colors);
+  state.preset = typeof active.preset === "string" ? active.preset : state.presets[0]?.name || "";
+  state.selectedFonts = normalizeFontList(active.fonts);
+  state.pageWidth = clamp(asNumber(active.page_width, 600), state.limits.pageWidth.min, state.limits.pageWidth.max);
+  state.outputFormat =
+    typeof active.output_format === "string" && active.output_format in state.limits.formatMaxHeight
+      ? active.output_format
+      : "webp";
+  state.singleColumnThreshold = clamp(
+    asNumber(active.single_column_threshold, 480),
+    state.limits.singleColumnThreshold.min,
+    state.limits.singleColumnThreshold.max,
+  );
+  state.giantThreshold = clamp(
+    asNumber(active.giant_threshold, 1500),
+    state.limits.giantThreshold.min,
+    state.limits.giantThreshold.max,
+  );
+  state.timeoutAnalysis = clamp(
+    asNumber(active.timeout_analysis, 10),
+    state.limits.timeoutAnalysis.min,
+    state.limits.timeoutAnalysis.max,
+  );
+  state.timeoutCompile = clamp(
+    asNumber(active.timeout_compile, 30),
+    state.limits.timeoutCompile.min,
+    state.limits.timeoutCompile.max,
+  );
+  // 分页高度默认跟随正式配置；上限受当前输出格式约束
+  state.splitHeight = clamp(
+    asNumber(active.split_height, 16000),
+    state.limits.splitHeight.min,
+    splitHeightMax(),
+  );
+  // 精度与插件设置里的「图片清晰度」是同一项，导入/恢复时一并回填
+  state.ppi = clamp(
+    asNumber(active.ppi, state.preview.ppi),
+    state.limits.ppi.min,
+    state.limits.ppi.max,
+  );
+  state.pluginTwoLines = asBool(active.plugin_two_lines, true);
+  state.heroHeader = asBool(active.hero_header, true);
+  state.background = typeof active.background === "string" ? active.background : "";
+  state.fontFilter = "";
+}
+
+function applyActive(rawActive) {
+  const active = asObject(rawActive);
+  const activeMode = typeof active.mode === "string" ? active.mode : "";
+  state.mode = state.modes.some((mode) => mode.value === activeMode)
+    ? activeMode
+    : state.modes[0]?.value || "command";
+  state.query = "";
+  importActiveStyle(active);
+}
+
+function buildControls() {
+  buildModeControl();
+  buildPresetControl();
+  buildBackgroundControl();
+  buildOutputFormatControl();
+  buildColorControl();
+  configureRanges();
+  syncControls();
+}
+
+const OUTPUT_FORMATS = [
+  { value: "webp", label: "WebP（体积最小，默认）" },
+  { value: "png", label: "PNG（无损，体积大）" },
+  { value: "jpeg", label: "JPEG（体积接近 WebP）" },
+];
+
+function buildOutputFormatControl() {
+  if (!els.outputFormatSelect) return;
+  els.outputFormatSelect.replaceChildren();
+  for (const format of OUTPUT_FORMATS) {
+    const option = document.createElement("option");
+    option.value = format.value;
+    option.textContent = format.label;
+    els.outputFormatSelect.appendChild(option);
+  }
+}
+
+function buildModeControl() {
+  els.modeSegmented.replaceChildren();
+  for (const mode of state.modes) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.mode = mode.value;
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", "false");
+    button.textContent = mode.label;
+    els.modeSegmented.appendChild(button);
+  }
+  syncModeControl();
+}
+
+function syncModeControl() {
+  for (const button of els.modeSegmented.querySelectorAll("button[data-mode]")) {
+    button.setAttribute("aria-checked", String(button.dataset.mode === state.mode));
+  }
+}
+
+function buildPresetControl() {
+  els.presetList.replaceChildren();
+  if (!state.presets.length) {
+    const empty = document.createElement("p");
+    empty.className = "preset-empty";
+    empty.textContent = "没有可用的主题预设";
+    els.presetList.appendChild(empty);
+    return;
+  }
+  for (const preset of state.presets) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "preset-card";
+    card.dataset.preset = preset.name;
+    card.setAttribute("aria-pressed", "false");
+    card.title = preset.label;
+
+    const name = document.createElement("span");
+    name.className = "preset-name";
+    name.textContent = preset.label;
+
+    const dots = document.createElement("span");
+    dots.className = "preset-dots";
+    for (const color of Object.values(preset.colors).slice(0, 5)) {
+      const dot = document.createElement("span");
+      dot.className = "preset-dot";
+      dot.style.background = color;
+      dots.appendChild(dot);
+    }
+
+    card.append(name, dots);
+    els.presetList.appendChild(card);
+  }
+  syncPresetControl();
+}
+
+function syncPresetControl() {
+  for (const card of els.presetList.querySelectorAll(".preset-card")) {
+    const name = card.dataset.preset;
+    const isActive = name === state.preset;
+    card.classList.toggle("is-active", isActive);
+    card.setAttribute("aria-pressed", String(isActive));
+    const preset = state.presets.find((item) => item.name === name);
+    const modified = Boolean(isActive && preset && !colorsMatchPreset(preset));
+    card.classList.toggle("is-modified", modified);
+  }
+}
+
+function colorsMatchPreset(preset) {
+  const entries = Object.entries(preset.colors);
+  if (!entries.length) return false;
+  return entries.every(([key, value]) => normalizeHex(state.colors[key]) === normalizeHex(value));
+}
+
+function buildBackgroundControl() {
+  els.backgroundSelect.replaceChildren();
+  const follow = document.createElement("option");
+  follow.value = "";
+  follow.textContent = "跟随插件配置";
+  els.backgroundSelect.appendChild(follow);
+  for (const name of state.backgrounds) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    els.backgroundSelect.appendChild(option);
+  }
+  syncBackgroundControl();
+}
+
+function syncBackgroundControl() {
+  els.backgroundSelect.value = state.background || "";
+  if (els.backgroundSelect.value === (state.background || "")) return;
+  // 当前背景不在扫描结果里（文件被删除或来自自定义路径）时补占位项，避免下拉框显示错位
+  const option = document.createElement("option");
+  option.value = state.background;
+  option.textContent = `${state.background}（未找到）`;
+  els.backgroundSelect.appendChild(option);
+  els.backgroundSelect.value = state.background;
+}
+
+function buildColorControl() {
+  colorInputs.clear();
+  els.colorGroups.replaceChildren();
+
+  if (!state.colorGroups.length) {
+    const empty = document.createElement("p");
+    empty.className = "color-empty";
+    empty.textContent = "没有可调整的颜色项";
+    els.colorGroups.appendChild(empty);
+    return;
+  }
+
+  for (const group of state.colorGroups) {
+    const details = document.createElement("details");
+    details.className = "color-group";
+    details.open = true;
+
+    const summary = document.createElement("summary");
+    const label = document.createElement("span");
+    label.textContent = group.label;
+    const count = document.createElement("span");
+    count.className = "color-count";
+    count.textContent = String(group.colors.length);
+    summary.append(label, count);
+
+    const body = document.createElement("div");
+    body.className = "color-group-body";
+    for (const item of group.colors) {
+      body.appendChild(buildColorRow(item));
+    }
+
+    details.append(summary, body);
+    els.colorGroups.appendChild(details);
+  }
+  syncColorInputs();
+}
+
+function buildColorRow(item) {
+  const value = normalizeHex(state.colors[item.key]) || item.value;
+
+  const row = document.createElement("div");
+  row.className = "color-row";
+
+  const swatch = document.createElement("input");
+  swatch.type = "color";
+  swatch.className = "color-swatch";
+  swatch.value = value;
+  swatch.dataset.colorKey = item.key;
+  swatch.dataset.role = "swatch";
+  swatch.setAttribute("aria-label", `${item.label} 颜色`);
+
+  const label = document.createElement("span");
+  label.className = "color-label";
+  label.textContent = item.label;
+  label.title = `${item.label}（${item.key}）`;
+
+  const hex = document.createElement("input");
+  hex.type = "text";
+  hex.className = "color-hex";
+  hex.value = value;
+  hex.maxLength = 7;
+  hex.spellcheck = false;
+  hex.dataset.colorKey = item.key;
+  hex.dataset.role = "hex";
+  hex.setAttribute("aria-label", `${item.label} 色值`);
+
+  row.append(swatch, label, hex);
+  colorInputs.set(item.key, { swatch, hex });
+  return row;
+}
+
+function syncColorInputs() {
+  colorInputs.forEach((pair, key) => {
+    const value = normalizeHex(state.colors[key]);
+    if (!value) return;
+    if (pair.swatch.value !== value) pair.swatch.value = value;
+    // 正在编辑 hex 文本框时不要覆盖用户输入，失焦时再归一化
+    if (document.activeElement !== pair.hex) {
+      pair.hex.value = value;
+      pair.hex.removeAttribute("aria-invalid");
+    }
+  });
+}
+
+function configureRanges() {
+  applyRangeConfig(els.pageWidthInput, state.limits.pageWidth);
+  applyRangeConfig(els.ppiInput, state.limits.ppi);
+  applyRangeConfig(els.previewPpiInput, state.limits.ppi);
+  applyRangeConfig(els.singleColumnThresholdInput, state.limits.singleColumnThreshold);
+  applyRangeConfig(els.giantThresholdInput, state.limits.giantThreshold);
+  applyRangeConfig(els.timeoutAnalysisInput, state.limits.timeoutAnalysis);
+  applyRangeConfig(els.timeoutCompileInput, state.limits.timeoutCompile);
+  updateSplitHeightLimit();
+}
+
+/** 分页高度上限随输出格式变化（WebP 16383 / PNG 32000 / JPEG 65500） */
+function updateSplitHeightLimit() {
+  const splitLimit = state.limits.splitHeight;
+  const max = splitHeightMax();
+  if (els.splitHeightInput) {
+    els.splitHeightInput.min = String(splitLimit.min);
+    els.splitHeightInput.max = String(max);
+    els.splitHeightInput.step = String(splitLimit.step);
+  }
+  state.splitHeight = clamp(state.splitHeight, splitLimit.min, max);
+}
+
+function applyRangeConfig(input, limit) {
+  if (!input) return;
+  input.min = String(limit.min);
+  input.max = String(limit.max);
+  input.step = String(limit.step);
+}
+
+function syncRanges() {
+  const widthLimit = state.limits.pageWidth;
+  els.pageWidthInput.value = String(clamp(state.pageWidth, widthLimit.min, widthLimit.max));
+  setText(els.pageWidthValue, `${Math.round(state.pageWidth)} pt`);
+
+  const splitLimit = state.limits.splitHeight;
+  const splitMax = splitHeightMax();
+  els.splitHeightInput.value = String(clamp(state.splitHeight, splitLimit.min, splitMax));
+  setText(els.splitHeightValue, `${Math.round(state.splitHeight)} px`);
+
+  const ppiLimit = state.limits.ppi;
+  els.ppiInput.value = String(clamp(state.ppi, ppiLimit.min, ppiLimit.max));
+  setText(els.ppiValue, `${Math.round(state.ppi)} ppi`);
+  const testPpi = clamp(state.testPpi, ppiLimit.min, ppiLimit.max);
+  els.previewPpiInput.value = String(testPpi);
+  setText(els.previewPpiValue, `${Math.round(testPpi)} ppi`);
+
+  const singleColumnLimit = state.limits.singleColumnThreshold;
+  els.singleColumnThresholdInput.value = String(
+    clamp(state.singleColumnThreshold, singleColumnLimit.min, singleColumnLimit.max),
+  );
+  setText(els.singleColumnThresholdValue, `${Math.round(state.singleColumnThreshold)} pt`);
+
+  const giantLimit = state.limits.giantThreshold;
+  els.giantThresholdInput.value = String(
+    clamp(state.giantThreshold, giantLimit.min, giantLimit.max),
+  );
+  setText(els.giantThresholdValue, `${Math.round(state.giantThreshold)} px`);
+
+  const analysisLimit = state.limits.timeoutAnalysis;
+  els.timeoutAnalysisInput.value = String(
+    clamp(state.timeoutAnalysis, analysisLimit.min, analysisLimit.max),
+  );
+  setText(els.timeoutAnalysisValue, `${Math.round(state.timeoutAnalysis)} s`);
+
+  const compileLimit = state.limits.timeoutCompile;
+  els.timeoutCompileInput.value = String(
+    clamp(state.timeoutCompile, compileLimit.min, compileLimit.max),
+  );
+  setText(els.timeoutCompileValue, `${Math.round(state.timeoutCompile)} s`);
+
+  if (els.outputFormatSelect) {
+    els.outputFormatSelect.value = state.outputFormat;
+  }
+}
+
+/* ==========================================================================
+   控件同步（只在初始化/恢复默认/导入配置/切预设时整体刷新）
+   ========================================================================== */
+
+function syncControls() {
+  syncModeControl();
+
+  if (document.activeElement !== els.queryInput) {
+    els.queryInput.value = state.query;
+  }
+  els.queryInput.maxLength = state.limits.maxQueryLen;
+  updateQueryClear();
+
+  syncPresetControl();
+  syncRanges();
+  els.toggleTwoLines.checked = state.pluginTwoLines;
+  els.toggleHero.checked = state.heroHeader;
+  updateBackgroundVisibility();
+  syncBackgroundControl();
+
+  els.fontSearch.value = "";
+  renderFontList();
+  buildFontChips();
+  syncColorInputs();
+}
+
+function updateQueryClear() {
+  show(els.queryClear, Boolean(state.query));
+}
+
+function updateBackgroundVisibility() {
+  show(els.backgroundRow, state.heroHeader);
+}
+
+function buildFontChips() {
+  els.fontChips.replaceChildren();
+  if (!state.selectedFonts.length) {
+    const empty = document.createElement("span");
+    empty.className = "font-chips-empty";
+    empty.textContent = "未选择字体，跟随插件配置";
+    els.fontChips.appendChild(empty);
+    return;
+  }
+  state.selectedFonts.forEach((name, index) => {
+    const chip = document.createElement("span");
+    chip.className = "font-chip";
+
+    const order = document.createElement("span");
+    order.className = "font-chip-order";
+    order.textContent = String(index + 1);
+
+    const label = document.createElement("span");
+    label.className = "font-chip-name";
+    label.textContent = name;
+    label.title = name;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "font-chip-remove";
+    remove.dataset.font = name;
+    remove.textContent = "×";
+    remove.title = `移除 ${name}`;
+    remove.setAttribute("aria-label", `移除字体 ${name}`);
+
+    chip.append(order, label, remove);
+    els.fontChips.appendChild(chip);
+  });
+}
+
+function renderFontList() {
+  const keyword = state.fontFilter.trim().toLowerCase();
+  const pool = keyword
+    ? state.fonts.filter((name) => name.toLowerCase().includes(keyword))
+    : state.fonts;
+
+  els.fontList.replaceChildren();
+  if (!pool.length) {
+    const empty = document.createElement("p");
+    empty.className = "font-list-empty";
+    empty.textContent = keyword ? "没有匹配的字体" : "没有发现可用字体";
+    els.fontList.appendChild(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const name of pool) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "font-item";
+    item.dataset.font = name;
+    item.setAttribute("role", "checkbox");
+    item.setAttribute("aria-checked", String(state.selectedFonts.includes(name)));
+
+    const check = document.createElement("span");
+    check.className = "font-check";
+    check.setAttribute("aria-hidden", "true");
+
+    const label = document.createElement("span");
+    label.className = "font-name";
+    label.textContent = name;
+
+    item.append(check, label);
+    fragment.appendChild(item);
+  }
+  els.fontList.appendChild(fragment);
+}
+
+function syncFontListStates() {
+  for (const item of els.fontList.querySelectorAll(".font-item")) {
+    item.setAttribute("aria-checked", String(state.selectedFonts.includes(item.dataset.font)));
+  }
+}
+
+/* ==========================================================================
+   控件交互
+   ========================================================================== */
+
+function bindStaticEvents() {
+  if (state.listenersBound) return;
+  state.listenersBound = true;
+
+  els.zoomOut.addEventListener("click", () => changeZoom(-ZOOM_STEP));
+  els.zoomIn.addEventListener("click", () => changeZoom(ZOOM_STEP));
+  els.zoomFit.addEventListener("click", () => {
+    state.fitWidth = true;
+    applyZoom();
+  });
+  els.openImage.addEventListener("click", openCurrentImage);
+
+  els.errorRetry.addEventListener("click", () => {
+    if (state.options) {
+      void requestRender();
+      return;
+    }
+    state.fatalError = "";
+    state.renderError = "";
+    renderPreview();
+    void init();
+  });
+
+  els.modeSegmented.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button[data-mode]") : null;
+    if (!button || button.dataset.mode === state.mode) return;
+    state.mode = button.dataset.mode;
+    syncModeControl();
+    markDirty();
+  });
+
+  els.queryInput.addEventListener("input", () => {
+    state.query = els.queryInput.value;
+    updateQueryClear();
+    markDirty();
+  });
+  els.queryClear.addEventListener("click", () => {
+    state.query = "";
+    els.queryInput.value = "";
+    updateQueryClear();
+    els.queryInput.focus();
+    markDirty();
+  });
+
+  els.presetList.addEventListener("click", (event) => {
+    const card = event.target instanceof Element ? event.target.closest(".preset-card") : null;
+    if (!card) return;
+    applyPreset(card.dataset.preset);
+  });
+
+  els.pageWidthInput.addEventListener("input", () => {
+    state.pageWidth = Number(els.pageWidthInput.value);
+    setText(els.pageWidthValue, `${Math.round(state.pageWidth)} pt`);
+    markDirty();
+  });
+  els.splitHeightInput.addEventListener("input", () => {
+    state.splitHeight = Number(els.splitHeightInput.value);
+    setText(els.splitHeightValue, `${Math.round(state.splitHeight)} px`);
+    markDirty();
+  });
+  els.ppiInput.addEventListener("input", () => {
+    state.ppi = Number(els.ppiInput.value);
+    setText(els.ppiValue, `${Math.round(state.ppi)} ppi`);
+    markDirty();
+  });
+  els.previewPpiInput.addEventListener("input", () => {
+    state.testPpi = Number(els.previewPpiInput.value);
+    setText(els.previewPpiValue, `${Math.round(state.testPpi)} ppi`);
+    storeTestPpi(state.testPpi);
+    markDirty();
+  });
+  els.singleColumnThresholdInput.addEventListener("input", () => {
+    state.singleColumnThreshold = Number(els.singleColumnThresholdInput.value);
+    setText(els.singleColumnThresholdValue, `${Math.round(state.singleColumnThreshold)} pt`);
+    markDirty();
+  });
+  els.giantThresholdInput.addEventListener("input", () => {
+    state.giantThreshold = Number(els.giantThresholdInput.value);
+    setText(els.giantThresholdValue, `${Math.round(state.giantThreshold)} px`);
+    markDirty();
+  });
+  els.outputFormatSelect.addEventListener("change", () => {
+    state.outputFormat = els.outputFormatSelect.value;
+    // 切换格式会改变可承载的单页高度，超限时回落到新格式的最大值
+    updateSplitHeightLimit();
+    syncRanges();
+    markDirty();
+  });
+  els.timeoutAnalysisInput.addEventListener("input", () => {
+    state.timeoutAnalysis = Number(els.timeoutAnalysisInput.value);
+    setText(els.timeoutAnalysisValue, `${Math.round(state.timeoutAnalysis)} s`);
+    markDirty();
+  });
+  els.timeoutCompileInput.addEventListener("input", () => {
+    state.timeoutCompile = Number(els.timeoutCompileInput.value);
+    setText(els.timeoutCompileValue, `${Math.round(state.timeoutCompile)} s`);
+    markDirty();
+  });
+
+  els.toggleTwoLines.addEventListener("change", () => {
+    state.pluginTwoLines = els.toggleTwoLines.checked;
+    markDirty();
+  });
+  els.toggleHero.addEventListener("change", () => {
+    state.heroHeader = els.toggleHero.checked;
+    updateBackgroundVisibility();
+    markDirty();
+  });
+  els.backgroundSelect.addEventListener("change", () => {
+    state.background = els.backgroundSelect.value;
+    markDirty();
+  });
+
+  els.fontSearch.addEventListener("input", () => {
+    state.fontFilter = els.fontSearch.value;
+    renderFontList();
+  });
+  els.fontList.addEventListener("click", (event) => {
+    const item = event.target instanceof Element ? event.target.closest(".font-item") : null;
+    if (!item || !item.dataset.font) return;
+    toggleFont(item.dataset.font);
+  });
+  els.fontChips.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest(".font-chip-remove") : null;
+    if (!button || !button.dataset.font) return;
+    removeFont(button.dataset.font);
+  });
+
+  els.colorGroups.addEventListener("input", handleColorInput);
+  els.colorGroups.addEventListener("change", handleColorCommit);
+  els.restoreColors.addEventListener("click", restorePresetColors);
+
+  els.btnReset.addEventListener("click", () => {
+    resetToDefaults();
+  });
+  els.btnImport.addEventListener("click", () => {
+    void importCurrentConfig();
+  });
+  els.btnApply.addEventListener("click", () => {
+    void applyConfig();
+  });
+  els.btnRefresh.addEventListener("click", () => {
+    cancelScheduledRender();
+    void requestRender();
+  });
+
+  window.addEventListener("resize", () => {
+    if (state.fitWidth) applyZoom();
+  });
+  if (typeof ResizeObserver === "function") {
+    // 侧栏折叠、iframe 尺寸变化时 clientWidth 变化不一定触发 window.resize
+    const observer = new ResizeObserver(() => {
+      if (state.fitWidth) applyZoom();
+    });
+    observer.observe(els.viewport);
+  }
+}
+
+function handleColorInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const key = target.dataset.colorKey;
+  const role = target.dataset.role;
+  if (!key || !role) return;
+  const pair = colorInputs.get(key);
+  if (!pair) return;
+
+  if (role === "swatch") {
+    const value = normalizeHex(target.value);
+    if (!value) return;
+    state.colors[key] = value;
+    pair.hex.value = value;
+    pair.hex.removeAttribute("aria-invalid");
+  } else {
+    const value = normalizeHex(target.value);
+    if (!value) {
+      // 非法 hex 不写入状态，只做视觉标红
+      target.setAttribute("aria-invalid", "true");
+      return;
+    }
+    target.removeAttribute("aria-invalid");
+    state.colors[key] = value;
+    pair.swatch.value = value;
+  }
+
+  syncPresetControl();
+  markDirty();
+}
+
+function handleColorCommit(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || target.dataset.role !== "hex") return;
+  const key = target.dataset.colorKey;
+  const value = key ? normalizeHex(state.colors[key]) : null;
+  if (!key || !value) return;
+  target.value = value;
+  target.removeAttribute("aria-invalid");
+}
+
+function applyPreset(name) {
+  const preset = state.presets.find((item) => item.name === name);
+  if (!preset) return;
+  state.preset = preset.name;
+  Object.assign(state.colors, preset.colors);
+  syncColorInputs();
+  syncPresetControl();
+  markDirty();
+}
+
+function restorePresetColors() {
+  const preset =
+    state.presets.find((item) => item.name === state.preset) || state.presets[0];
+  if (!preset) return;
+  state.preset = preset.name;
+  Object.assign(state.colors, preset.colors);
+  syncColorInputs();
+  syncPresetControl();
+  markDirty();
+  setNotice(`已套用「${preset.label}」主题色`);
+}
+
+function toggleFont(name) {
+  const index = state.selectedFonts.indexOf(name);
+  if (index >= 0) {
+    state.selectedFonts.splice(index, 1);
+  } else {
+    state.selectedFonts.push(name);
+  }
+  buildFontChips();
+  syncFontListStates();
+  markDirty();
+}
+
+function removeFont(name) {
+  const index = state.selectedFonts.indexOf(name);
+  if (index < 0) return;
+  state.selectedFonts.splice(index, 1);
+  buildFontChips();
+  syncFontListStates();
+  markDirty();
+}
+
+/* ==========================================================================
+   配置同步：从当前配置导入 / 应用配置
+   ========================================================================== */
+
+function buildStyleFromState() {
+  return {
+    preset: state.preset,
+    colors: { ...state.colors },
+    fonts: [...state.selectedFonts],
+    page_width: Math.round(state.pageWidth),
+    ppi: Math.round(state.ppi),
+    test_ppi: Math.round(state.testPpi),
+    split_height: Math.round(state.splitHeight),
+    single_column_threshold: Math.round(state.singleColumnThreshold),
+    giant_threshold: Math.round(state.giantThreshold),
+    output_format: state.outputFormat,
+    timeout_analysis: Math.round(state.timeoutAnalysis),
+    timeout_compile: Math.round(state.timeoutCompile),
+    plugin_two_lines: state.pluginTwoLines,
+    hero_header: state.heroHeader,
+    background: state.background,
+  };
+}
+
+function readStoredTestPpi() {
+  try {
+    const value = Number(window.localStorage.getItem(TEST_PPI_KEY));
+    return Number.isFinite(value) && value >= 72 && value <= 384 ? value : 144;
+  } catch (error) {
+    return 144;
+  }
+}
+
+function storeTestPpi(value) {
+  try {
+    window.localStorage.setItem(TEST_PPI_KEY, String(Math.round(value)));
+  } catch (error) {
+    // 隐私模式等场景 localStorage 不可用，测试精度仅本次会话生效
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
+}
+
+/** 恢复默认：回到打开页面时读到的配置样式，不会重新读取服务端。 */
+function resetToDefaults() {
+  if (!state.options || state.fatalError || state.importing || state.applying) return;
+  applyActive(asObject(state.options.active));
+  syncControls();
+  markDirty();
+  setNotice("已恢复默认样式");
+}
+
+/** 导入当前配置：重新拉取服务端配置覆盖样式控件（未应用的修改会被丢弃）。 */
+async function importCurrentConfig() {
+  if (!bridge || !state.options || state.importing || state.applying) return;
+  cancelScheduledRender();
+  const before = JSON.stringify(buildStyleFromState());
+  state.importing = true;
+  state.renderError = "";
+  clearNotice();
+  renderPreview();
+  try {
+    const options = await bridge.apiGet("preview/options");
+    applyOptions(options, { keepView: true });
+    const changed = JSON.stringify(buildStyleFromState()) !== before;
+    state.importing = false;
+    if (changed) await requestRender();
+    setNotice("已导入当前配置");
+  } catch (error) {
+    state.renderError = `导入配置失败：${errorMessage(error)}`;
+  } finally {
+    state.importing = false;
+    renderPreview();
+  }
+}
+
+/** 应用配置：把面板样式写入插件配置，插件随后自动重载使配置生效。 */
+async function applyConfig() {
+  if (!bridge || !state.options || state.applying) return;
+  if (inFlight) {
+    try {
+      await inFlight;
+    } catch {
+      // 在途渲染失败不影响应用配置
+    }
+  }
+  cancelScheduledRender();
+  state.applying = true;
+  state.renderError = "";
+  clearNotice();
+  renderPreview();
+  try {
+    const result = asObject(await bridge.apiPost("preview/apply", buildPayload()));
+    const changed = asArray(result.changed).map((item) => String(item));
+    const warnings = asArray(result.warnings).map((item) => String(item));
+    if (!changed.length) {
+      setNotice(warnings[0] || "面板样式与插件当前配置一致，无需应用");
+      return;
+    }
+    if (result.reload !== true) {
+      setNotice("样式已保存，但未能自动重载插件，请手动重载后生效");
+      return;
+    }
+    setNotice("样式已保存，正在重载插件…");
+    renderPreview();
+    const options = await waitForAppliedConfig(buildStyleFromState(), asNumber(result.reload_in_ms, 1000));
+    if (!options) {
+      setNotice("配置已保存，但未能确认重载结果，请刷新页面查看");
+      return;
+    }
+    applyOptions(options, { keepView: true });
+    setNotice(`已应用 ${changed.length} 项配置`);
+  } catch (error) {
+    state.renderError = `应用配置失败：${errorMessage(error)}`;
+  } finally {
+    state.applying = false;
+    renderPreview();
+  }
+}
+
+/** 插件重载会短暂中断接口，轮询到配置回显与面板一致才认为生效。 */
+async function waitForAppliedConfig(style, reloadInMs) {
+  await sleep(reloadInMs + 400);
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    try {
+      const options = await bridge.apiGet("preview/options");
+      if (styleMatchesActive(asObject(options.active), style)) return options;
+    } catch {
+      // 重载窗口内接口暂不可用，继续重试
+    }
+    await sleep(400);
+  }
+  return null;
+}
+
+function styleMatchesActive(active, style) {
+  const close = (left, right) => Math.abs(asNumber(left, -99999) - asNumber(right, -99998)) < 0.51;
+  if (!close(active.page_width, style.page_width)) return false;
+  if (!close(active.single_column_threshold, style.single_column_threshold)) return false;
+  if (!close(active.giant_threshold, style.giant_threshold)) return false;
+  if (!close(active.split_height, style.split_height)) return false;
+  if (!close(active.timeout_analysis, style.timeout_analysis)) return false;
+  // 配置里的编译超时可能高于面板上限（面板导入时被截断到上限），此时后端会保留原值
+  const compileCap = asNumber(state.limits.timeoutCompile.max, 30);
+  const activeCompile = asNumber(active.timeout_compile, 30);
+  const styleCompile = asNumber(style.timeout_compile, 30);
+  const compileKept = styleCompile >= compileCap && activeCompile > compileCap;
+  if (!close(activeCompile, styleCompile) && !compileKept) return false;
+  if (String(active.output_format || "") !== String(style.output_format || "")) return false;
+  if (asBool(active.plugin_two_lines, true) !== asBool(style.plugin_two_lines, true)) return false;
+  if (asBool(active.hero_header, true) !== asBool(style.hero_header, true)) return false;
+  if (style.background && String(active.background || "") !== String(style.background)) return false;
+
+  const currentColors = normalizeColorMap(active.colors);
+  for (const [key, value] of Object.entries(normalizeColorMap(style.colors))) {
+    if (currentColors[key] !== value) return false;
+  }
+  const appliedFonts = asArray(active.fonts).map(String);
+  const expectedFonts = asArray(style.fonts).map(String).filter(Boolean);
+  if (expectedFonts.length && appliedFonts.join("\u0000") !== expectedFonts.join("\u0000")) return false;
+  return true;
+}
+
+/* ==========================================================================
+   渲染请求：debounce + 串行化（latest-wins）
+   ========================================================================== */
+
+function markDirty() {
+  if (!state.options || state.fatalError) return;
+  state.dirty = true;
+  scheduleRender();
+}
+
+function scheduleRender() {
+  if (!state.options || !bridge || state.fatalError) return;
+  if (inFlight) {
+    // 在途期间不再叠定时器，等响应回来立刻用最新状态补一次
+    state.pendingRerender = true;
+    return;
+  }
+  cancelScheduledRender();
+  state.debounceTimer = window.setTimeout(() => {
+    state.debounceTimer = null;
+    void requestRender();
+  }, state.preview.debounceMs);
+}
+
+function cancelScheduledRender() {
+  if (state.debounceTimer !== null) {
+    window.clearTimeout(state.debounceTimer);
+    state.debounceTimer = null;
+  }
+}
+
+function buildPayload() {
+  return {
+    mode: state.mode,
+    query: state.query.trim(),
+    style: buildStyleFromState(),
+  };
+}
+
+async function requestRender() {
+  if (!state.options || !bridge || state.fatalError) return;
+  cancelScheduledRender();
+  // 渲染状态优先于一次性提示，避免底部状态条长时间停留在旧提示上
+  clearNotice();
+
+  if (inFlight) {
+    state.pendingRerender = true;
+    return inFlight;
+  }
+
+  state.pendingRerender = false;
+  state.dirty = false;
+  state.rendering = true;
+  state.renderError = "";
+  const sequence = ++state.requestSeq;
+  renderPreview();
+
+  const promise = (async () => {
+    try {
+      const result = await bridge.apiPost("preview/render", buildPayload());
+      if (sequence !== state.requestSeq) return;
+      applyRenderResult(result);
+    } catch (error) {
+      if (sequence !== state.requestSeq) return;
+      state.renderError = describeRenderError(error);
+    } finally {
+      if (sequence === state.requestSeq) {
+        state.rendering = false;
+        renderPreview();
+      }
+    }
+  })();
+
+  inFlight = promise;
+  try {
+    await promise;
+  } finally {
+    if (inFlight === promise) inFlight = null;
+    if (state.pendingRerender) {
+      state.pendingRerender = false;
+      void requestRender();
+    }
+  }
+}
+
+function describeRenderError(error) {
+  const message = errorMessage(error);
+  if (/timeout|timed out|超时/i.test(message)) return `渲染超时：${message}`;
+  if (/background|背景图/i.test(message)) return `背景图不可用：${message}`;
+  return message;
+}
+
+function applyRenderResult(rawResult) {
+  const result = asObject(rawResult);
+  const images = [];
+
+  asArray(result.images).forEach((rawImage, index) => {
+    const image = asObject(rawImage);
+    if (typeof image.data !== "string" || !image.data) return;
+    images.push({
+      page: asNumber(image.page, index + 1),
+      mime: typeof image.mime === "string" && image.mime ? image.mime : "image/webp",
+      data: image.data,
+      width: asNumber(image.width, 0),
+      height: asNumber(image.height, 0),
+    });
+  });
+  images.sort((left, right) => left.page - right.page);
+
+  state.images = images;
+  state.warnings = asArray(result.warnings).map((warning) => String(warning)).filter(Boolean);
+  state.renderError = "";
+  state.lastRender = {
+    elapsedMs: Math.max(0, asNumber(result.elapsed_ms, 0)),
+    cached: result.cached === true,
+    totalPages: Math.max(images.length, asNumber(result.total_pages, images.length)),
+    truncated: result.truncated === true,
+    width: images[0] ? images[0].width : 0,
+    height: images[0] ? images[0].height : 0,
+    at: Date.now(),
+  };
+
+  renderStage();
+  renderPreview();
+}
+
+/* ==========================================================================
+   预览渲染
+   ========================================================================== */
+
+function renderStage() {
+  const fragment = document.createDocumentFragment();
+
+  state.images.forEach((image, index) => {
+    const page = document.createElement("div");
+    page.className = "preview-page";
+    page.dataset.width = String(image.width || 0);
+    // 后端未给尺寸时先占满可用宽度，等图片 load 后再按 naturalWidth 计算缩放
+    if (!image.width) page.style.width = "100%";
+
+    const img = document.createElement("img");
+    img.src = `data:${image.mime};base64,${image.data}`;
+    img.alt = `第 ${image.page} 页预览`;
+    img.decoding = "async";
+    img.draggable = false;
+    if (index > 0) img.loading = "lazy";
+    // 后端没给尺寸时，等图片解码后用 naturalWidth 兜住缩放计算
+    img.addEventListener("load", () => {
+      if (!Number(page.dataset.width) && img.naturalWidth) {
+        page.dataset.width = String(img.naturalWidth);
+        applyZoom();
+      }
+    });
+
+    const totalPages = Math.max(
+      state.lastRender ? state.lastRender.totalPages : 0,
+      state.images.length,
+    );
+    const badge = document.createElement("span");
+    badge.className = "page-badge";
+    badge.textContent = totalPages > 1 ? `第 ${image.page} / 共 ${totalPages} 页` : `第 ${image.page} 页`;
+
+    page.append(img, badge);
+    fragment.appendChild(page);
+  });
+
+  els.stage.replaceChildren(fragment);
+  applyZoom();
+}
+
+function renderPreview() {
+  const hasImages = state.images.length > 0;
+  const fatal = Boolean(state.fatalError);
+  const failed = Boolean(state.renderError);
+  const loading = state.rendering;
+  const firstLoad = !state.lastRender;
+
+  show(els.skeleton, !hasImages && !fatal && !failed && (loading || firstLoad));
+  setText(els.skeletonText, state.options ? "正在渲染预览…" : "正在加载预览…");
+
+  show(els.empty, !hasImages && !fatal && !failed && Boolean(state.lastRender));
+  show(els.previewHint, !fatal && Boolean(state.lastRender && state.lastRender.totalPages > 1));
+  show(els.loading, loading && hasImages);
+  els.stage.classList.toggle("is-stale", loading && hasImages);
+
+  show(els.error, failed || fatal);
+  if (failed || fatal) {
+    setText(els.errorTitle, fatal ? "无法加载预览" : "渲染失败");
+    setText(els.errorText, fatal ? state.fatalError : state.renderError);
+    setText(els.errorRetry, fatal ? "重新加载" : "重试");
+  }
+
+  els.openImage.disabled = !hasImages;
+  els.app.classList.toggle("is-fatal", fatal);
+  updateMeta();
+  updateStatus();
+  updateControlAvailability();
+}
+
+function updateControlAvailability() {
+  const disabled = !state.options || Boolean(state.fatalError);
+  const busy = state.importing || state.applying;
+  els.btnReset.disabled = disabled || busy;
+  els.btnImport.disabled = disabled || busy;
+  els.btnApply.disabled = disabled || busy;
+  els.btnRefresh.disabled = disabled || state.applying;
+  els.previewPpiInput.disabled = disabled || busy;
+  if ("inert" in els.controlsBody) els.controlsBody.inert = Boolean(state.fatalError) || busy;
+}
+
+function updateMeta() {
+  const render = state.lastRender;
+
+  if (!state.images.length) {
+    setText(els.metaPages, render ? "0 页" : "");
+  } else {
+    const count = state.images.length;
+    const total = Math.max(render ? render.totalPages : 0, count);
+    let text = total > count ? `第 1–${count} 页 · 共 ${total} 页` : `${count} 页`;
+    if (render && render.truncated) text += " · 已截断";
+    setText(els.metaPages, text);
+  }
+
+  if (!render) {
+    setText(els.metaRender, "");
+    els.metaRender.removeAttribute("title");
+    return;
+  }
+
+  const size = render.width && render.height ? `${render.width}×${render.height}` : "";
+  const parts = [`渲染于 ${formatSeconds(render.elapsedMs)}`, size].filter(Boolean);
+  setText(els.metaRender, parts.join(" · "));
+  if (state.warnings.length) {
+    els.metaRender.title = state.warnings.join("\n");
+  } else {
+    els.metaRender.removeAttribute("title");
+  }
+}
+
+function updateStatus() {
+  let topState = "idle";
+  let topText = "准备就绪";
+  let footerState = "idle";
+  let footerText = "尚未渲染";
+
+  if (state.fatalError) {
+    topState = "error";
+    topText = "加载失败";
+    footerState = "error";
+    footerText = "加载失败";
+  } else if (!state.options) {
+    topState = "loading";
+    topText = "正在加载…";
+    footerState = "loading";
+    footerText = "正在加载…";
+  } else if (state.applying) {
+    topState = "loading";
+    topText = "正在应用配置…";
+    footerState = "loading";
+    footerText = "正在应用配置…";
+  } else if (state.importing) {
+    topState = "loading";
+    topText = "正在导入配置…";
+    footerState = "loading";
+    footerText = "正在导入配置…";
+  } else if (state.rendering) {
+    topState = "loading";
+    topText = "正在渲染…";
+    footerState = "loading";
+    footerText = "正在渲染…";
+  } else if (state.renderError) {
+    topState = "error";
+    topText = "渲染失败";
+    footerState = "error";
+    footerText = "渲染失败";
+  } else if (state.lastRender) {
+    const seconds = formatSeconds(state.lastRender.elapsedMs);
+    topState = "ok";
+    topText = `已更新 · ${seconds}`;
+    footerState = "ok";
+    footerText = `已更新 · ${seconds}`;
+  }
+
+  els.topbarStatus.dataset.state = topState;
+  setText(els.topbarStatusText, topText);
+
+  els.footerStatus.dataset.state = footerState;
+  setText(els.footerStatusText, state.notice || footerText);
+  els.footerCached.hidden = !(
+    state.lastRender &&
+    state.lastRender.cached &&
+    !state.rendering &&
+    !state.renderError &&
+    !state.notice
+  );
+
+  setText(els.footerError, state.renderError);
+  show(els.footerError, Boolean(state.renderError));
+}
+
+/* ==========================================================================
+   缩放与图片操作
+   ========================================================================== */
+
+function computeFitScale() {
+  const imageWidth = state.images[0] ? state.images[0].width : 0;
+  // 24px 是 stage 两侧内边距
+  const available = els.viewport.clientWidth - 48;
+  if (!imageWidth || available <= 0) return state.zoom || 1;
+  return clamp(available / imageWidth, ZOOM_MIN, 1);
+}
+
+function changeZoom(delta) {
+  if (!state.images.length) return;
+  state.fitWidth = false;
+  state.zoom = clamp(Math.round((state.zoom + delta) * 100) / 100, ZOOM_MIN, ZOOM_MAX);
+  applyZoom();
+}
+
+function applyZoom() {
+  if (!state.images.length) {
+    state.zoom = 1;
+    updateZoomLabel();
+    return;
+  }
+  if (state.fitWidth) state.zoom = computeFitScale();
+  const scale = clamp(state.zoom, ZOOM_MIN, ZOOM_MAX);
+
+  for (const page of els.stage.querySelectorAll(".preview-page")) {
+    const image = page.querySelector("img");
+    const naturalWidth = Number(page.dataset.width) || (image ? image.naturalWidth : 0) || 0;
+    if (!naturalWidth) continue;
+    page.style.width = `${Math.round(naturalWidth * scale)}px`;
+  }
+
+  updateZoomLabel();
+  els.zoomFit.classList.toggle("is-active", state.fitWidth);
+  els.zoomFit.setAttribute("aria-pressed", String(state.fitWidth));
+}
+
+function updateZoomLabel() {
+  setText(els.zoomValue, `${Math.round((state.fitWidth ? computeFitScale() : state.zoom) * 100)}%`);
+}
+
+function openCurrentImage() {
+  const image = state.images[0];
+  if (!image) return;
+
+  let opened = null;
+  let url = "";
+  try {
+    url = URL.createObjectURL(base64ToBlob(image.data, image.mime));
+    // 插件页 iframe 没有 allow-popups 时这里会返回 null，回退成下载
+    opened = window.open(url, "_blank", "noopener");
+  } catch {
+    opened = null;
+  }
+
+  if (!opened) {
+    if (url) URL.revokeObjectURL(url);
+    downloadImage(image);
+    setNotice("浏览器拦截了新窗口，已改为下载第 1 页");
+    return;
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function downloadImage(image) {
+  const link = document.createElement("a");
+  link.href = `data:${image.mime};base64,${image.data}`;
+  link.download = `help-panel-preview-${image.page}.${extensionForMime(image.mime)}`;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+/* ==========================================================================
+   启动
+   ========================================================================== */
+
+renderPreview();
+void init();

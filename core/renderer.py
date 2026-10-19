@@ -127,7 +127,11 @@ class TypstRenderer:
 
         return snapshot
 
-    def _resolve_background_image(self) -> Path | None:
+    def get_config_snapshot(self, bg_image: Path | None = None) -> dict[str, Any]:
+        """渲染配置快照 (预览页把它并入缓存键, 配置/模板/背景变化时自动失效)"""
+        return self._get_config_snapshot(bg_image)
+
+    def _resolve_background_image(self, deterministic: bool = False) -> Path | None:
         """解析头部背景图
 
         优先级:
@@ -136,6 +140,9 @@ class TypstRenderer:
           3. 默认背景目录:      数据目录下 backgrounds/ 子目录
         目录扫描规则: 该目录根下的图片文件 (排除 cache_/temp_ 前缀), 多张时按
         background_random 决定随机选一张或取文件名排序第一张。
+
+        deterministic: 预览页用。为 True 时即使开启随机也固定取排序后的第一张,
+        否则同一套样式每次请求可能换背景, 预览与缓存都无法稳定。
         """
         # 1. 显式指定单个文件
         cfg_path = (self.cfg.header_background or "").strip()
@@ -175,7 +182,7 @@ class TypstRenderer:
             if not candidates:
                 continue
 
-            if len(candidates) > 1 and self.cfg.background_random:
+            if len(candidates) > 1 and self.cfg.background_random and not deterministic:
                 picked = random.choice(candidates)
                 logger.debug(
                     f"[HelpTypst] 随机背景图: {picked.name} (共 {len(candidates)} 张)"
@@ -227,15 +234,53 @@ class TypstRenderer:
         candidates.sort(key=lambda c: c.name)
         return candidates
 
+    def resolve_background_image(self, deterministic: bool = False) -> Path | None:
+        """当前配置下实际使用的背景图 (预览页用来标记「当前生效」项)"""
+        return self._resolve_background_image(deterministic)
+
+    def list_background_choices(self) -> list[tuple[str, Path]]:
+        """列出预览页可选的背景图 (文件名 → 路径, 按文件名排序)
+
+        合并显式配置的单图、自定义背景目录与默认背景目录; 预览请求只按文件名
+        回传选择, 因此同名图片由先出现的来源占位, 保证解析结果可复现。
+        """
+        choices: dict[str, Path] = {}
+        explicit = (self.cfg.header_background or "").strip()
+        if explicit:
+            path = Path(explicit)
+            if (
+                path.is_file()
+                and path.suffix.lower() in InternalCFG.BACKGROUND_IMAGE_EXTS
+                and verify_image_header(path)
+                and verify_image_format_matches_extension(path)
+            ):
+                choices[path.name] = path
+
+        scan_dirs: list[Path] = []
+        custom_dir = (self.cfg.background_dir or "").strip()
+        if custom_dir:
+            scan_dirs.append(Path(custom_dir))
+        scan_dirs.append(self.data_dir / InternalCFG.NAME_BACKGROUND_DIR)
+        for scan_dir in scan_dirs:
+            for path in self._scan_background_dir(scan_dir):
+                choices.setdefault(path.name, path)
+
+        return sorted(choices.items(), key=lambda item: item[0].lower())
+
     async def render(
         self,
         data_provider: Callable[[Path], int],
         mode: str,
         query: str | None = None,
+        force_temp: bool = False,
     ) -> tuple[RenderResult | None, str]:
-        """核心渲染流程"""
+        """核心渲染流程
+
+        force_temp: 网页预览用。为 True 时即使没有搜索词也走 temp_* 临时路径,
+        不读写静态缓存 —— 预览的样式是随手调的, 不能污染正式发图缓存。
+        """
         # 1. 确定路径策略
-        paths = self._resolve_paths(mode, query)
+        paths = self._resolve_paths(mode, query, force_temp)
         json_path, img_path, kv_key = paths["json"], paths["img"], paths["kv_key"]
         is_temp, req_id = paths["is_temp"], paths["req_id"]
 
@@ -535,9 +580,11 @@ class TypstRenderer:
             # 没有运行中的事件循环 (解释器退出等), 直接同步清一次
             self._discard_artifacts(stem)
 
-    def _resolve_paths(self, mode: str, query: str | None) -> dict[str, Any]:
+    def _resolve_paths(
+        self, mode: str, query: str | None, force_temp: bool = False
+    ) -> dict[str, Any]:
         """计算文件路径"""
-        if query:
+        if query or force_temp:
             uid = str(uuid.uuid4())
             return {
                 "json": self.data_dir / f"temp_{uid}.json",

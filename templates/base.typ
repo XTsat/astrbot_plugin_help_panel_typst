@@ -766,7 +766,8 @@
   // 确定是否有任何能力内容
   let has_capabilities = cmds.len() > 0 or groups.len() > 0 or listeners.len() > 0
 
-  block(
+  // 插件卡片整块保留, 分页发生在插件之间; 只有插件自身高于单页上限时才允许拆开
+  let card = block(
     width: 100%, fill: row_bg,
     stroke: 0.5pt + row_stroke, radius: 8pt,
     inset: (x: 10pt, y: if stacked { 10pt } else { 7pt }),
@@ -802,6 +803,11 @@
       listeners_section(listeners, disabled: pdisabled)
     }
   ]
+  context {
+    let card_height = measure(card).height
+    let must_break = max_page_height_pt > 0pt and card_height > max_page_height_pt
+    block(width: 100%, breakable: must_break)[#card]
+  }
 }
 
 // ============================================================
@@ -828,14 +834,9 @@
   let badge_bg   = color.lighten(82%)
   let badge_num  = on_color(badge_bg)
 
-  block(
-    width: 100%, breakable: false,
-    fill: luma(0, 4%), radius: card_radius,
-    inset: (bottom: 2pt, right: 2pt),
+  let inner = block(
+    width: 100%, fill: c_card, radius: 15pt, stroke: 1pt + c_border,
   )[
-    #block(
-      width: 100%, fill: c_card, radius: 15pt, stroke: 1pt + c_border,
-    )[
       // 主题色标题栏: 居中加粗标题 + 右侧计数徽章
       #block(
         width: 100%, fill: bar_fill, radius: (top: 14pt),
@@ -864,8 +865,19 @@
           ..plugins.map(p => if detail { plugin_item_detail(p, color) } else { plugin_item(p, color) })
         )
       ]
-    ]
   ]
+
+  // 分类卡片默认整体换页 (分页落在分类边界); 单页高度放不下整张卡片时
+  // 必须允许跨页拆开, 否则超出页面的内容会被直接裁掉, 表现为指令"没渲染完"
+  context {
+    let card_height = measure(inner).height
+    let must_break = max_page_height_pt > 0pt and card_height > max_page_height_pt
+    block(
+      width: 100%, breakable: must_break,
+      fill: luma(0, 4%), radius: card_radius,
+      inset: (bottom: 2pt, right: 2pt),
+    )[#inner]
+  }
 }
 
 // ============================================================

@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>样式预览</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app" id="app" data-state="loading">
+      <!-- ==================== 顶部标题栏 ==================== -->
+      <header class="topbar">
+        <div class="topbar-brand">
+          <svg
+            class="brand-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="3" />
+            <path d="M3 9h18M9 21V9" />
+          </svg>
+          <span class="brand-name">插件帮助面板</span>
+          <span class="brand-divider" aria-hidden="true">/</span>
+          <span class="brand-page">样式预览</span>
+        </div>
+        <div class="topbar-status" id="topbar-status" data-state="idle" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="topbar-status-text">正在加载…</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <!-- ==================== 左侧预览区 ==================== -->
+        <section class="preview-pane" aria-label="面板预览">
+          <div class="preview-toolbar">
+            <div class="zoom-controls" role="group" aria-label="预览缩放">
+              <button class="icon-btn" id="zoom-out" type="button" title="缩小" aria-label="缩小">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+              <span class="zoom-value" id="zoom-value" aria-live="off">100%</span>
+              <button class="icon-btn" id="zoom-in" type="button" title="放大" aria-label="放大">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <button class="text-btn" id="zoom-fit" type="button" title="缩放到适合预览区宽度">适应宽度</button>
+            </div>
+            <div class="preview-meta">
+              <span class="meta-item" id="meta-pages"></span>
+              <span class="meta-item" id="meta-render"></span>
+              <button
+                class="text-btn"
+                id="btn-open-image"
+                type="button"
+                disabled
+                title="在新标签页查看；若浏览器拦截新窗口，则改为下载第 1 页"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M14 4h6v6M20 4l-8 8" />
+                  <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+                </svg>
+                <span class="preview-tab-label">新标签页查看</span>
+              </button>
+            </div>
+          </div>
+
+          <p class="preview-hint" id="preview-hint" hidden>分页时每页都会包含品牌横幅</p>
+
+          <!-- 错误提示（保留上一次成功图片，不遮挡） -->
+          <div class="preview-error" id="preview-error" role="alert" hidden>
+            <span class="error-icon" aria-hidden="true">!</span>
+            <div class="error-body">
+              <p class="error-title" id="preview-error-title">渲染失败</p>
+              <p class="error-text" id="preview-error-text"></p>
+            </div>
+            <button class="btn btn-ghost btn-small" id="preview-error-retry" type="button">重试</button>
+          </div>
+
+          <div class="preview-body">
+            <div class="preview-viewport" id="preview-viewport">
+              <div class="preview-stage" id="preview-stage" aria-live="polite"></div>
+            </div>
+
+            <div class="preview-skeleton" id="preview-skeleton">
+              <div class="skeleton-page" aria-hidden="true"></div>
+              <p class="skeleton-text" id="preview-skeleton-text">正在加载预览…</p>
+            </div>
+
+            <div class="preview-empty" id="preview-empty" hidden>
+              <p class="empty-title">当前面板没有可展示的内容</p>
+              <p class="empty-text">试试清空搜索关键词，或切换到其它面板类型。</p>
+            </div>
+
+            <div class="preview-loading" id="preview-loading" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <span>正在渲染…</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 右侧控制栏 ==================== -->
+        <aside class="controls-pane" aria-label="样式设置">
+          <div class="controls-body" id="controls-body">
+            <details class="ct-section" open>
+              <summary>面板与内容</summary>
+              <div class="ct-section-body">
+                <div class="field">
+                  <span class="field-label">面板类型</span>
+                  <div class="segmented" id="mode-segmented" role="radiogroup" aria-label="面板类型"></div>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="query-input">搜索关键词</label>
+                  <div class="input-wrap">
+                    <input
+                      id="query-input"
+                      type="search"
+                      placeholder="留空显示全部，输入关键词过滤"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <button class="input-clear" id="query-clear" type="button" title="清空关键词" aria-label="清空关键词" hidden>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <details class="ct-section" open>
+              <summary>版式</summary>
+              <div class="ct-section-body">
+                <div class="field">
+                  <div class="field-head">
+                    <label class="field-label" for="page-width">页宽</label>
+                    <span class="field-value" id="page-width-value">600 pt</span>
+                  </div>
+                  <input type="range" id="page-width" min="360" max="1200" step="10" value="600" />
+                </div>
+                <div class="field">
+                  <div class="field-head">
+                    <label class="field-label" for="single-column-threshold">单列切换阈值</label>
+                    <span class="field-value" id="single-column-threshold-value">480 pt</span>
+                  </div>
+                  <input
+                    type="range"
+                    id="single-column-threshold"
+                    min="360"
+                    max="1200"
+                    step="10"
+                    value="480"
+                  />
+                  <p class="field-hint">页宽低于该值时改为单列排版</p>
+                </div>
+                <div class="field">
+                  <div class="field-head">
+                    <label class="field-label" for="split-height">分页高度</label>
+                    <span class="field-value" id="split-height-value">16000 px</span>
+                  </div>
+                  <input type="range" id="split-height" min="1000" max="16000" step="1000" value="16000" />
+                  <p class="field-hint">每页高度上限，默认与正式配置一致；上限随输出格式自动收敛</p>
+                </div>
+                <div class="field">
+                  <div class="field-head">
+                    <label class="field-label" for="ppi">图片清晰度</label>
+                    <span class="field-value" id="ppi-value">128 ppi</span>
+                  </div>
+                  <input type="range" id="ppi" min="72" max="384" step="8" value="128" />
+                  <p class="field-hint">与插件设置里的「图片清晰度」一致，应用配置时保存</p>
+                </div>
+                <div class="field">
+                  <div class="field-head">
+                    <label class="field-label" for="giant-threshold">独占行高度</label>
+                    <span class="field-value" id="giant-threshold-value">1500 px</span>
+                  </div>
+                  <input type="range" id="giant-threshold" min="100" max="3000" step="50" value="1500" />
+                  <p class="field-hint">事件 / 过滤器面板中超过该高度的卡片独占一行</p>
+                </div>
+                <label class="switch-row">
+                  <span>插件双行</span>
+                  <input type="checkbox" id="toggle-two-lines" />
+                  <span class="switch" aria-hidden="true"></span>
+                </label>
+                <label class="switch-row">
+                  <span>Hero 品牌横幅</span>
+                  <input type="checkbox" id="toggle-hero" />
+                  <span class="switch" aria-hidden="true"></span>
+                </label>
+                <div class="field" id="background-row">
+                  <label class="field-label" for="background-select">背景图</label>
+                  <select id="background-select"></select>
+                </div>
+              </div>
+            </details>
+
+            <details class="ct-section" open>
+              <summary>输出与性能</summary>
+              <div class="ct-section-body">
+                <div class="field">
+                  <label class="field-label" for="output-format">输出格式</label>
+                  <select id="output-format"></select>
+                  <p class="field-hint">WebP 体积最小；PNG 无损但更大；JPEG 体积接近 WebP</p>
+                </div>
+                <div class="field">
+                  <div class="field-head">
+                    <label class="field-label" for="timeout-analysis">数据生成超时</label>
+                    <span class="field-value" id="timeout-analysis-value">10 s</span>
+                  </div>
+                  <input type="range" id="timeout-analysis" min="1" max="60" step="1" value="10" />
+                  <p class="field-hint">插件较多时可适当调高，超时会返回可读错误</p>
+                </div>
+                <div class="field">
+                  <div class="field-head">
+                    <label class="field-label" for="timeout-compile">编译超时</label>
+                    <span class="field-value" id="timeout-compile-value">30 s</span>
+                  </div>
+                  <input type="range" id="timeout-compile" min="3" max="30" step="1" value="30" />
+                  <p class="field-hint">预览最多等待 30 秒；正式出图的并发等调度项仍以插件配置为准</p>
+                </div>
+              </div>
+            </details>
+
+            <details class="ct-section" open>
+              <summary>字体</summary>
+              <div class="ct-section-body">
+                <p class="field-hint">顺序即优先级；未选时跟随插件配置</p>
+                <div class="font-chips" id="font-chips"></div>
+                <input
+                  type="search"
+                  id="font-search"
+                  class="font-search"
+                  placeholder="搜索字体…"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div class="font-list" id="font-list" role="group" aria-label="可用字体"></div>
+              </div>
+            </details>
+
+            <details class="ct-section" open>
+              <summary>颜色</summary>
+              <div class="ct-section-body">
+                <div class="field">
+                  <span class="field-label" id="preset-label">主题预设</span>
+                  <div class="preset-list" id="preset-list" role="group" aria-labelledby="preset-label"></div>
+                  <p class="field-hint">选预设会整套换色，下方仍可逐个微调</p>
+                </div>
+                <div class="section-actions">
+                  <button class="text-btn" id="btn-restore-colors" type="button">恢复当前主题色</button>
+                </div>
+                <div class="color-groups" id="color-groups"></div>
+              </div>
+            </details>
+          </div>
+
+          <!-- 粘性底部操作栏 -->
+          <div class="controls-footer">
+            <div class="footer-status" id="footer-status" data-state="idle">
+              <span class="footer-dot" aria-hidden="true"></span>
+              <span id="footer-status-text">正在加载…</span>
+              <span class="footer-cached" id="footer-cached" hidden>缓存</span>
+            </div>
+            <p class="footer-error" id="footer-error" hidden></p>
+            <div class="footer-test-ppi">
+              <label class="footer-test-ppi-label" for="preview-ppi" title="只影响预览渲染的清晰度与速度，不会写入插件配置">渲染用测试精度</label>
+              <input type="range" id="preview-ppi" min="72" max="384" step="8" value="144" disabled />
+              <span class="footer-test-ppi-value" id="preview-ppi-value">144 ppi</span>
+            </div>
+            <div class="footer-actions">
+              <button class="btn btn-ghost" id="btn-reset" type="button" disabled title="回到打开页面时的配置样式，丢弃还没应用的修改">恢复默认</button>
+              <button class="btn btn-ghost" id="btn-import" type="button" disabled title="把插件当前配置读取到面板，丢弃还没应用的修改">导入当前配置</button>
+              <button class="btn btn-ghost" id="btn-refresh" type="button" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M20 11a8 8 0 1 0-2.34 5.66" />
+                  <path d="M20 4v7h-7" />
+                </svg>
+                刷新预览
+              </button>
+              <button class="btn btn-primary" id="btn-apply" type="button" disabled title="把面板样式写入插件配置，并重载插件使其生效">应用配置</button>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

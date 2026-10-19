@@ -314,14 +314,10 @@ class TypstPluginConfig:
             DefaultCFG.OUTPUT_FORMAT,
             DefaultCFG.OUTPUT_FORMATS,
         )
-        # 单张高度上限随格式走: WebP 16383 是硬限制, PNG/JPEG 可以更大
+        # 单图高度上限已并入分页高度, 不再单独配置: 直接取所选格式能承载的最大高度,
+        # 页面高度由 split_height 控制, 只要它不超过该值就不会再触发二次切片
         format_max_side = InternalCFG.FORMAT_MAX_SIDE[output_format]
-        webp_limit = _as_int(
-            raw_render.get("webp_limit"),
-            DefaultCFG.LIMIT_WEBP,
-            DefaultCFG.MIN_WEBP_LIMIT,
-            min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side),
-        )
+        webp_limit = min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side)
         render_cfg = RenderingConfig(
             timeout_analysis=_as_float(
                 raw_render.get("timeout_analysis"),
@@ -348,12 +344,12 @@ class TypstPluginConfig:
                 DefaultCFG.MAX_GIANT,
             ),
             webp_limit=webp_limit,
-            # 单个分片高度不能超过所选格式的单图上限, 否则切片后仍然写不进该格式
+            # 分页高度也不能超过所选格式的单图上限, 否则页面本身写不进该格式
             split_height=_as_int(
                 raw_render.get("split_height"),
                 DefaultCFG.LIMIT_SIDE,
                 DefaultCFG.MIN_SPLIT_HEIGHT,
-                min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side, webp_limit),
+                min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side),
             ),
             ppi=_as_float(
                 raw_render.get("ppi"),
