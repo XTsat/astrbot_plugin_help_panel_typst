@@ -465,7 +465,7 @@ class TypstLayout:
         return "#808E9D"
 
     def _fallback_color(self) -> str:
-        """兜底分类卡片颜色: 优先 category.fallback_color (hex 固定 / slot_N 随主题), 缺省灰蓝"""
+        """兜底分类卡片颜色: 优先 category.fallback_color (hex 固定 / slot_N 随主题), 空串灰蓝"""
         fc = self.cfg.category.fallback_color
         if fc.startswith("#"):
             return fc

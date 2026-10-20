@@ -695,9 +695,9 @@ function applyOptions(rawOptions, viewOptions = {}) {
       step: asNumber(ppiLimit.step, 8),
     },
     splitHeight: {
-      min: asNumber(splitLimit.min, 1000),
+      min: asNumber(splitLimit.min, 200),
       max: asNumber(splitLimit.max, 65500),
-      step: asNumber(splitLimit.step, 1000),
+      step: asNumber(splitLimit.step, 100),
     },
     singleColumnThreshold: {
       min: asNumber(singleColumnLimit.min, 360),

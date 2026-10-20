@@ -707,7 +707,7 @@ class PreviewService:
             _clamp_float(
                 rendering.split_height,
                 float(rendering.split_height),
-                InternalCFG.PREVIEW_MIN_SPLIT_HEIGHT,
+                DefaultCFG.MIN_SPLIT_HEIGHT,
                 _format_max_height(output_format),
             )
         )
@@ -783,9 +783,9 @@ class PreviewService:
                     "step": 8,
                 },
                 "split_height": {
-                    "min": InternalCFG.PREVIEW_MIN_SPLIT_HEIGHT,
-                    "max": InternalCFG.PREVIEW_MAX_SPLIT_HEIGHT,
-                    "step": 1000,
+                    "min": DefaultCFG.MIN_SPLIT_HEIGHT,
+                    "max": DefaultCFG.MAX_LIMIT_SIDE,
+                    "step": 100,
                 },
                 "single_column_threshold": {
                     "min": DefaultCFG.MIN_PAGE_WIDTH,
@@ -1229,7 +1229,7 @@ class PreviewService:
                     _clamp_float(
                         style.get("split_height"),
                         float(rendering.split_height),
-                        InternalCFG.PREVIEW_MIN_SPLIT_HEIGHT,
+                        DefaultCFG.MIN_SPLIT_HEIGHT,
                         float(_format_max_height(output_format)),
                     )
                 )

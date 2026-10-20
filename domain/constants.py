@@ -139,10 +139,6 @@ class InternalCFG:
     PREVIEW_TEST_PPI: float = 144.0
     PREVIEW_MIN_PAGE_WIDTH: float = 360.0
     PREVIEW_MAX_PAGE_WIDTH: float = 1200.0
-    # 预览的分页高度默认跟随插件配置，保证预览与正式发图的分页位置一致；
-    # 上限取配置项全范围，实际值再按输出格式的单图上限收敛
-    PREVIEW_MIN_SPLIT_HEIGHT: int = 1000
-    PREVIEW_MAX_SPLIT_HEIGHT: int = 65500
     # 实测 40 个插件最多 4 页, 再多只增加 base64 体积
     PREVIEW_MAX_PAGES: int = 4
     PREVIEW_MAX_QUERY_LEN: int = 80

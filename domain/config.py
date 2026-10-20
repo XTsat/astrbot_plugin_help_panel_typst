@@ -277,8 +277,9 @@ class CategoryConfig:
 
     rules: list[CategoryRule]
     fallback: str
-    # 兜底分类卡片颜色: "" 灰蓝 / slot_N 主题色槽 (随主题) / #RRGGBB 固定色
-    fallback_color: str = ""
+    # 兜底分类卡片颜色: slot_N 主题色槽 (随主题) / #RRGGBB 固定色;
+    # 默认与 load() 兜底、设置面板保持一致, 不要另留一套「灰蓝」空串默认
+    fallback_color: str = DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
 
     def match(self, title: str, desc: str = "") -> str:
         """按关键词归类: 名称命中优先于简介, 同层级长词优先, 平票按规则顺序
@@ -549,12 +550,12 @@ class TypstPluginConfig:
         raw_fallback = str(raw_category.get("fallback", "") or "").strip()
         fallback = raw_fallback or DefaultCFG.DEFAULT_CATEGORY_FALLBACK
 
-        # 兜底分类颜色: "" 灰蓝 / slot_N 主题色槽 (随主题) / #RRGGBB 固定色
+        # 兜底分类颜色: slot_0~slot_9 主题色槽 (随主题) / #RRGGBB 固定色; 留空取 DefaultCFG 默认槽位
         raw_fallback_color = str(raw_category.get("fallback_color", "") or "").strip()
         fallback_color = (
             raw_fallback_color or DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
         )
-        is_fallback_slot = bool(re.fullmatch(r"slot_\d+", fallback_color))
+        is_fallback_slot = bool(re.fullmatch(r"slot_[0-9]", fallback_color))
         if (
             fallback_color
             and not is_fallback_slot
@@ -562,9 +563,9 @@ class TypstPluginConfig:
         ):
             logger.warning(
                 f"[HelpTypst] 兜底分类颜色配置异常: '{fallback_color}' "
-                f"不是有效的十六进制颜色或色槽编号 (slot_N), 已回退为灰蓝"
+                f"不是有效的十六进制颜色或色槽编号 (slot_0~slot_9), 已回退为默认色槽"
             )
-            fallback_color = ""
+            fallback_color = DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
 
         raw_rules_list = raw_category.get("rules", None)
         if not isinstance(raw_rules_list, list):
