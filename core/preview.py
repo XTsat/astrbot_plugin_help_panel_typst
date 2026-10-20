@@ -624,14 +624,32 @@ class PreviewService:
         self._cache = _PreviewCache()
         # 预览编译串行化：Typst 子进程本身不便宜，并发请求只会互相拖慢
         self._render_lock = asyncio.Lock()
+        # 模板超出解析上限只提示一次: options 会被前端轮询, 每次刷日志没有意义
+        self._preset_overflow_warned = False
 
     # ---- options ----
 
     def _conf_preset_entries(self) -> list[dict[str, Any]]:
-        """按配置列表顺序读出自定义模板(含启用标记): 首条即面板上的「自定义」"""
+        """按配置列表顺序读出自定义模板(含启用标记): 首条即面板上的「自定义」
+
+        与「应用」使用同一上限 (PREVIEW_CUSTOM_PRESET_HARD_MAX): 面板显示多少条
+        就保存多少条, 否则面板露出的条目会在应用时被静默截掉。
+        """
         entries: list[dict[str, Any]] = []
         used: set[str] = {DefaultCFG.CUSTOM_PRESET_KEY}
-        for index, preset in enumerate(self.base_config.appearance.preset_entries):
+        conf_entries = self.base_config.appearance.preset_entries
+        if (
+            len(conf_entries) > InternalCFG.PREVIEW_CUSTOM_PRESET_HARD_MAX
+            and not self._preset_overflow_warned
+        ):
+            self._preset_overflow_warned = True
+            logger.warning(
+                f"[HelpTypst] 自定义模板共 {len(conf_entries)} 条, 超过上限 "
+                f"{InternalCFG.PREVIEW_CUSTOM_PRESET_HARD_MAX} 条, 超出部分不显示也不参与应用"
+            )
+        for index, preset in enumerate(
+            conf_entries[: InternalCFG.PREVIEW_CUSTOM_PRESET_HARD_MAX]
+        ):
             if index == 0:
                 name = DefaultCFG.CUSTOM_PRESET_KEY
             else:

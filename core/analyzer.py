@@ -365,7 +365,8 @@ class BaseAnalyzer:
 
         插件的 handler 常定义在与 main 同级的子模块里, 只取精确命中的模块会让那些
         指令在面板上静默消失。归属按「插件根模块 + 本模块父包」两重前缀判定,
-        再把已知其它插件的根模块下的 key 排除掉, 避免相邻插件被误并进来。
+        再把已知其它插件的根模块与其所在包排除掉, 避免相邻插件或同目录内嵌的
+        子插件被误并进来。
         """
         roots = [raw_module]
         if "." in raw_module:
@@ -381,11 +382,27 @@ class BaseAnalyzer:
             for root in star_roots
             if raw_module == root or raw_module.startswith(root + ".")
         )
-        foreign = [
-            root
-            for root in star_roots
-            if not (raw_module == root or raw_module.startswith(root + "."))
-        ]
+        # 其它插件的排除前缀: 根模块本身 + 它所在的包
+        # 只排根模块不够 —— 插件目录里再注册一个 Star (内嵌子插件) 时, 子插件的
+        # 兄弟模块与我们同处一个父包, 会被当成「我们的模块」并进来, 同一条指令就在
+        # 两张插件卡片上各出现一次。排除它的包前缀即可, 但别排到我们自己的祖先层。
+        own_prefixes = (raw_module, raw_module.rsplit(".", 1)[0] if "." in raw_module else "")
+        foreign: list[str] = []
+        for root in star_roots:
+            if raw_module == root or raw_module.startswith(root + "."):
+                continue
+            foreign.append(root)
+            package = root.rsplit(".", 1)[0] if "." in root else ""
+            if not package:
+                continue
+            # 只跳过「就是我们自己或我们的祖先」的包: 排掉祖先层会连自己的兄弟模块一起丢掉
+            if any(
+                package == own or own.startswith(package + ".")
+                for own in own_prefixes
+                if own
+            ):
+                continue
+            foreign.append(package)
 
         keys: set[str] = set()
         for root in roots:

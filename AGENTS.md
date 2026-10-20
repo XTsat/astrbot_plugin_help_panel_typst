@@ -201,7 +201,7 @@ class HelpTypst(Star):
 | 模块级常量 | `UPPER_SNAKE`（`DELAY_SEND`、`BACKGROUND_IMAGE_EXTS`） |
 | 私有方法 | `_` 前缀 + `snake_case`（`_get_config_snapshot`） |
 | 命令方法 | `cmd_` 前缀（`cmd_scan_fonts`；历史 `show_*` 保留） |
-| Web API 方法 | `api_` 前缀（本插件暂无 Web API） |
+| Web API 方法 | `api_` 前缀（`api_preview_options`、`api_preview_render`、`api_preview_apply`，注册于 `main.py`） |
 | 类名 | `PascalCase`（`TypstRenderer`、`FontManager`） |
 | 文件名 / 模块 | `snake_case`（`renderer.py`、`analyzer.py`） |
 | 配置 key | `snake_case`（`background_random`、`rescan_fonts`） |

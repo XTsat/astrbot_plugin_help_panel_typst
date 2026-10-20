@@ -108,7 +108,8 @@ class FontManager:
             live_schema: `config.schema`; 缺省或结构异常时静默跳过。
 
         字体选项仅在 `scan_fonts()` 成功时改写: 扫描失败得到的是空集合,
-        写回会把配置面板的字体下拉框清空, 因此失败时保留原有选项。
+        写回会把配置面板的字体下拉框清空, 因此失败时保留原有选项; 若连原有
+        选项都没有 (首次启动即失败), 用内置默认字体兜底, 避免下拉框空着。
         """
         if not isinstance(live_schema, dict):
             return
@@ -142,8 +143,19 @@ class FontManager:
                     font_item["options"] = families
                     changed = True
             else:
+                # 扫描失败时磁盘 schema 已不再携带静态 options, 若面板此刻还没有选项,
+                # 就用内置默认字体兜底: 否则字体下拉为空, 用户连默认字体都选不回来
+                if not font_item.get("options"):
+                    fallback = [
+                        family
+                        for family in DefaultCFG.DEFAULT_FONT_ORDER
+                        if family != DefaultCFG.EMOJI_FONT
+                    ]
+                    if fallback:
+                        font_item["options"] = fallback
+                        changed = True
                 logger.warning(
-                    "[HelpTypst] 字体扫描未成功，保留原字体选项 (不改写 Schema options)"
+                    "[HelpTypst] 字体扫描未成功，沿用已有字体选项 (无选项时用内置默认字体兜底)"
                 )
 
         if changed:

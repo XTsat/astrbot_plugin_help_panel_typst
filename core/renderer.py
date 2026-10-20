@@ -86,6 +86,9 @@ class TypstRenderer:
         )
         # 静态资源锁 (每个静态 mode 一把, 避免同模式重复编译)
         self._cache_locks = {k: asyncio.Lock() for k in InternalCFG.CACHE_FILES.keys()}
+        # 超时编译的看门狗句柄 (stem → TimerHandle): 子进程真挂死时由它强制收尾,
+        # 否则令牌永不归还, 并发上限被占满后只能重载插件恢复
+        self._token_holds: dict[str, asyncio.TimerHandle] = {}
 
     def _get_config_snapshot(self, bg_image: Path | None = None) -> dict[str, Any]:
         """渲染配置的快照字典
@@ -622,7 +625,19 @@ class TypstRenderer:
         artifact_stem: str,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
-        """超时/取消的编译: 等子进程真正退出后再清迟到产物并归还令牌"""
+        """超时/取消的编译: 等子进程真正退出后再清迟到产物并归还令牌
+
+        子进程卡死不退出时 done 回调永不触发, 因此同时挂一个看门狗: 持有超过
+        `COMPILE_TOKEN_HOLD_FACTOR` 倍 `timeout_compile` 就强制收尾, 把「并发令牌
+        被永久占满」降级成「这一次编译彻底放弃」。
+        """
+        hold_limit = (
+            float(self.cfg.rendering.timeout_compile)
+            * InternalCFG.COMPILE_TOKEN_HOLD_FACTOR
+        )
+        self._token_holds[artifact_stem] = loop.call_later(
+            hold_limit, self._abandon_hung_worker, pool, artifact_stem
+        )
 
         def _on_worker_done(_future: Future[list[str]]) -> None:
             try:
@@ -630,8 +645,10 @@ class TypstRenderer:
                     self._finish_timed_out_compile, pool, artifact_stem
                 )
             except RuntimeError:
-                # 事件循环已关闭 (插件卸载): 只清产物, 不能再碰信号量
+                # 事件循环已关闭 (插件卸载): 清产物并关池; 信号量已无意义, 不再碰
+                self._token_holds.pop(artifact_stem, None)
                 self._discard_artifacts(artifact_stem)
+                pool.shutdown(wait=False, cancel_futures=True)
 
         future.add_done_callback(_on_worker_done)
 
@@ -639,10 +656,33 @@ class TypstRenderer:
         self, pool: ProcessPoolExecutor, artifact_stem: str
     ) -> None:
         """超时编译的收尾: 清迟到产物 → 归还令牌 → 关闭进程池"""
+        if not self._release_token_hold(artifact_stem):
+            return  # 看门狗已经收尾过, 令牌与进程池都不必再动
         self._discard_artifacts(artifact_stem)
         self._compile_semaphore.release()
         pool.shutdown(wait=False, cancel_futures=True)
         logger.info("[HelpTypst] 超时的编译子进程已结束, 已清理迟到产物并归还并发令牌")
+
+    def _abandon_hung_worker(
+        self, pool: ProcessPoolExecutor, artifact_stem: str
+    ) -> None:
+        """看门狗: 子进程迟迟不退出时放弃本次编译并交还令牌, 保证后续渲染还能跑"""
+        if not self._release_token_hold(artifact_stem):
+            return
+        self._discard_artifacts(artifact_stem)
+        self._compile_semaphore.release()
+        pool.shutdown(wait=False, cancel_futures=True)
+        logger.error(
+            "[HelpTypst] 编译子进程超过超时上限仍未退出, 已放弃本次编译并归还并发令牌"
+        )
+
+    def _release_token_hold(self, artifact_stem: str) -> bool:
+        """取回并取消该 stem 的看门狗; 已被收尾过 (无记录) 时返回 False"""
+        handle = self._token_holds.pop(artifact_stem, None)
+        if handle is None:
+            return False
+        handle.cancel()
+        return True
 
     def _resolve_paths(
         self, mode: str, query: str | None, force_temp: bool = False
