@@ -31,7 +31,7 @@
 |---|---|---|
 | `main.py` | ✅ | 插件入口：注册指令、组装组件、请求编排与消息收发（含自我重载） |
 | `metadata.yaml` | ✅ | 插件元信息（name、version、author、desc、repo、astrbot_version、tags） |
-| `_conf_schema.json` | ✅ | WebUI 配置 Schema；字体/预设下拉 `options` 会在运行时被改写 |
+| `_conf_schema.json` | ✅ | WebUI 配置 Schema；字体/插件下拉 `options` 在运行时同步到内存 Schema，**不改写磁盘文件** |
 | `README.md` | ✅ | 中文文档（功能、指令、配置、常见问题），面向使用者 |
 | `CHANGELOG.md` | ✅ | 变更日志，顶部固定 `[Unreleased]` |
 | `LICENSE` | ✅ | 许可证 |
@@ -84,8 +84,8 @@ cache_menu_{command,command_detail,event,filter}.json/.png/.webp(_partN)   # 静
 temp_<uuid>.json/.png/.webp(_partN)                                        # 搜索/详情临时文件
 ```
 
-- 插件初始化时：扫描字体、同步 schema、清洗非法字体选项、导入内置背景图。
-- 插件卸载时：清理 `temp_*`，并再次扫描字体以刷新配置面板 schema。
+- 插件初始化时：扫描字体、同步内存 Schema（字体/预设/屏蔽插件下拉）、清洗非法字体选项、导入内置背景图。
+- 插件卸载时：清理 `temp_*`，并再次扫描字体以刷新配置面板的字体选项（仅内存）。
 
 ### 2.3 架构风格与分层约束
 
@@ -262,8 +262,8 @@ class HelpTypst(Star):
 - 新增配置项**先**在 `_conf_schema.json` 补 schema（`type` / `hint` / `default` / `options`），**再**在代码中实现读取。
 - 默认值在 **`DefaultCFG` 与 `_conf_schema.json` 的 `default` 两处维护**，修改时必须同步（例如 `ignored_plugins`、字体缺省项）。
 - 文档（README 配置说明、CHANGELOG）引用配置项时，统一写成**「中文名（`key`）」**：中文名取自 schema 的 `hint`，key 用反引号包裹，例如「背景图随机选择（`background_random`）」。
-- 新增会影响布局/图片输出的配置项，必须同时加入 `InternalCFG.CACHE_SENSITIVE_CONFIGS`（见 §5.4）；`rendering` 下的 `ppi`、`webp_limit`、`split_height`、`giant_threshold` 均已入表。
-- 新增主题预设只需在 `DefaultCFG.PRESETS` 登记配色；`active_preset` 与字体下拉 `options` 由 `FontManager.update_json_schema` 在运行时自动同步，不要手改 schema 的 `options`。
+- 新增会影响布局/图片输出的配置项，必须同时加入 `InternalCFG.CACHE_SENSITIVE_CONFIGS`（见 §5.4）；`rendering` 下的 `ppi`、`split_height`、`giant_threshold`、`output_format` 均已入表（`webp_limit` 已并入 `split_height`，不再是配置项）。
+- 新增主题预设只需在 `DefaultCFG.PRESETS` 登记配色；`active_preset` 与字体下拉 `options` 由 `FontManager.update_json_schema` 在运行时同步到内存 Schema，不要手改 schema 的 `options`。
 
 ### 5.2 配置读取与默认值
 
@@ -303,7 +303,7 @@ class HelpTypst(Star):
 - 搜索路径 = `resources/fonts` + 自定义字体目录（`custom_font_path`，留空为数据目录 `fonts/`）+ 系统字体目录。**扫描与编译共用** `FontManager.get_search_paths()`，改路径逻辑时两边自动一致。
 - `typst.Fonts(font_paths=...)` 扫描字体家族；选择框排除固定表情字体 `DefaultCFG.EMOJI_FONT`。
 - 渲染字体列表 = 用户选定且可用的字体 + 兜底（`DefaultCFG.DEFAULT_FONT_ORDER`）+ **固定追加** `Noto Color Emoji`（`get_render_font_list`，保证列表非空）。
-- Schema 同步：`FontManager.update_json_schema` 会同时改写磁盘 `_conf_schema.json` 与内存 live schema（`config.schema`），使新字体/预设无需重载即出现在面板；`prune_invalid_config_items` 清理已失效选择。
+- Schema 同步：`FontManager.update_json_schema` 只改写内存 live schema（`config.schema`），不写磁盘 `_conf_schema.json`，使新字体/预设无需重载即出现在面板；`prune_invalid_config_items` 清理已失效选择。
 - `appearance.rescan_fonts` 是**一次性开关**：插件初始化/卸载时扫描字体，随后自动复位为 false。
 - 新增字体格式支持 → 同步 `font.py` 的扫描过滤、`README.md` 的字体说明，并确认 `typst` 编译侧支持。
 
@@ -377,7 +377,7 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 **流程**
 
 - 顶部固定 `## [Unreleased]`；日常改动先记在这里，**发版时**再移动到 `## vX.Y.Z (YYYY-MM-DD)`（新版本在上）。
-- 多个不相关改动各自独立成条，不要合并。
+- **先记后合**：记录阶段同一工作周期内的改动各自独立成条（同一功能的多处调整也先各记一条，避免遗漏）；提交或发版前的整理阶段统一过一遍 `[Unreleased]`，把描述同一件事的多条合并成一条，不相关改动保持独立。
 - 发版日期填**当前日期**（以发版当天系统时间为准）。
 - **多会话并行**：更新前必须先读取当前文件，识别并保留其它会话已写入的条目，只追加自己的条目，**严禁整文件覆盖或删除他人记录**。
 
@@ -407,12 +407,16 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 - 写「用户能做什么 / 会看到什么 / 行为与默认值有什么不同」；不写类名、函数名、数据结构、算法、缓存与并发策略、日志埋点、重构过程。
 - 不出现代码标识符与文件路径；用户直接接触的命令名、配置项 key 除外。
 - 无用户感知的改动（纯内部重构、格式化、注释调整）不记入 CHANGELOG。
+- 只写相对上一版的变化：只讲差异，不复述仍然有效的旧功能，不写「继续优化」「体验更好」这类没有信息量的空话。
+- 同一个变化合并成一条：同一功能的多处调整、跨多个提交的同一件事，在提交或发版前的整理阶段合并为一条，不在不同分类或不同版本段重复出现。
+- 一句话说清改了什么：按「做了什么 + 用户得到什么」写完，不加背景、动机与实现过程。
 - 判断标准：使用者读完一条，能决定「要不要升级、升级后有什么不同」。
 
-**版本号联动**
+**版本号（准备发布时才确认）**
 
-- 涉及功能新增/删除、行为变化、配置项变化时，三处同步：`metadata.yaml` 的 `version`、`CHANGELOG.md` 新版本段、`README.md` 的版本信息（如有）。
-- 纯修复/内部重构可只更新 `[Unreleased]`，不递增版本号。
+- **日常开发不碰版本号**：只往 `[Unreleased]` 追加条目，`metadata.yaml` 的 `version` 保持原值；每个功能、每个修复各自独立提交，提交里不带版本号变更。
+- **发版时一次确认**：把 `[Unreleased]` 移入 `## vX.Y.Z (YYYY-MM-DD)` 的同一次操作里才递增版本号（SemVer 见 §8.3），改 `metadata.yaml` 的 `version`，把 README 的版本信息等辅助位置同步成同一版本号，再打 `git tag vX.Y.Z`。**不能每改一点就递增**，否则版本号会随提交次数突进、与实际发布节奏脱节。
+- **唯一版本源**：`metadata.yaml` 的 `version` 字段；README 的版本徽章与正文版本字样属于辅助信息，不是版本源，需要展示版本时以 `metadata.yaml` 为准。
 
 ### 7.2 README
 
@@ -479,8 +483,8 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 - **提交前必须先向用户展示以下内容，等用户确认后再执行 `git commit`**：
   - 待提交文件清单；
   - 改动概要（如 `git diff --stat` 或等价说明）；
-  - 提交标题。
-  - 涉及推送时，另附提交 hash 与目标分支。
+  - **提交标题，尽量给 2–3 个候选**（不同侧重点：做了什么 / 为什么改 / 是否带 scope），逐条注明侧重并标出推荐项；确实只有一种合理写法时才给一个；
+  - 用户选定标题（或自拟）后才 commit；涉及推送时另附提交 hash 与目标分支。
 - **授权一次性，不延续**：
   - 用户的确认只对当次动作生效；下一次改动必须重新展示、重新确认。
   - 展示后改动内容又变了（用户提了新要求、又改了文件，哪怕只改一行），**原确认立即失效**，必须重新展示并再次确认。
@@ -492,8 +496,8 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 ### 8.3 版本号与发布
 
 - 采用 **SemVer**：新功能 → `minor` 递增；bug 修复 / 小改进 → `patch` 递增；破坏性变更 → `major`。
-- `metadata.yaml` 的 `version` 与 `CHANGELOG.md` 最新版本必须一致。
-- 发版时打 `git tag vX.Y.Z`；tag 推送同样需用户确认。
+- **只在发版时递增一次**（规则见 §7.1）：单个功能/修复提交不碰版本号，逐次递增会让版本号随提交次数突进。
+- 发版一致性：`metadata.yaml` 的 `version` = `CHANGELOG.md` 新版本段号 = `git tag vX.Y.Z`；tag 推送同样需用户确认。
 
 ### 8.4 验证
 
@@ -501,7 +505,7 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 - 若项目已补充单测，改动后需保证测试通过。
 - 格式化：`python -m ruff format .`（项目历史使用 ruff；未安装可先 `pip install ruff`，不要写入 `requirements.txt`）。
 - 涉及渲染的改动需人工核对缓存失效逻辑（见 §5.4），必要时清缓存后重测。
-- **注意运行时改写**：插件初始化/卸载会按本机字体环境重写 `_conf_schema.json` 的 `options`（字体与预设），提交前查看 `git diff`，避免把本机字体列表当成本次改动带入提交。
+- **不要手改 schema 的 `options`**：字体与屏蔽插件选项由运行时写入内存 Schema，磁盘 `_conf_schema.json` 不再被运行时改写；`git diff` 里出现 `options` 差异说明有人手改过，需要人工核对。
 
 ---
 
@@ -510,11 +514,11 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 - [ ] 架构：改动落在既有分层（`main → core → utils/domain`），未破坏依赖方向
 - [ ] 注释：只写 non-obvious reason，无残留旧代码 / 调试输出 / 半成品 TODO
 - [ ] 日志：`[HelpTypst]` 前缀，异常分类记录，无空 `except`（或已注释理由）
-- [ ] CHANGELOG：`[Unreleased]` 已按分组式追加条目，面向用户，保留了他人既有记录
+- [ ] CHANGELOG：`[Unreleased]` 已按分组式追加条目，**只写相对上一版的变化**、同一变化已合并为一条（无重复条目），面向用户，保留了他人既有记录
 - [ ] README：涉及用户可见变更时已同步，且面向用户书写（无实现原理与内部细节）
-- [ ] 版本号：`metadata.yaml` 与 `CHANGELOG.md` 最新版本一致（发版时）
+- [ ] 版本号：日常任务不递增版本号；发版时才改 `metadata.yaml` 的 `version`（与 CHANGELOG 新版本段、tag 一致）并同步 README 版本信息
 - [ ] 配置：schema 与代码同步，默认值两处一致，布局相关配置已入 `CACHE_SENSITIVE_CONFIGS`
 - [ ] 指令：docstring（展示描述）、别名、权限、README 命令表已同步
 - [ ] 缓存：改模板后已清缓存；新增渲染模式已登记 `CACHE_FILES`
-- [ ] 提交：Conventional Commits 格式；已展示文件清单 / 改动概要 / 提交标题，并取得**本轮**对**本次改动**的明确确认
+- [ ] 提交：Conventional Commits 格式；已展示文件清单 / `git diff --stat` / 2–3 个候选提交标题（注明侧重与推荐项），并取得**本轮**对**本次改动**的明确确认
 - [ ] 本地自检：`python -m compileall -q .`（及 ruff 格式）通过
