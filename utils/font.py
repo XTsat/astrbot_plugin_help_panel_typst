@@ -82,7 +82,7 @@ class FontManager:
             self._last_scan_ok = True
             count = len(self.available_families)
             logger.info(f"[HelpTypst] Typst 扫描完成，识别到 {count} 个字体家族")
-            logger.debug(f"可用字体: {self.available_families}")
+            logger.debug(f"[HelpTypst] 可用字体: {self.available_families}")
             return True
 
         except Exception as e:

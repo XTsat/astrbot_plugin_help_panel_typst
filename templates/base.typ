@@ -39,7 +39,9 @@
 #let plugin_two_lines = data.at("plugin_two_lines", default: false)
 
 // 编号徽章统一宽度: 徽章若随位数变宽, 9→10 时整列插件名会跟着左右错位
-#let order_digits = calc.max(1, str(data.at("plugin_count", default: 0)).len())
+// 优先用 Python 侧按最大编号算出的位数 (插件数 ≠ 最大编号, 屏蔽/过滤后可能不等);
+// 旧缓存 JSON 无此键时回落为插件总数的位数
+#let order_digits = calc.max(1, data.at("order_digits", default: str(data.at("plugin_count", default: 0)).len()))
 
 // 分类计数徽章同样按最长位数统一宽度: 4 与 14 位数不同时徽章一长一短, 并排看很明显
 #let count_digits = {
@@ -434,8 +436,8 @@
             #grid(
               columns: (auto, auto, auto),
               column-gutter: 12pt,
-              stat(str(total), "总插件", c_sky),
-              stat(str(enabled), "已开启", c_cream, divided: true),
+              stat(str(total), "总插件", readable_title_color(c_sky)),
+              stat(str(enabled), "已开启", readable_title_color(c_cream), divided: true),
               stat(system_name, "人格", c_navy, divided: true),
             )
           ],

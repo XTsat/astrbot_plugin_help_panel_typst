@@ -185,16 +185,17 @@ class HelpTypst(Star):
 
     def _refresh_resources(self):
         try:
-            # 1. 扫描; 失败时 scan_fonts 已记录原因, 这里回报一次并跳过后续 schema/配置清洗
-            if not self.font_manager.scan_fonts():
+            # 1. 扫描; 失败时 scan_fonts 已记录原因, 仅跳过字体相关的下拉与清洗
+            scanned = self.font_manager.scan_fonts()
+            if not scanned:
                 logger.warning("[HelpTypst] 字体扫描未成功, 已保留原有字体选项")
-                return
 
             # 2. 同步内存 Schema (只改 config.schema, 不写磁盘文件): 新字体无需重载即可出现在配置面板
+            #    预设项与字体扫描无关, 扫描失败也要同步; 字体项由 update_json_schema 内部按 _last_scan_ok 守卫
             live_schema = getattr(self.config, "schema", None)
             self.font_manager.update_json_schema(live_schema)
 
-            # 3. 清洗 Config
+            # 3. 清洗 Config (扫描失败时 prune 内部自行跳过)
             self.font_manager.prune_invalid_config_items(self.config)
 
         except Exception as e:
@@ -291,6 +292,7 @@ class HelpTypst(Star):
                     if f.exists():  # 双重检查
                         f.unlink()
                 except OSError:
+                    # 文件可能已被其它请求清理, 或目录只读; 清理失败不影响发送
                     pass
 
         except Exception as e:
@@ -741,6 +743,7 @@ class HelpTypst(Star):
                     if isinstance(item, dict):
                         return dict(item)
         except (KeyError, TypeError):
+            # 旧版/残缺 schema 缺 presets 模板时走下方兜底模板, 无需告警
             pass
         template: dict[str, Any] = {
             "__template_key": "standard_theme",

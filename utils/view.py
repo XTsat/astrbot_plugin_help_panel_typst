@@ -214,6 +214,15 @@ class TypstLayout:
         width = self.cfg.rendering.page_width
         return 3 if width >= InternalCFG.DESIGN_PAGE_WIDTH else 2
 
+    @staticmethod
+    def _order_digits(plugins: list[PluginMetadata]) -> int:
+        """编号徽章的位数: 取最大编号的位数
+
+        插件数 ≠ 最大编号: 屏蔽/搜索后子集的最大编号可能远大于条目数,
+        徽章位宽不够时, 两位编号会把右侧插件名顶歪。
+        """
+        return max(1, len(str(max((p.order for p in plugins), default=0))))
+
     def _generate_balanced_payload(
         self,
         plugins: list[PluginMetadata],
@@ -321,6 +330,7 @@ class TypstLayout:
             "prefixes": prefixes,
             "fonts": font_list,
             "plugin_count": len(plugins),
+            "order_digits": self._order_digits(plugins),
             "enabled_count": sum(1 for p in plugins if not p.disabled),
             "category_columns": cols,
         }
@@ -346,6 +356,7 @@ class TypstLayout:
             "prefixes": prefixes,
             "fonts": font_list,
             "plugin_count": len(plugins),
+            "order_digits": self._order_digits(plugins),
             "enabled_count": sum(1 for p in plugins if not p.disabled),
             "category_columns": cols,
         }

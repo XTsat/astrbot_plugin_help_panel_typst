@@ -308,7 +308,7 @@
     "type": "object",
     "items": {
       "timeout_analysis": {
-        "description": "数据分析超时 (秒)",
+        "description": "数据生成超时 (秒)",
         "type": "float",
         "slider": {
           "min": 3,
@@ -422,29 +422,12 @@
         "description": "当前使用的样式预设",
         "type": "string",
         "default": "zhenxun",
-        "options": [
-          "zhenxun",
-          "Forest",
-          "Sunset",
-          "Amethyst",
-          "自定义"
-        ],
-        "labels": [
-          "真寻",
-          "墨竹",
-          "落日",
-          "夜鸢",
-          "自定义"
-        ],
-        "hint": "选择要使用的样式：内置预设配色固定；选择「自定义」时使用下方列表第一条（固定名为「自定义」）的配色"
+        "hint": "选择要使用的样式：内置预设配色固定；选择「自定义」时使用下方列表第一条（固定名为「自定义」）的配色。选项与中文名由插件启动时按内置预设同步到面板，无需手写"
       },
       "font_order": {
         "description": "字体优先级排序",
         "type": "list",
         "default": [
-          "LXGW Neo XiHei"
-        ],
-        "options": [
           "LXGW Neo XiHei"
         ],
         "hint": "全局字体使用顺序（按选择顺序生效）。选项自动收录：内置字体 + 自定义目录字体 + 系统字体库；也支持直接输入字体名（需存在于系统中）。扫描不到的字体会被自动剔除"

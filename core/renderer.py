@@ -310,7 +310,7 @@ class TypstRenderer:
                 except asyncio.TimeoutError:
                     if is_temp and json_path.exists():
                         json_path.unlink(missing_ok=True)
-                    return None, "数据分析超时，请检查插件列表是否过长"
+                    return None, "数据生成超时，请检查插件列表是否过长"
 
                 if count == 0:
                     if is_temp and json_path.exists():
@@ -486,7 +486,8 @@ class TypstRenderer:
                     # 这里吞掉删除异常，避免掩盖主异常 e
                     logger.warning(f"[HelpTypst] 清除缓存失败: {del_err}")
 
-            return None, f"渲染过程出错: {str(e)}"
+            # 详细异常（含部署路径）只进日志，聊天窗口给通用提示
+            return None, "渲染失败：请稍后重试；若持续失败请查看插件日志"
 
         return None, "未知错误"
 
