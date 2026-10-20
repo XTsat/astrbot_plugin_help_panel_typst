@@ -39,7 +39,6 @@ class HelpTypst(Star):
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self.template_path = self.plugin_dir / "templates" / InternalCFG.NAME_TEMPLATE
-        self.schema_path = self.plugin_dir / "_conf_schema.json"
 
         # 2. 配置加载
         self.config = config
@@ -191,11 +190,9 @@ class HelpTypst(Star):
                 logger.warning("[HelpTypst] 字体扫描未成功, 已保留原有字体选项")
                 return
 
-            # 2. 更新 Schema (磁盘文件 + 内存存活 schema, 使新字体无需重载即可出现在配置面板)
+            # 2. 同步内存 Schema (只改 config.schema, 不写磁盘文件): 新字体无需重载即可出现在配置面板
             live_schema = getattr(self.config, "schema", None)
-            self.font_manager.update_json_schema(
-                self.schema_path, live_schema=live_schema
-            )
+            self.font_manager.update_json_schema(live_schema)
 
             # 3. 清洗 Config
             self.font_manager.prune_invalid_config_items(self.config)
@@ -207,7 +204,7 @@ class HelpTypst(Star):
             self._sync_plugin_options()
 
     def _sync_plugin_options(self) -> None:
-        """把已安装插件写进屏蔽项的 Schema 选项 (磁盘 + 内存)
+        """把已安装插件写进屏蔽项的 Schema 选项 (只改内存 schema)
 
         额外保留配置里未安装的旧名字: 面板只显示 options 内的值, 缺失会变成
         「看不见也删不掉」的幽灵屏蔽。
@@ -221,7 +218,6 @@ class HelpTypst(Star):
                 if name not in installed
             )
             sync_plugin_options(
-                self.schema_path,
                 getattr(self.config, "schema", None),
                 plugins,
                 extra,

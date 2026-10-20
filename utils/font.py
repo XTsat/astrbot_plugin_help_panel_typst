@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -8,7 +7,6 @@ import typst
 from astrbot.api import logger
 
 from ..domain import DefaultCFG
-from .schema import write_schema_atomic
 
 
 def _preset_options() -> tuple[list[str], list[str]]:
@@ -99,95 +97,59 @@ class FontManager:
         """
         return sorted(f for f in self.available_families if f != DefaultCFG.EMOJI_FONT)
 
-    def _write_schema_atomic(self, schema_path: Path, schema: dict[str, Any]) -> bool:
-        # 与屏蔽插件选项共用同一套原子写, 避免两处实现漂移
-        return write_schema_atomic(schema_path, schema)
+    def update_json_schema(self, live_schema: dict[str, Any] | None = None) -> None:
+        """同步内存 Schema 的下拉选项 (内置样式预设 & 全局字体)
 
-    def update_json_schema(
-        self, schema_path: Path, live_schema: dict[str, Any] | None = None
-    ) -> None:
-        """更新 Schema options (内置样式下拉项 & 全局字体选项)
+        只改内存中的 `config.schema` (配置面板实时读取它), 不写磁盘
+        `_conf_schema.json`: 把本机字体列表写回插件目录会让升级或提交时
+        混入环境差异。
 
         Args:
-            schema_path: `_conf_schema.json` 的磁盘路径。
-            live_schema: AstrBot 启动时从磁盘加载、当前内存中存活的 schema 字典
-                (即 `config.schema`, 配置面板实时读取它)。若提供则同步更新,
-                使新扫描的字体无需重载插件即可立即出现在配置面板下拉框中。
+            live_schema: `config.schema`; 缺省或结构异常时静默跳过。
 
         字体选项仅在 `scan_fonts()` 成功时改写: 扫描失败得到的是空集合,
         写回会把配置面板的字体下拉框清空, 因此失败时保留原有选项。
         """
-        if not schema_path.exists():
+        if not isinstance(live_schema, dict):
             return
         try:
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema = json.load(f)
+            live_items = live_schema["appearance"]["items"]
+        except (KeyError, TypeError):
+            return
+        if not isinstance(live_items, dict):
+            return
 
-            changed = False
+        changed = False
 
-            # 1. 内置样式预设下拉项 (与 DefaultCFG.PRESETS 保持同步, 含「自定义」)
-            try:
-                target = schema["appearance"]["items"]["active_preset"]
-                options, labels = _preset_options()
-                if target.get("options") != options:
-                    target["options"] = options
+        # 1. 内置样式预设下拉项 (与 DefaultCFG.PRESETS 保持同步, 含「自定义」)
+        #    与字体扫描无关, 扫描失败也要同步, 否则面板显示旧主题名
+        preset_item = live_items.get("active_preset")
+        if isinstance(preset_item, dict):
+            options, labels = _preset_options()
+            if preset_item.get("options") != options:
+                preset_item["options"] = options
+                changed = True
+            if preset_item.get("labels") != labels:
+                preset_item["labels"] = labels
+                changed = True
+
+        # 2. 全局字体优先级选项 (扫描到的字体, 排除固定表情字体)
+        font_item = live_items.get("font_order")
+        if isinstance(font_item, dict):
+            if self._last_scan_ok:
+                families = self.get_selectable_families()
+                if font_item.get("options") != families:
+                    font_item["options"] = families
                     changed = True
-                if target.get("labels") != labels:
-                    target["labels"] = labels
-                    changed = True
-            except KeyError:
-                pass
-
-            # 2. 全局字体优先级选项 (扫描到的字体, 排除固定表情字体)
-            try:
-                target = schema["appearance"]["items"]["font_order"]
-                if self._last_scan_ok:
-                    options = self.get_selectable_families()
-                    if target.get("options") != options:
-                        target["options"] = options
-                        changed = True
-                else:
-                    logger.warning(
-                        "[HelpTypst] 字体扫描未成功，保留原字体选项 (不改写 Schema options)"
-                    )
-            except KeyError:
-                pass
-
-            if changed and self._write_schema_atomic(schema_path, schema):
-                logger.info(
-                    "[HelpTypst] 已更新 Schema 选项（字体 / 主题预设），"
-                    "配置面板无需重载即可生效"
+            else:
+                logger.warning(
+                    "[HelpTypst] 字体扫描未成功，保留原字体选项 (不改写 Schema options)"
                 )
 
-            # 同步内存中的 live schema, 立即应用到配置面板 (无需重载插件)
-            # 扫描失败时同样保留内存里的原字体选项
-            if live_schema is not None and isinstance(live_schema, dict):
-                try:
-                    live_items = live_schema["appearance"]["items"]
-                except (KeyError, TypeError):
-                    live_items = None
-                if isinstance(live_items, dict):
-                    # 预设下拉项与字体扫描无关, 扫描失败也要同步, 否则面板显示旧主题名
-                    try:
-                        live_preset = live_items["active_preset"]
-                        options, labels = _preset_options()
-                        if live_preset.get("options") != options:
-                            live_preset["options"] = options
-                        if live_preset.get("labels") != labels:
-                            live_preset["labels"] = labels
-                    except (KeyError, TypeError, AttributeError):
-                        pass
-                    # 字体选项只在扫描成功时改写, 避免把扫描失败的空集合写进面板
-                    if self._last_scan_ok:
-                        try:
-                            live_font = live_items["font_order"]
-                            new_options = self.get_selectable_families()
-                            if live_font.get("options") != new_options:
-                                live_font["options"] = new_options
-                        except (KeyError, TypeError, AttributeError):
-                            pass
-        except Exception as e:
-            logger.warning(f"[HelpTypst] Schema 更新失败: {e}")
+        if changed:
+            logger.info(
+                "[HelpTypst] 已更新 Schema 选项（字体 / 主题预设，仅内存，配置面板无需重载）"
+            )
 
     def prune_invalid_config_items(self, config: dict[str, Any]):
         """失效字体清洗 (全局 appearance.font_order)"""

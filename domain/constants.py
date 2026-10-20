@@ -65,9 +65,7 @@ class InternalCFG:
     CACHE_SENSITIVE_CONFIGS: list[str] = [
         "giant_threshold",
         "split_height",
-        # 直接决定长图切片结果 (是否切、切成几张), 改动后必须重编
-        "webp_limit",
-        # 换发送格式 = 换产物扩展名, 旧格式文件必须让位
+        # 单图高度上限由输出格式派生, 换格式即换扩展名与上限, 旧格式文件必须让位
         "output_format",
         "ppi",
         # 页宽与单列阈值直接决定版式与出图像素, 改动后必须重编
