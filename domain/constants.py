@@ -449,11 +449,21 @@ class DefaultCFG:
     # 当前面板与兜底统一为 256
     LIMIT_PPI: float = 256.0
 
-    # 1.1 配置值收敛区间 (防御手工改坏的配置; 与设置面板 slider 范围对齐)
+    # 1.1 开关与路径的兜底值: 与 _conf_schema.json 同名项的 default 保持一致,
+    # 配置面板读取失败或缺项时不会落到另一套默认值上
+    ENABLE_WAITING_MESSAGE: bool = False
+    CUSTOM_FONT_PATH: str = ""
+    HEADER_BACKGROUND: str = ""
+    BACKGROUND_DIR: str = ""
+    BACKGROUND_RANDOM: bool = True
+    HERO_HEADER: bool = True
+
+    # 1.2 配置值收敛区间 (防御手工改坏的配置; 与设置面板 slider 范围对齐)
     MIN_PPI: float = 72.0
     # 上限受 WebP 单边 16383px 与 Pillow 像素上限约束: 600pt 页宽下 384ppi 已接近单张上限
     MAX_PPI: float = 384.0
-    MIN_SPLIT_HEIGHT: int = 200  # image.py 按此高度切片, 过小无意义, 0 会除零
+    # 分页高度下限: 设置面板 slider、网页预览与 image.py 切片共用这一个下限, 0 会除零
+    MIN_SPLIT_HEIGHT: int = 200
     # 页面总宽度 (pt): 越窄同 PPI 下出图越窄、文字相对越大, 聊天窗口里更易读
     LIMIT_WIDTH: float = 600.0
     # 页面宽度低于该值时改单列 (两列/三列在窄页宽下会挤成一团)

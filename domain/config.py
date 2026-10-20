@@ -84,6 +84,17 @@ def _as_choice(value: Any, default: str, allowed: tuple[str, ...]) -> str:
     return default
 
 
+def _as_path(value: Any, default: str = "") -> str:
+    """路径配置收敛: 非字符串回落默认值, 字符串去掉首尾空格并展开 ~
+
+    手工配置可能写入列表/数字, 渲染侧直接 .strip() 会抛 AttributeError;
+    面板提示「绝对路径」, 但用户写 ~/xxx 也应该能用。
+    """
+    if not isinstance(value, str):
+        return default
+    return os.path.expanduser(value.strip()) or default
+
+
 def _parse_name_list(value: Any) -> set[str]:
     """插件名列表解析: 单个字符串按一项处理, 非字符串项丢弃
 
@@ -368,7 +379,10 @@ class TypstPluginConfig:
     @classmethod
     def load(cls, raw_config: AstrBotConfig) -> "TypstPluginConfig":
         """工厂方法：从 AstrBotConfig 加载配置，未配置项回退到 DefaultCFG"""
-        enable_wait = _as_bool(raw_config.get("enable_waiting_message"), False)
+        enable_wait = _as_bool(
+            raw_config.get("enable_waiting_message"),
+            DefaultCFG.ENABLE_WAITING_MESSAGE,
+        )
 
         # 黑名单: 字符串按单个插件名处理 (面板误存/手工配置 → 不能被 set() 拆成字符集),
         # 混入的非字符串项过滤掉, 否则缓存快照的 sorted() 会抛 TypeError
@@ -627,17 +641,20 @@ class TypstPluginConfig:
             rules=rules, fallback=fallback, fallback_color=fallback_color
         )
 
-        # 路径项: 展开 ~ (否则 "~/fonts" 会被当成相对路径), 非字符串回落默认
-        raw_custom_font_path = raw_config.get("custom_font_path", "")
-        custom_font_path = (
-            os.path.expanduser(raw_custom_font_path.strip())
-            if isinstance(raw_custom_font_path, str)
-            else ""
+        # 路径项统一收敛: 展开 ~, 非字符串回落默认值 (渲染侧会对这些值直接 strip/stat)
+        custom_font_path = _as_path(
+            raw_config.get("custom_font_path"), DefaultCFG.CUSTOM_FONT_PATH
         )
-        header_background = raw_config.get("header_background", "")
-        background_dir = raw_config.get("background_dir", "")
-        background_random = _as_bool(raw_config.get("background_random"), True)
-        hero_header = _as_bool(raw_config.get("hero_header"), True)
+        header_background = _as_path(
+            raw_config.get("header_background"), DefaultCFG.HEADER_BACKGROUND
+        )
+        background_dir = _as_path(
+            raw_config.get("background_dir"), DefaultCFG.BACKGROUND_DIR
+        )
+        background_random = _as_bool(
+            raw_config.get("background_random"), DefaultCFG.BACKGROUND_RANDOM
+        )
+        hero_header = _as_bool(raw_config.get("hero_header"), DefaultCFG.HERO_HEADER)
 
         logger.debug(
             f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}, 外观预设: {active_preset_name}"
