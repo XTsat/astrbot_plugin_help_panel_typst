@@ -148,6 +148,8 @@ class InternalCFG:
     PREVIEW_CACHE_MAX_BYTES: int = 32 * 1024 * 1024
     # 自定义模板: 预览页配色列表可增删改的条目; 首条固定名「自定义」并对应 conf presets 首条
     PREVIEW_CUSTOM_PRESET_MAX: int = 8
+    # 解析上限: 面板只允许新增到 MAX 条, 但设置面板可直接写入更多, 不能按 MAX 截断丢数据
+    PREVIEW_CUSTOM_PRESET_HARD_MAX: int = 64
     PREVIEW_PRESET_NAME_MAX: int = 20
 
     # 预览页分类编辑器: 与配置面板 category 一一对应, 但只做预览态校验, 落盘仍走 category

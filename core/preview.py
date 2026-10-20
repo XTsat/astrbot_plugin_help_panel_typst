@@ -1124,12 +1124,16 @@ class PreviewService:
         )
 
     def _normalize_custom_presets(self, raw: Any) -> list[dict[str, Any]]:
-        """收敛面板自定义模板: 保留顺序, 首条固定「自定义」, 其余名字去重限长"""
+        """收敛面板自定义模板: 保留顺序, 首条固定「自定义」, 其余名字去重限长
+
+        不按面板的新增上限 (PREVIEW_CUSTOM_PRESET_MAX) 截断: 用户可能在设置面板
+        直接写入更多条目, 按面板上限截断会在「应用」时静默丢掉第 9 条起。
+        """
         entries: list[dict[str, Any]] = []
         if not isinstance(raw, list):
             return entries
         used: set[str] = {DefaultCFG.CUSTOM_PRESET_KEY}
-        for index, item in enumerate(raw[: InternalCFG.PREVIEW_CUSTOM_PRESET_MAX]):
+        for index, item in enumerate(raw[: InternalCFG.PREVIEW_CUSTOM_PRESET_HARD_MAX]):
             if not isinstance(item, dict):
                 continue
             if index == 0:

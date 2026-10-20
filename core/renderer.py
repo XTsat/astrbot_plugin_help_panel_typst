@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -389,29 +389,15 @@ class TypstRenderer:
                     )
 
                     # 调度执行: 全局并发上限 + 编译超时, 避免一次挂死永久持有 mode 锁
-                    pool = ProcessPoolExecutor(max_workers=1)
                     try:
-                        async with self._compile_semaphore:
-                            final_images = await asyncio.wait_for(
-                                asyncio.get_running_loop().run_in_executor(
-                                    pool, execute_render_task, task
-                                ),
-                                # 下限已由 config.load / 预览样式统一夹紧, 这里不再另设兜底
-                                timeout=float(self.cfg.rendering.timeout_compile),
-                            )
+                        final_images = await self._compile_once(task, artifact_stem)
                     except asyncio.TimeoutError:
                         logger.warning(
-                            f"[HelpTypst] 编译超时 (>={self.cfg.rendering.timeout_compile}s), "
-                            f"已放弃本次渲染: mode={mode}"
+                            f"[HelpTypst] 编译或排队超时, 已放弃本次渲染: mode={mode}"
                         )
-                        # 子进程可能仍在写文件, 延迟再清一次它迟到的产物
-                        self._schedule_artifact_cleanup(artifact_stem)
                         if is_temp:
                             json_path.unlink(missing_ok=True)
                         return None, "渲染超时，请稍后重试或减少插件数量"
-                    finally:
-                        # wait=False: 超时/取消时不能阻塞事件循环等待子进程退出
-                        pool.shutdown(wait=False, cancel_futures=True)
 
                     # 错误检查: 子进程把 typst 诊断/内部路径都塞在 ERROR: 后面,
                     # 这些只适合进日志; 回给群里的一律是简短提示, 避免泄露部署路径
@@ -567,18 +553,80 @@ class TypstRenderer:
             except OSError as e:
                 logger.warning(f"[HelpTypst] 清理临时产物失败 {path}: {e}")
 
-    def _schedule_artifact_cleanup(self, stem: str, delay: float = 30.0) -> None:
-        """超时后子进程可能仍在写文件, 延迟再清一次它迟到的产物"""
+    async def _compile_once(self, task: RenderTask, artifact_stem: str) -> list[str]:
+        """占一个并发令牌执行一次编译, 并在异常路径决定令牌何时归还
 
-        async def _cleanup() -> None:
-            await asyncio.sleep(delay)
-            self._discard_artifacts(stem)
-
+        超时/取消时子进程仍在跑, 若立刻归还令牌, 并发编译数就会突破
+        max_concurrent_tasks, 迟到的产物也可能与下一个请求的清理互相踩;
+        因此令牌要等 worker 真正结束后再交还, 产物的清理也挪到那之后。
+        """
+        loop = asyncio.get_running_loop()
         try:
-            asyncio.get_running_loop().create_task(_cleanup())
-        except RuntimeError:
-            # 没有运行中的事件循环 (解释器退出等), 直接同步清一次
-            self._discard_artifacts(stem)
+            await asyncio.wait_for(
+                self._compile_semaphore.acquire(),
+                # 上一次超时的子进程可能还在跑: 排队等太久就不该继续把请求挂死
+                timeout=float(self.cfg.rendering.timeout_compile),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[HelpTypst] 等待编译并发令牌超时, 已放弃本次渲染")
+            raise
+        try:
+            pool = ProcessPoolExecutor(max_workers=1)
+        except BaseException:
+            self._compile_semaphore.release()
+            raise
+
+        future: Future[list[str]] | None = None
+        try:
+            future = pool.submit(execute_render_task, task)
+            images = await asyncio.wait_for(
+                asyncio.wrap_future(future),
+                # 下限已由 config.load / 预览样式统一夹紧, 这里不再另设兜底
+                timeout=float(self.cfg.rendering.timeout_compile),
+            )
+        except BaseException:
+            if future is None or future.done():
+                # 子进程已退出: 清掉本次不再使用的产物, 令牌可立即归还
+                self._discard_artifacts(artifact_stem)
+                pool.shutdown(wait=False, cancel_futures=True)
+                self._compile_semaphore.release()
+            else:
+                self._hold_token_until_worker_done(pool, future, artifact_stem, loop)
+            raise
+
+        # 不能写成 try/else: 成功路径在 try 里 return 会跳过 else, 令牌就再也还不回去
+        pool.shutdown(wait=False, cancel_futures=True)
+        self._compile_semaphore.release()
+        return images
+
+    def _hold_token_until_worker_done(
+        self,
+        pool: ProcessPoolExecutor,
+        future: Future[list[str]],
+        artifact_stem: str,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """超时/取消的编译: 等子进程真正退出后再清迟到产物并归还令牌"""
+
+        def _on_worker_done(_future: Future[list[str]]) -> None:
+            try:
+                loop.call_soon_threadsafe(
+                    self._finish_timed_out_compile, pool, artifact_stem
+                )
+            except RuntimeError:
+                # 事件循环已关闭 (插件卸载): 只清产物, 不能再碰信号量
+                self._discard_artifacts(artifact_stem)
+
+        future.add_done_callback(_on_worker_done)
+
+    def _finish_timed_out_compile(
+        self, pool: ProcessPoolExecutor, artifact_stem: str
+    ) -> None:
+        """超时编译的收尾: 清迟到产物 → 归还令牌 → 关闭进程池"""
+        self._discard_artifacts(artifact_stem)
+        self._compile_semaphore.release()
+        pool.shutdown(wait=False, cancel_futures=True)
+        logger.info("[HelpTypst] 超时的编译子进程已结束, 已清理迟到产物并归还并发令牌")
 
     def _resolve_paths(
         self, mode: str, query: str | None, force_temp: bool = False

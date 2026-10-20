@@ -340,7 +340,11 @@ class BaseAnalyzer:
             return []
         exact = handlers_map.get(raw_module)
         if exact:
-            return exact
+            # 精确命中只返回该模块会漏掉同插件其它模块 (handlers.py 等) 里注册的指令
+            merged = list(exact)
+            for key in self._same_plugin_module_keys(raw_module, handlers_map):
+                merged.extend(handlers_map[key])
+            return merged
 
         best_handlers: list[StarHandlerMetadata] = []
         best_score = (0, 0, 0)
@@ -353,6 +357,47 @@ class BaseAnalyzer:
                 best_score = score
                 best_handlers = handlers
         return best_handlers
+
+    def _same_plugin_module_keys(
+        self, raw_module: str, handlers_map: dict[str, list[StarHandlerMetadata]]
+    ) -> list[str]:
+        """与 raw_module 同属一个插件的其它 handler 模块键 (排序后返回)
+
+        插件的 handler 常定义在与 main 同级的子模块里, 只取精确命中的模块会让那些
+        指令在面板上静默消失。归属按「插件根模块 + 本模块父包」两重前缀判定,
+        再把已知其它插件的根模块下的 key 排除掉, 避免相邻插件被误并进来。
+        """
+        roots = [raw_module]
+        if "." in raw_module:
+            roots.append(raw_module.rsplit(".", 1)[0])
+        star_roots: list[str] = []
+        for star in self.context.get_all_stars():
+            module_path = getattr(star, "module_path", None)
+            if not module_path:
+                continue
+            star_roots.append(str(module_path))
+        roots.extend(
+            root
+            for root in star_roots
+            if raw_module == root or raw_module.startswith(root + ".")
+        )
+        foreign = [
+            root
+            for root in star_roots
+            if not (raw_module == root or raw_module.startswith(root + "."))
+        ]
+
+        keys: set[str] = set()
+        for root in roots:
+            keys.update(
+                key for key in handlers_map if key == root or key.startswith(root + ".")
+            )
+        keys.discard(raw_module)
+        return sorted(
+            key
+            for key in keys
+            if not any(key == f or key.startswith(f + ".") for f in foreign)
+        )
 
     def _resolve_plugin(
         self, handler_module: str, module_to_plugin: dict[str, Any]
