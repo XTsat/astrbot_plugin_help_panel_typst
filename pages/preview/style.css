@@ -1820,7 +1820,6 @@ textarea:focus {
 }
 
 .btn-primary {
-  flex: 1 1 auto;
   background: var(--accent);
   color: #fff;
 }
@@ -1842,6 +1841,19 @@ textarea:focus {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 三个次要按钮平分一行：总宽与下方「应用配置」对齐；basis 96px 让窄屏放不下三列时折行，
+   不把按钮文字挤出边界 */
+.footer-actions .btn {
+  flex: 1 1 96px;
+  gap: 4px;
+  padding-inline: 6px;
+}
+
+/* 主按钮在放得下时与三个按钮同一行，放不下时独占整行并撑满（宽度=上排三个按钮总宽） */
+.footer-actions .btn-primary {
+  flex: 1 1 120px;
 }
 
 /* 图标按钮 / 文字按钮 */

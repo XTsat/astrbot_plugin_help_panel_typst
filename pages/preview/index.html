@@ -345,14 +345,27 @@
               <span class="footer-test-ppi-value" id="preview-ppi-value">144 ppi</span>
             </div>
             <div class="footer-actions">
-              <button class="btn btn-ghost" id="btn-reset" type="button" disabled title="回到打开页面时的配置样式，丢弃还没应用的修改">恢复默认</button>
-              <button class="btn btn-ghost" id="btn-import" type="button" disabled title="把插件当前配置读取到面板，丢弃还没应用的修改">导入当前配置</button>
+              <button class="btn btn-ghost" id="btn-import" type="button" disabled title="把插件当前配置读取到面板，丢弃还没应用的修改">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3v9" />
+                  <path d="m8 8 4 4 4-4" />
+                  <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+                </svg>
+                导入当前配置
+              </button>
               <button class="btn btn-ghost" id="btn-refresh" type="button" disabled>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M20 11a8 8 0 1 0-2.34 5.66" />
                   <path d="M20 4v7h-7" />
                 </svg>
                 刷新预览
+              </button>
+              <button class="btn btn-ghost" id="btn-reset" type="button" disabled title="回到打开页面时的配置样式，丢弃还没应用的修改">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H8" />
+                  <path d="m8 5-4 4 4 4" />
+                </svg>
+                恢复默认
               </button>
               <button class="btn btn-primary" id="btn-apply" type="button" disabled title="把面板样式写入插件配置，并重载插件使其生效">应用配置</button>
             </div>
