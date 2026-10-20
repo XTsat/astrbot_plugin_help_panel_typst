@@ -594,6 +594,9 @@ class TypstPluginConfig:
             ]
         else:
             rules = []
+            # 同名分类的图标色只取第一条 (get_rule 返回首条), 关键词却一直按并集参与匹配;
+            # 所以重名条目不能直接丢, 要把关键词并入首条, 归类结果才与旧配置一致
+            rule_index_by_name: dict[str, int] = {}
             for item in raw_rules_list:
                 if not isinstance(item, dict):
                     continue
@@ -614,19 +617,41 @@ class TypstPluginConfig:
                     )
                     continue
 
-                # 规则自带主题色 (可选): 合法值为 固定 hex (#RRGGBB) 或 主题色槽绑定 (slot_N)
+                # 规则自带主题色 (可选): 合法值为 固定 hex (#RRGGBB) 或 主题色槽绑定 (slot_0~slot_9)
                 # 非法值回退为空串 (走 主题 cat_<名称>/自动分配/灰蓝 兜底)
                 rule_color = str(item.get("color", "") or "").strip()
-                is_slot_binding = bool(re.fullmatch(r"slot_\d+", rule_color))
+                is_slot_binding = bool(re.fullmatch(r"slot_[0-9]", rule_color))
                 if rule_color and not is_slot_binding and not _is_valid_hex(rule_color):
                     logger.warning(
                         f"[HelpTypst] 分类「{rule_name}」的颜色配置异常: '{rule_color}' "
-                        f"不是有效的十六进制颜色或色槽编号 (slot_N), 已回退为主题色板/自动分配"
+                        f"不是有效的十六进制颜色或色槽编号 (slot_0~slot_9), 已回退为主题色板/自动分配"
                     )
                     rule_color = ""
 
                 # 「启用」开关: 缺省视为启用, 只有显式 false 才关闭
                 rule_enabled = item.get("enabled", True) is True
+
+                merged_index = rule_index_by_name.get(rule_name)
+                if merged_index is not None:
+                    # 停用的重名规则本就不参与匹配, 没必要并关键词
+                    target = rules[merged_index]
+                    existing = {kw.lower() for kw in target.keywords}
+                    added = (
+                        [kw for kw in keywords if kw.lower() not in existing]
+                        if rule_enabled
+                        else []
+                    )
+                    if added:
+                        target.keywords.extend(added)
+                        logger.warning(
+                            f"[HelpTypst] 分类规则重名: '{rule_name}' 已存在, "
+                            f"关键词已并入第一条规则: {'、'.join(added)}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[HelpTypst] 分类规则重名: '{rule_name}' 已存在, 已忽略重复条目"
+                        )
+                    continue
 
                 rules.append(
                     CategoryRule(
@@ -636,6 +661,7 @@ class TypstPluginConfig:
                         color=rule_color,
                     )
                 )
+                rule_index_by_name[rule_name] = len(rules) - 1
 
         category_cfg = CategoryConfig(
             rules=rules, fallback=fallback, fallback_color=fallback_color

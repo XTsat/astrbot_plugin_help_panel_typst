@@ -183,7 +183,7 @@ def _color_map(colors: dict[str, str]) -> dict[str, str]:
     }
 
 
-_SLOT_COLOR_RE = re.compile(r"slot_\d+")
+_SLOT_COLOR_RE = re.compile(r"slot_[0-9]")
 _CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
 _LATIN_WORD_RE = re.compile(r"[a-z][a-z0-9]{1,}")
 # 片段位于中文串首尾时没有邻字，用空串占位，避免被当成「总是跟着某个字」
@@ -191,7 +191,7 @@ _HOT_WORD_EDGE = ""
 
 
 def _normalize_slot_or_color(value: Any) -> str:
-    """分类颜色只接受主题色槽 slot_N 或 #RRGGBB，其它值退回「自动分配」"""
+    """分类颜色只接受主题色槽 slot_0~slot_9 或 #RRGGBB，其它值退回「自动分配」"""
     if not isinstance(value, str):
         return ""
     text = value.strip()
