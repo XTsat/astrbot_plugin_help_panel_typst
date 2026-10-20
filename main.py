@@ -10,7 +10,7 @@ from astrbot.core.star.filter.command import GreedyStr
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.message_components import Image
 
-from .domain import DefaultCFG, InternalCFG, TypstPluginConfig
+from .domain import DefaultCFG, InternalCFG, RenderFailure, TypstPluginConfig
 from .utils import (
     FontManager,
     HelpHint,
@@ -430,7 +430,7 @@ class HelpTypst(Star):
                         asyncio.create_task(self._cleanup_task(result.temp_files))
             else:
                 # 错误处理
-                if error == "empty":
+                if error == RenderFailure.EMPTY:
                     yield event.plain_result(self.hint.msg_empty_result(mode, query))
                 else:
                     yield event.plain_result(error)

@@ -22,7 +22,13 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.star import Star
 
-from ..domain import DefaultCFG, InternalCFG, ThemePreset, TypstPluginConfig
+from ..domain import (
+    DefaultCFG,
+    InternalCFG,
+    RenderFailure,
+    ThemePreset,
+    TypstPluginConfig,
+)
 from ..domain.config import HEX_COLOR_REGEX, CategoryConfig, CategoryRule
 from ..utils import FontManager, TypstLayout, calculate_hash
 from .renderer import TypstRenderer
@@ -1029,7 +1035,7 @@ class PreviewService:
 
         if count <= 0:
             await asyncio.to_thread(self._remove_files, [json_path])
-            raise PreviewError(self._friendly_error("empty"))
+            raise PreviewError(self._friendly_error(RenderFailure.EMPTY))
 
         try:
             content = await asyncio.to_thread(json_path.read_text, encoding="utf-8")
@@ -1693,7 +1699,7 @@ class PreviewService:
         }
 
     def _friendly_error(self, error: str) -> str:
-        if not error or error == "empty":
+        if not error or error == RenderFailure.EMPTY:
             return "当前面板没有可展示的内容（可能还没有加载任何插件）"
         if "超时" in error:
             return "预览渲染超时，请降低精度或减少搜索范围后重试"

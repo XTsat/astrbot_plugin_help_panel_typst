@@ -974,3 +974,14 @@ class RenderMode(str, Enum):
     COMMAND_DETAIL = "command_detail"
     EVENT = "event"
     FILTER = "filter"
+
+
+class RenderFailure(str, Enum):
+    """渲染失败的哨兵码
+
+    不是用户可读文案: renderer 用它告诉调用方「没有内容可渲染」, 由 Chat 侧与
+    预览页各自翻译成自己的提示语。用哨兵而不是空串或 None, 才能和「渲染成功」
+    区分开; 值为 str 子类, 现有 `error == "..."` 式的调试输出不受影响。
+    """
+
+    EMPTY = "empty"

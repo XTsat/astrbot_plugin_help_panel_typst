@@ -348,6 +348,305 @@ class CategoryConfig:
         }
 
 
+def _load_ignored_plugins(raw_config: AstrBotConfig) -> tuple[set[str], set[str]]:
+    """解析屏蔽插件: 面板勾选的已安装项 + 用户自定义名, 渲染侧直接用并集"""
+    # 黑名单: 字符串按单个插件名处理 (面板误存/手工配置 → 不能被 set() 拆成字符集),
+    # 混入的非字符串项过滤掉, 否则缓存快照的 sorted() 会抛 TypeError
+    raw_ignored = raw_config.get("ignored_plugins")
+    if isinstance(raw_ignored, (list, str)):
+        ignored_set = _parse_name_list(raw_ignored)
+    else:
+        ignored_set = set(DefaultCFG.IGNORED_PLUGINS)
+
+    # 自定义屏蔽名: 新键缺失时的兜底要看老配置的形态——老配置的屏蔽项全在
+    # ignored_plugins 里, 此时预置模板默认会把用户删掉的名字又加回来;
+    # 只有连 ignored_plugins 都没有(全新配置)才用模板默认值
+    raw_custom = raw_config.get("ignored_plugins_custom")
+    if isinstance(raw_custom, (list, str)):
+        ignored_custom_set = _parse_name_list(raw_custom)
+    elif isinstance(raw_ignored, (list, str)):
+        ignored_custom_set = set()
+    else:
+        ignored_custom_set = set(DefaultCFG.IGNORED_PLUGINS_CUSTOM)
+    return ignored_set, ignored_custom_set
+
+
+def _load_rendering(raw_config: AstrBotConfig) -> RenderingConfig:
+    """解析渲染参数: 取值全部经 _as_int/_as_float 夹紧, 缺项回落 DefaultCFG"""
+    # Rendering (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)
+    raw_render = raw_config.get("rendering")
+    if not isinstance(raw_render, dict):
+        raw_render = {}
+
+    output_format = _as_choice(
+        raw_render.get("output_format"),
+        DefaultCFG.OUTPUT_FORMAT,
+        DefaultCFG.OUTPUT_FORMATS,
+    )
+    # 单图高度上限已并入分页高度, 不再单独配置: 直接取所选格式能承载的最大高度,
+    # 页面高度由 split_height 控制, 只要它不超过该值就不会再触发二次切片
+    format_max_side = InternalCFG.FORMAT_MAX_SIDE[output_format]
+    webp_limit = min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side)
+    render_cfg = RenderingConfig(
+        timeout_analysis=_as_float(
+            raw_render.get("timeout_analysis"),
+            DefaultCFG.TIMEOUT_ANALYSIS,
+            DefaultCFG.MIN_TIMEOUT_ANALYSIS,
+            DefaultCFG.MAX_TIMEOUT,
+        ),
+        timeout_compile=_as_float(
+            raw_render.get("timeout_compile"),
+            DefaultCFG.TIMEOUT_COMPILE,
+            DefaultCFG.MIN_TIMEOUT_COMPILE,
+            DefaultCFG.MAX_TIMEOUT,
+        ),
+        max_concurrent_tasks=_as_int(
+            raw_render.get("max_concurrent_tasks"),
+            DefaultCFG.LIMIT_TASK,
+            DefaultCFG.MIN_CONCURRENCY,
+            DefaultCFG.MAX_CONCURRENCY,
+        ),
+        giant_threshold=_as_int(
+            raw_render.get("giant_threshold"),
+            DefaultCFG.LIMIT_GIANT,
+            DefaultCFG.MIN_GIANT,
+            DefaultCFG.MAX_GIANT,
+        ),
+        webp_limit=webp_limit,
+        # 分页高度也不能超过所选格式的单图上限, 否则页面本身写不进该格式
+        split_height=_as_int(
+            raw_render.get("split_height"),
+            DefaultCFG.LIMIT_SIDE,
+            DefaultCFG.MIN_SPLIT_HEIGHT,
+            min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side),
+        ),
+        ppi=_as_float(
+            raw_render.get("ppi"),
+            DefaultCFG.LIMIT_PPI,
+            DefaultCFG.MIN_PPI,
+            DefaultCFG.MAX_PPI,
+        ),
+        page_width=_as_float(
+            raw_render.get("page_width"),
+            DefaultCFG.LIMIT_WIDTH,
+            DefaultCFG.MIN_PAGE_WIDTH,
+            DefaultCFG.MAX_PAGE_WIDTH,
+        ),
+        # 阈值允许大于页宽 (等于强制单列), 因此上界与页宽一致
+        single_column_threshold=_as_float(
+            raw_render.get("single_column_threshold"),
+            DefaultCFG.LIMIT_SINGLE_COLUMN_THRESHOLD,
+            DefaultCFG.MIN_PAGE_WIDTH,
+            DefaultCFG.MAX_PAGE_WIDTH,
+        ),
+        plugin_two_lines=_as_bool(
+            raw_render.get("plugin_two_lines"),
+            DefaultCFG.PLUGIN_TWO_LINES,
+        ),
+        output_format=output_format,
+    )
+    return render_cfg
+
+
+def _load_appearance(raw_config: AstrBotConfig) -> AppearanceConfig:
+    """解析外观配置: 预设条目、全局字体优先级 (含旧配置迁移)"""
+    # Appearance (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)
+    raw_appearance = raw_config.get("appearance")
+    if not isinstance(raw_appearance, dict):
+        raw_appearance = {}
+    active_preset_name = raw_appearance.get(
+        "active_preset", DefaultCFG.DEFAULT_PRESET
+    )
+    raw_font_order = raw_appearance.get("font_order", None)
+
+    # 全局字体优先级 (旧配置迁移: 缺失时尝试从旧激活预设中提取)
+    if not isinstance(raw_font_order, list) or not raw_font_order:
+        legacy_fonts = None
+        legacy_presets = raw_appearance.get("presets", [])
+        if isinstance(legacy_presets, list):
+            for p_data in legacy_presets:
+                if not isinstance(p_data, dict):
+                    continue
+                if p_data.get("preset_name") == active_preset_name:
+                    legacy_fonts = p_data.get("font_order", [])
+                    break
+        font_order = [
+            str(f)
+            for f in (legacy_fonts or DefaultCFG.DEFAULT_FONT_ORDER)
+            if isinstance(f, str)
+        ]
+    else:
+        font_order = [str(f) for f in raw_font_order if isinstance(f, str)]
+    if not font_order:  # 清洗后为空 → 回退默认值
+        font_order = DefaultCFG.DEFAULT_FONT_ORDER.copy()
+
+    raw_presets_list = raw_appearance.get("presets", [])  # 旧配置兼容
+    presets_dict = {}
+    preset_entries: list[ThemePreset] = []
+
+    # 内置预设注册 (配色由 DefaultCFG.PRESETS 提供, 此处仅登记名称)
+    for preset_name in DefaultCFG.PRESETS:
+        presets_dict[preset_name] = ThemePreset(name=preset_name, colors={})
+
+    if isinstance(raw_presets_list, list):
+        for p_data in raw_presets_list:
+            if not isinstance(p_data, dict):
+                continue
+            # 解析旧配置的列表 (仅用于颜色覆盖兼容)
+            p_name = p_data.get("preset_name", "custom")
+
+            # 解析颜色配置 (旧配置中微调过的内置预设颜色覆盖仍生效)
+            p_colors = {}
+            for color_key in DefaultCFG.DEFAULT_COLORS.keys():
+                if color_key in p_data:
+                    raw_val = p_data[color_key]  # 防 None、数字类型传入
+                    p_colors[color_key] = (
+                        str(raw_val) if raw_val is not None else ""
+                    )
+
+            # 「启用」开关: 只有真正的 Python True 才算启用 (防御异常值)
+            p_enabled = p_data.get("enabled") is True
+
+            presets_dict[p_name] = ThemePreset(
+                name=p_name,
+                colors=p_colors,
+                enabled=p_enabled,
+            )
+            preset_entries.append(presets_dict[p_name])
+
+    appearance_cfg = AppearanceConfig(
+        active_preset=active_preset_name,
+        font_order=font_order,
+        presets=presets_dict,
+        preset_entries=preset_entries,
+        rescan_fonts=_as_bool(raw_appearance.get("rescan_fonts"), False),
+    )
+    # 已移除的预设名只有在解析配色时才会被纠正 (见 get_active_colors),
+    # 这里提前触发一次, 让配置面板下拉框在插件加载后就显示成回落后的预设
+    appearance_cfg.get_active_colors()
+    return appearance_cfg
+
+
+def _load_category(raw_config: AstrBotConfig) -> CategoryConfig:
+    """解析分类规则: 兜底分类 + 规则列表 (含重名条目合并)"""
+    # Category (插件分类规则)
+    # 结构: category = { "fallback": "其他", "fallback_color": "slot_8",
+    #                    "rules": [ {category_name, enabled, keywords, color}, ... ] }
+    # - fallback/fallback_color: 兜底分类的名称与颜色, 独立于规则列表配置, 始终存在 (保底)
+    # - rules: 分类规则列表 (设置面板 template_list, 与主题预设列表同格式), 列表顺序即匹配优先级;
+    #   条目 color 字段: 留空自动分配主题色槽 / slot_N 绑定主题色槽 (随主题) / #RRGGBB 固定色
+    raw_category = raw_config.get("category", {})
+    if not isinstance(raw_category, dict):
+        raw_category = {}
+
+    raw_fallback = str(raw_category.get("fallback", "") or "").strip()
+    fallback = raw_fallback or DefaultCFG.DEFAULT_CATEGORY_FALLBACK
+
+    # 兜底分类颜色: slot_0~slot_9 主题色槽 (随主题) / #RRGGBB 固定色; 留空取 DefaultCFG 默认槽位
+    raw_fallback_color = str(raw_category.get("fallback_color", "") or "").strip()
+    fallback_color = (
+        raw_fallback_color or DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
+    )
+    is_fallback_slot = bool(re.fullmatch(r"slot_[0-9]", fallback_color))
+    if (
+        fallback_color
+        and not is_fallback_slot
+        and not _is_valid_hex(fallback_color)
+    ):
+        logger.warning(
+            f"[HelpTypst] 兜底分类颜色配置异常: '{fallback_color}' "
+            f"不是有效的十六进制颜色或色槽编号 (slot_0~slot_9), 已回退为默认色槽"
+        )
+        fallback_color = DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
+
+    raw_rules_list = raw_category.get("rules", None)
+    if not isinstance(raw_rules_list, list):
+        # 配置缺失 (首次安装/旧版本升级) → 导入默认规则 (预绑定主题色槽) 作为可自由修改的预置
+        rules = [
+            CategoryRule(
+                name=name,
+                keywords=list(kws),
+                color=DefaultCFG.DEFAULT_CATEGORY_SLOT_BINDINGS.get(name, ""),
+            )
+            for name, kws in DefaultCFG.DEFAULT_CATEGORY_KEYWORDS.items()
+        ]
+    else:
+        rules = []
+        # 同名分类的图标色只取第一条 (get_rule 返回首条), 关键词却一直按并集参与匹配;
+        # 所以重名条目不能直接丢, 要把关键词并入首条, 归类结果才与旧配置一致
+        rule_index_by_name: dict[str, int] = {}
+        for item in raw_rules_list:
+            if not isinstance(item, dict):
+                continue
+            rule_name = str(item.get("category_name", "") or "").strip()
+
+            raw_keywords = item.get("keywords", [])
+            keywords: list[str] = []
+            if isinstance(raw_keywords, list):
+                for kw in raw_keywords:
+                    if isinstance(kw, str) and kw.strip():
+                        kw_clean = kw.strip()
+                        if kw_clean not in keywords:  # 去重, 保持顺序
+                            keywords.append(kw_clean)
+
+            if not rule_name or not keywords:
+                logger.warning(
+                    f"[HelpTypst] 分类规则异常: 名称或关键词为空, 已跳过该规则: {item}"
+                )
+                continue
+
+            # 规则自带主题色 (可选): 合法值为 固定 hex (#RRGGBB) 或 主题色槽绑定 (slot_0~slot_9)
+            # 非法值回退为空串 (走 主题 cat_<名称>/自动分配/灰蓝 兜底)
+            rule_color = str(item.get("color", "") or "").strip()
+            is_slot_binding = bool(re.fullmatch(r"slot_[0-9]", rule_color))
+            if rule_color and not is_slot_binding and not _is_valid_hex(rule_color):
+                logger.warning(
+                    f"[HelpTypst] 分类「{rule_name}」的颜色配置异常: '{rule_color}' "
+                    f"不是有效的十六进制颜色或色槽编号 (slot_0~slot_9), 已回退为主题色板/自动分配"
+                )
+                rule_color = ""
+
+            # 「启用」开关: 缺省视为启用, 只有显式 false 才关闭
+            rule_enabled = item.get("enabled", True) is True
+
+            merged_index = rule_index_by_name.get(rule_name)
+            if merged_index is not None:
+                # 停用的重名规则本就不参与匹配, 没必要并关键词
+                target = rules[merged_index]
+                existing = {kw.lower() for kw in target.keywords}
+                added = (
+                    [kw for kw in keywords if kw.lower() not in existing]
+                    if rule_enabled
+                    else []
+                )
+                if added:
+                    target.keywords.extend(added)
+                    logger.warning(
+                        f"[HelpTypst] 分类规则重名: '{rule_name}' 已存在, "
+                        f"关键词已并入第一条规则: {'、'.join(added)}"
+                    )
+                else:
+                    logger.warning(
+                        f"[HelpTypst] 分类规则重名: '{rule_name}' 已存在, 已忽略重复条目"
+                    )
+                continue
+
+            rules.append(
+                CategoryRule(
+                    name=rule_name,
+                    keywords=keywords,
+                    enabled=rule_enabled,
+                    color=rule_color,
+                )
+            )
+            rule_index_by_name[rule_name] = len(rules) - 1
+
+    category_cfg = CategoryConfig(
+        rules=rules, fallback=fallback, fallback_color=fallback_color
+    )
+    return category_cfg
+
+
 @dataclass
 class TypstPluginConfig:
     """插件全局配置聚合根"""
@@ -378,295 +677,20 @@ class TypstPluginConfig:
 
     @classmethod
     def load(cls, raw_config: AstrBotConfig) -> "TypstPluginConfig":
-        """工厂方法：从 AstrBotConfig 加载配置，未配置项回退到 DefaultCFG"""
+        """工厂方法：从 AstrBotConfig 加载配置，未配置项回退到 DefaultCFG
+
+        子配置的解析各自成函数 (见下方 _load_*): 每个函数只读同一份 raw_config,
+        互不依赖, 拆分只为让「读一层配置」与「拼装聚合根」分开看。
+        """
         enable_wait = _as_bool(
             raw_config.get("enable_waiting_message"),
             DefaultCFG.ENABLE_WAITING_MESSAGE,
         )
 
-        # 黑名单: 字符串按单个插件名处理 (面板误存/手工配置 → 不能被 set() 拆成字符集),
-        # 混入的非字符串项过滤掉, 否则缓存快照的 sorted() 会抛 TypeError
-        raw_ignored = raw_config.get("ignored_plugins")
-        if isinstance(raw_ignored, (list, str)):
-            ignored_set = _parse_name_list(raw_ignored)
-        else:
-            ignored_set = set(DefaultCFG.IGNORED_PLUGINS)
-
-        # 自定义屏蔽名: 新键缺失时的兜底要看老配置的形态——老配置的屏蔽项全在
-        # ignored_plugins 里, 此时预置模板默认会把用户删掉的名字又加回来;
-        # 只有连 ignored_plugins 都没有(全新配置)才用模板默认值
-        raw_custom = raw_config.get("ignored_plugins_custom")
-        if isinstance(raw_custom, (list, str)):
-            ignored_custom_set = _parse_name_list(raw_custom)
-        elif isinstance(raw_ignored, (list, str)):
-            ignored_custom_set = set()
-        else:
-            ignored_custom_set = set(DefaultCFG.IGNORED_PLUGINS_CUSTOM)
-
-        # Rendering (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)
-        raw_render = raw_config.get("rendering")
-        if not isinstance(raw_render, dict):
-            raw_render = {}
-
-        output_format = _as_choice(
-            raw_render.get("output_format"),
-            DefaultCFG.OUTPUT_FORMAT,
-            DefaultCFG.OUTPUT_FORMATS,
-        )
-        # 单图高度上限已并入分页高度, 不再单独配置: 直接取所选格式能承载的最大高度,
-        # 页面高度由 split_height 控制, 只要它不超过该值就不会再触发二次切片
-        format_max_side = InternalCFG.FORMAT_MAX_SIDE[output_format]
-        webp_limit = min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side)
-        render_cfg = RenderingConfig(
-            timeout_analysis=_as_float(
-                raw_render.get("timeout_analysis"),
-                DefaultCFG.TIMEOUT_ANALYSIS,
-                DefaultCFG.MIN_TIMEOUT_ANALYSIS,
-                DefaultCFG.MAX_TIMEOUT,
-            ),
-            timeout_compile=_as_float(
-                raw_render.get("timeout_compile"),
-                DefaultCFG.TIMEOUT_COMPILE,
-                DefaultCFG.MIN_TIMEOUT_COMPILE,
-                DefaultCFG.MAX_TIMEOUT,
-            ),
-            max_concurrent_tasks=_as_int(
-                raw_render.get("max_concurrent_tasks"),
-                DefaultCFG.LIMIT_TASK,
-                DefaultCFG.MIN_CONCURRENCY,
-                DefaultCFG.MAX_CONCURRENCY,
-            ),
-            giant_threshold=_as_int(
-                raw_render.get("giant_threshold"),
-                DefaultCFG.LIMIT_GIANT,
-                DefaultCFG.MIN_GIANT,
-                DefaultCFG.MAX_GIANT,
-            ),
-            webp_limit=webp_limit,
-            # 分页高度也不能超过所选格式的单图上限, 否则页面本身写不进该格式
-            split_height=_as_int(
-                raw_render.get("split_height"),
-                DefaultCFG.LIMIT_SIDE,
-                DefaultCFG.MIN_SPLIT_HEIGHT,
-                min(DefaultCFG.MAX_LIMIT_SIDE, format_max_side),
-            ),
-            ppi=_as_float(
-                raw_render.get("ppi"),
-                DefaultCFG.LIMIT_PPI,
-                DefaultCFG.MIN_PPI,
-                DefaultCFG.MAX_PPI,
-            ),
-            page_width=_as_float(
-                raw_render.get("page_width"),
-                DefaultCFG.LIMIT_WIDTH,
-                DefaultCFG.MIN_PAGE_WIDTH,
-                DefaultCFG.MAX_PAGE_WIDTH,
-            ),
-            # 阈值允许大于页宽 (等于强制单列), 因此上界与页宽一致
-            single_column_threshold=_as_float(
-                raw_render.get("single_column_threshold"),
-                DefaultCFG.LIMIT_SINGLE_COLUMN_THRESHOLD,
-                DefaultCFG.MIN_PAGE_WIDTH,
-                DefaultCFG.MAX_PAGE_WIDTH,
-            ),
-            plugin_two_lines=_as_bool(
-                raw_render.get("plugin_two_lines"),
-                DefaultCFG.PLUGIN_TWO_LINES,
-            ),
-            output_format=output_format,
-        )
-
-        # Appearance (null / 非 dict → 空配置, 全部走 DefaultCFG 兜底)
-        raw_appearance = raw_config.get("appearance")
-        if not isinstance(raw_appearance, dict):
-            raw_appearance = {}
-        active_preset_name = raw_appearance.get(
-            "active_preset", DefaultCFG.DEFAULT_PRESET
-        )
-        raw_font_order = raw_appearance.get("font_order", None)
-
-        # 全局字体优先级 (旧配置迁移: 缺失时尝试从旧激活预设中提取)
-        if not isinstance(raw_font_order, list) or not raw_font_order:
-            legacy_fonts = None
-            legacy_presets = raw_appearance.get("presets", [])
-            if isinstance(legacy_presets, list):
-                for p_data in legacy_presets:
-                    if not isinstance(p_data, dict):
-                        continue
-                    if p_data.get("preset_name") == active_preset_name:
-                        legacy_fonts = p_data.get("font_order", [])
-                        break
-            font_order = [
-                str(f)
-                for f in (legacy_fonts or DefaultCFG.DEFAULT_FONT_ORDER)
-                if isinstance(f, str)
-            ]
-        else:
-            font_order = [str(f) for f in raw_font_order if isinstance(f, str)]
-        if not font_order:  # 清洗后为空 → 回退默认值
-            font_order = DefaultCFG.DEFAULT_FONT_ORDER.copy()
-
-        raw_presets_list = raw_appearance.get("presets", [])  # 旧配置兼容
-        presets_dict = {}
-        preset_entries: list[ThemePreset] = []
-
-        # 内置预设注册 (配色由 DefaultCFG.PRESETS 提供, 此处仅登记名称)
-        for preset_name in DefaultCFG.PRESETS:
-            presets_dict[preset_name] = ThemePreset(name=preset_name, colors={})
-
-        if isinstance(raw_presets_list, list):
-            for p_data in raw_presets_list:
-                if not isinstance(p_data, dict):
-                    continue
-                # 解析旧配置的列表 (仅用于颜色覆盖兼容)
-                p_name = p_data.get("preset_name", "custom")
-
-                # 解析颜色配置 (旧配置中微调过的内置预设颜色覆盖仍生效)
-                p_colors = {}
-                for color_key in DefaultCFG.DEFAULT_COLORS.keys():
-                    if color_key in p_data:
-                        raw_val = p_data[color_key]  # 防 None、数字类型传入
-                        p_colors[color_key] = (
-                            str(raw_val) if raw_val is not None else ""
-                        )
-
-                # 「启用」开关: 只有真正的 Python True 才算启用 (防御异常值)
-                p_enabled = p_data.get("enabled") is True
-
-                presets_dict[p_name] = ThemePreset(
-                    name=p_name,
-                    colors=p_colors,
-                    enabled=p_enabled,
-                )
-                preset_entries.append(presets_dict[p_name])
-
-        appearance_cfg = AppearanceConfig(
-            active_preset=active_preset_name,
-            font_order=font_order,
-            presets=presets_dict,
-            preset_entries=preset_entries,
-            rescan_fonts=_as_bool(raw_appearance.get("rescan_fonts"), False),
-        )
-        # 已移除的预设名只有在解析配色时才会被纠正 (见 get_active_colors),
-        # 这里提前触发一次, 让配置面板下拉框在插件加载后就显示成回落后的预设
-        appearance_cfg.get_active_colors()
-
-        # Category (插件分类规则)
-        # 结构: category = { "fallback": "其他", "fallback_color": "slot_8",
-        #                    "rules": [ {category_name, enabled, keywords, color}, ... ] }
-        # - fallback/fallback_color: 兜底分类的名称与颜色, 独立于规则列表配置, 始终存在 (保底)
-        # - rules: 分类规则列表 (设置面板 template_list, 与主题预设列表同格式), 列表顺序即匹配优先级;
-        #   条目 color 字段: 留空自动分配主题色槽 / slot_N 绑定主题色槽 (随主题) / #RRGGBB 固定色
-        raw_category = raw_config.get("category", {})
-        if not isinstance(raw_category, dict):
-            raw_category = {}
-
-        raw_fallback = str(raw_category.get("fallback", "") or "").strip()
-        fallback = raw_fallback or DefaultCFG.DEFAULT_CATEGORY_FALLBACK
-
-        # 兜底分类颜色: slot_0~slot_9 主题色槽 (随主题) / #RRGGBB 固定色; 留空取 DefaultCFG 默认槽位
-        raw_fallback_color = str(raw_category.get("fallback_color", "") or "").strip()
-        fallback_color = (
-            raw_fallback_color or DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
-        )
-        is_fallback_slot = bool(re.fullmatch(r"slot_[0-9]", fallback_color))
-        if (
-            fallback_color
-            and not is_fallback_slot
-            and not _is_valid_hex(fallback_color)
-        ):
-            logger.warning(
-                f"[HelpTypst] 兜底分类颜色配置异常: '{fallback_color}' "
-                f"不是有效的十六进制颜色或色槽编号 (slot_0~slot_9), 已回退为默认色槽"
-            )
-            fallback_color = DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
-
-        raw_rules_list = raw_category.get("rules", None)
-        if not isinstance(raw_rules_list, list):
-            # 配置缺失 (首次安装/旧版本升级) → 导入默认规则 (预绑定主题色槽) 作为可自由修改的预置
-            rules = [
-                CategoryRule(
-                    name=name,
-                    keywords=list(kws),
-                    color=DefaultCFG.DEFAULT_CATEGORY_SLOT_BINDINGS.get(name, ""),
-                )
-                for name, kws in DefaultCFG.DEFAULT_CATEGORY_KEYWORDS.items()
-            ]
-        else:
-            rules = []
-            # 同名分类的图标色只取第一条 (get_rule 返回首条), 关键词却一直按并集参与匹配;
-            # 所以重名条目不能直接丢, 要把关键词并入首条, 归类结果才与旧配置一致
-            rule_index_by_name: dict[str, int] = {}
-            for item in raw_rules_list:
-                if not isinstance(item, dict):
-                    continue
-                rule_name = str(item.get("category_name", "") or "").strip()
-
-                raw_keywords = item.get("keywords", [])
-                keywords: list[str] = []
-                if isinstance(raw_keywords, list):
-                    for kw in raw_keywords:
-                        if isinstance(kw, str) and kw.strip():
-                            kw_clean = kw.strip()
-                            if kw_clean not in keywords:  # 去重, 保持顺序
-                                keywords.append(kw_clean)
-
-                if not rule_name or not keywords:
-                    logger.warning(
-                        f"[HelpTypst] 分类规则异常: 名称或关键词为空, 已跳过该规则: {item}"
-                    )
-                    continue
-
-                # 规则自带主题色 (可选): 合法值为 固定 hex (#RRGGBB) 或 主题色槽绑定 (slot_0~slot_9)
-                # 非法值回退为空串 (走 主题 cat_<名称>/自动分配/灰蓝 兜底)
-                rule_color = str(item.get("color", "") or "").strip()
-                is_slot_binding = bool(re.fullmatch(r"slot_[0-9]", rule_color))
-                if rule_color and not is_slot_binding and not _is_valid_hex(rule_color):
-                    logger.warning(
-                        f"[HelpTypst] 分类「{rule_name}」的颜色配置异常: '{rule_color}' "
-                        f"不是有效的十六进制颜色或色槽编号 (slot_0~slot_9), 已回退为主题色板/自动分配"
-                    )
-                    rule_color = ""
-
-                # 「启用」开关: 缺省视为启用, 只有显式 false 才关闭
-                rule_enabled = item.get("enabled", True) is True
-
-                merged_index = rule_index_by_name.get(rule_name)
-                if merged_index is not None:
-                    # 停用的重名规则本就不参与匹配, 没必要并关键词
-                    target = rules[merged_index]
-                    existing = {kw.lower() for kw in target.keywords}
-                    added = (
-                        [kw for kw in keywords if kw.lower() not in existing]
-                        if rule_enabled
-                        else []
-                    )
-                    if added:
-                        target.keywords.extend(added)
-                        logger.warning(
-                            f"[HelpTypst] 分类规则重名: '{rule_name}' 已存在, "
-                            f"关键词已并入第一条规则: {'、'.join(added)}"
-                        )
-                    else:
-                        logger.warning(
-                            f"[HelpTypst] 分类规则重名: '{rule_name}' 已存在, 已忽略重复条目"
-                        )
-                    continue
-
-                rules.append(
-                    CategoryRule(
-                        name=rule_name,
-                        keywords=keywords,
-                        enabled=rule_enabled,
-                        color=rule_color,
-                    )
-                )
-                rule_index_by_name[rule_name] = len(rules) - 1
-
-        category_cfg = CategoryConfig(
-            rules=rules, fallback=fallback, fallback_color=fallback_color
-        )
-
+        ignored_set, ignored_custom_set = _load_ignored_plugins(raw_config)
+        render_cfg = _load_rendering(raw_config)
+        appearance_cfg = _load_appearance(raw_config)
+        category_cfg = _load_category(raw_config)
         # 路径项统一收敛: 展开 ~, 非字符串回落默认值 (渲染侧会对这些值直接 strip/stat)
         custom_font_path = _as_path(
             raw_config.get("custom_font_path"), DefaultCFG.CUSTOM_FONT_PATH
@@ -683,7 +707,7 @@ class TypstPluginConfig:
         hero_header = _as_bool(raw_config.get("hero_header"), DefaultCFG.HERO_HEADER)
 
         logger.debug(
-            f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}, 外观预设: {active_preset_name}"
+            f"[HelpTypst] 配置加载完毕: PPI={render_cfg.ppi}, Concurrency={render_cfg.max_concurrent_tasks}, 外观预设: {appearance_cfg.active_preset}"
         )
 
         return cls(

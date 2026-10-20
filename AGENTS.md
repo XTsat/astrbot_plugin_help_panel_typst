@@ -40,6 +40,8 @@
 | `domain/` `utils/` `core/` | ✅ | 分层业务代码（见 §2） |
 | `templates/base.typ` | ✅ | Typst 渲染模板：消费 JSON payload 与 sys_inputs |
 | `resources/` | ✅ | 内置字体与背景图 |
+| `pages/preview/` | 可选 | 样式预览页静态资源（`index.html` / `app.js` / `style.css`），数据来自 `main.py` 注册的 Web API |
+| `.astrbot-plugin/i18n/` | 可选 | 提示文案的多语言文件（`zh-CN.json` / `en-US.json`），无对应文件时回落中文 |
 | `preview/` | 可选 | README 功能预览图 |
 | `hero_preview.png` | 可选 | README 顶部横幅图 |
 | `.gitignore` | 可选 | Git 忽略规则 |
@@ -60,12 +62,16 @@ utils/               # [通用工具层] 禁止 import core/ 或 main
   hash.py            #   calculate_hash（MD5，用于缓存内容哈希）
   font.py            #   FontManager：字体扫描、schema 同步、字体列表清洗
   image.py           #   图片头/扩展名校验、尺寸读取、PNG → WebP 切片
+  schema.py          #   运行时同步插件屏蔽项下拉（字体下拉在 font.py）
   view.py            #   HelpHint(文案) / MsgRecall(发送撤回) / TypstLayout(布局 JSON)
 core/                # [核心业务层] 纯 Python 逻辑
   analyzer.py        #   BaseAnalyzer + Command/Event/Filter 分析器（组装 RenderNode 树）
   renderer.py        #   TypstRenderer：路径策略、缓存、背景图解析、子进程调度
   worker.py          #   RenderTask + execute_render_task（typst.compile，即用即销）
+  preview.py         #   PreviewService：样式预览页的取数、试渲染、应用配置与内存缓存
 templates/base.typ   # 渲染模板
+pages/preview/       # 样式预览页静态资源（app.js / index.html / style.css）
+.astrbot-plugin/     # 插件元数据与多语言文案（i18n/）
 resources/fonts/     # 内置字体（LXGW Neo XiHei、Noto Color Emoji）
 resources/images/    # 内置背景图（安装时导入数据目录 backgrounds）
 preview/             # README 功能预览图
@@ -130,7 +136,7 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 - `event` / `filter`：`title`、`mode`、`prefixes`、`fonts`、`plugin_count`、`giants`、`columns`、`singles`
 - 所有模式统一注入 `colors`（激活配色 + 禁用灰化色板：卡片底色为深色时自动换用 `DISABLED_COLORS_DARK`，否则用 `DISABLED_COLORS`）、`system_name`（人格名，空串时模板不渲染该列）、`page_width`（页面总宽度，pt，模板据此设置 `#set page`；缺键按 830pt 兜底）、`content_columns`（卡片内部小块并排列数：页宽 ≥ 830pt 为 3，更窄为 2；缺键按 3 兜底）与 `plugin_two_lines`（插件行双行模式，缺键按 false 兜底）
 
-`core/worker.py` 向模板传入 `sys_inputs`：恒有 `json_string`、`timestamp`；搜索时额外有 `query_regex`（`re.escape` 后的原始关键词）；背景相关为 `bg_image`（相对模板目录的路径）、`hero_header`（`"true"/"false"`）；品牌资源为 `logo_image`（相对模板目录的路径，空串表示文件缺失）。改 `view.py` / `worker.py` / `base.typ` 时保持键名一致。
+`core/worker.py` 向模板传入 `sys_inputs`：恒有 `json_string`、`timestamp`；搜索时额外有 `query_regex`（`re.escape` 后的原始关键词）；背景相关为 `bg_image`（相对模板目录的路径）、`hero_header`（`"true"/"false"`）；品牌资源为 `logo_image`（相对模板目录的路径，空串表示文件缺失）；另有 `max_page_height`（按 `split_height × 72 / ppi` 换算成 pt，模板据此控制页脚上提与分页）。改 `view.py` / `worker.py` / `base.typ` 时保持键名一致。
 
 **协议约定**：`sys_inputs` 的值一律按字符串传（Typst 侧 `sys.inputs.at(...)` 取回后由模板顶部集中解析成 bool / 数组）；payload 里的键模板必须用 `.at(key, default: ...)` 兜底，缺键不得导致整页编译失败。
 

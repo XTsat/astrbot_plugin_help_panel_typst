@@ -7,13 +7,14 @@ import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.star import Star
 
-from ..domain import InternalCFG, TypstPluginConfig
+from ..domain import InternalCFG, RenderFailure, TypstPluginConfig
 from ..utils import (
     calculate_hash,
     verify_image_format_matches_extension,
@@ -40,6 +41,21 @@ class AsyncNullContext:  # 异步空上下文
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class RenderPaths:
+    """一次渲染的落盘路径策略
+
+    json 是数据落点, image 是本次编译的直接产物, kv_key 是静态缓存的元数据键
+    (临时路径没有缓存, 为 None)。三者绑在一起返回, 调用方不必按字符串键取值。
+    """
+
+    json: Path
+    image: Path
+    kv_key: str | None
+    is_temp: bool
+    req_id: str
 
 
 class RenderResult:
@@ -281,8 +297,8 @@ class TypstRenderer:
         """
         # 1. 确定路径策略
         paths = self._resolve_paths(mode, query, force_temp)
-        json_path, img_path, kv_key = paths["json"], paths["img"], paths["kv_key"]
-        is_temp, req_id = paths["is_temp"], paths["req_id"]
+        json_path, img_path, kv_key = paths.json, paths.image, paths.kv_key
+        is_temp, req_id = paths.is_temp, paths.req_id
 
         # 2. 获取锁 (仅静态模式需要)
         lock = self._cache_locks.get(mode) if not is_temp else None
@@ -315,7 +331,7 @@ class TypstRenderer:
                 if count == 0:
                     if is_temp and json_path.exists():
                         json_path.unlink(missing_ok=True)
-                    return None, "empty"
+                    return None, RenderFailure.EMPTY
 
                 # --- 2. 缓存校验 (仅静态) ---
                 need_compile = True
@@ -630,27 +646,26 @@ class TypstRenderer:
 
     def _resolve_paths(
         self, mode: str, query: str | None, force_temp: bool = False
-    ) -> dict[str, Any]:
+    ) -> RenderPaths:
         """计算文件路径"""
         if query or force_temp:
             uid = str(uuid.uuid4())
-            return {
-                "json": self.data_dir / f"temp_{uid}.json",
-                "img": self.data_dir / f"temp_{uid}.png",
-                "kv_key": None,
-                "is_temp": True,
-                "req_id": uid,
-            }
-        else:
-            return {
-                "json": self.data_dir
-                / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.json",
-                "img": self.data_dir
-                / f"{InternalCFG.CACHE_FILES.get(mode, 'cache_unknown')}.png",
-                "kv_key": f"typst_cache_{mode}",
-                "is_temp": False,
-                "req_id": "static",
-            }
+            return RenderPaths(
+                json=self.data_dir / f"temp_{uid}.json",
+                image=self.data_dir / f"temp_{uid}.png",
+                kv_key=None,
+                is_temp=True,
+                req_id=uid,
+            )
+        # 未知 mode 落在共用兜底名上: 没有独立缓存文件与锁 (见 AGENTS §5.4)
+        stem = InternalCFG.CACHE_FILES.get(mode, "cache_unknown")
+        return RenderPaths(
+            json=self.data_dir / f"{stem}.json",
+            image=self.data_dir / f"{stem}.png",
+            kv_key=f"typst_cache_{mode}",
+            is_temp=False,
+            req_id="static",
+        )
 
     def _find_cached_outputs(self, stem: str) -> list[str]:
         """按当前发送格式查找产物: 先找分片, 再找单图

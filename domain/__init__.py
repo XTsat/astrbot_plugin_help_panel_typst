@@ -1,5 +1,5 @@
 from .schemas import RenderNode, PluginMetadata
-from .constants import InternalCFG, DefaultCFG, RenderMode
+from .constants import InternalCFG, DefaultCFG, RenderFailure, RenderMode
 from .config import (
     RenderingConfig,
     ThemePreset,
@@ -15,6 +15,7 @@ __all__ = [
     "PluginMetadata",
     "InternalCFG",
     "DefaultCFG",
+    "RenderFailure",
     "RenderMode",
     "RenderingConfig",
     "ThemePreset",
