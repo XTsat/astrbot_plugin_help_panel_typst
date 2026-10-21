@@ -6,7 +6,7 @@
 > **来源**：本文件派生自 [agent-templates](https://github.com/XTsat/agent-templates) 的 `templates/astrbot-plugin/AGENTS.md`，上游最新版见该仓库 `main` 分支。
 > **更新流程**：用户说「更新 AGENTS」时按以下步骤执行：① 拉取来源模板最新版 → ② 与本地逐节比对 → ③ 合并（保留本项目已回填的插件名、命令前缀、目录结构与项目特有约定）→ ④ 展示 diff 与改动清单，等用户确认后再落盘。**禁止整文件覆盖**。
 >
-> 与上游的已回填差异：日志前缀使用 `[HelpTypst]`；README 目前为单语历史格式；历史 CHANGELOG（v0.4.3 及以前）沿用旧内联格式。
+> 与上游的已回填差异：日志前缀使用 `[HelpTypst]`；README 为单语（中文）四板块格式；历史 CHANGELOG（v0.4.3 及以前）沿用旧内联格式。
 
 ---
 
@@ -42,8 +42,7 @@
 | `resources/` | ✅ | 内置字体与背景图 |
 | `pages/preview/` | 可选 | 样式预览页静态资源（`index.html` / `app.js` / `style.css`），数据来自 `main.py` 注册的 Web API |
 | `.astrbot-plugin/i18n/` | 可选 | 提示文案的多语言文件（`zh-CN.json` / `en-US.json`），无对应文件时回落中文 |
-| `preview/` | 可选 | README 功能预览图 |
-| `hero_preview.png` | 可选 | README 顶部横幅图 |
+| `preview/` | 可选 | README 用图统一存放处：功能预览图与首图 `hero_preview.png`（Hero 横幅 + 分类卡片整图） |
 | `.gitignore` | 可选 | Git 忽略规则 |
 
 ---
@@ -74,7 +73,7 @@ pages/preview/       # 样式预览页静态资源（app.js / index.html / style
 .astrbot-plugin/     # 插件元数据与多语言文案（i18n/）
 resources/fonts/     # 内置字体（LXGW Neo XiHei、Noto Color Emoji）
 resources/images/    # 内置背景图（安装时导入数据目录 backgrounds）
-preview/             # README 功能预览图
+preview/             # README 用图（功能预览图与首图）
 _conf_schema.json    # 配置面板 schema
 metadata.yaml        # 插件元信息与版本号
 ```
@@ -335,10 +334,12 @@ async def show_menu(
     """显示指令菜单"""
     ...
 
+
 @filter.command_group("typst")
 @filter.permission_type(filter.PermissionType.ADMIN)
 def typst(self) -> None:
     pass
+
 
 @typst.command("font")
 async def cmd_scan_fonts(self, event: AstrMessageEvent) -> ...:
@@ -457,7 +458,7 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 
 **当前状态与双语文档**
 
-- 本项目目前仅维护中文 `README.md`，头部为历史格式，**本次不重构**。
+- 本项目目前仅维护中文 `README.md`，采用重排版式：居中标题 + 一句话介绍 → 效果预览（多页面图片表格，含 `preview/hero_preview.png`）→ 特性 / 快速开始 / 指令 / 配置（按分组收进 `<details>` 折叠块）/ 常见问题 / 许可。
 - 若后续新增英文版 `README_en.md`：中文版为权威版本（源），改动先落中文、再同步英文，**禁止反向**；两版章节结构保持一致，头部语言切换链接互相指向。
 
 **格式与多会话**
