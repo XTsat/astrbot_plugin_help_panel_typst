@@ -19,6 +19,8 @@ const ZOOM_STEP = 0.1;
 const DEFAULT_DEBOUNCE_MS = 550;
 const READY_TIMEOUT_MS = 15000;
 const NOTICE_DURATION_MS = 4000;
+/** 多页下载之间的间隔，避免同一轮的多次下载被浏览器合并成一次 */
+const DOWNLOAD_STAGGER_MS = 150;
 /** 「渲染用测试精度」只保存在本机，换浏览器/清缓存后回到 144 */
 const TEST_PPI_KEY = "helpTypst.previewTestPpi";
 
@@ -281,15 +283,6 @@ function withTimeout(promise, milliseconds, message) {
       },
     );
   });
-}
-
-function base64ToBlob(base64, mime) {
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return new Blob([bytes], { type: mime });
 }
 
 function extensionForMime(mime) {
@@ -2143,7 +2136,7 @@ function bindStaticEvents() {
     state.fitWidth = true;
     applyZoom();
   });
-  els.openImage.addEventListener("click", openCurrentImage);
+  els.openImage.addEventListener("click", downloadCurrentImage);
 
   els.errorRetry.addEventListener("click", () => {
     if (state.options) {
@@ -3025,27 +3018,16 @@ function updateZoomLabel() {
   setText(els.zoomValue, `${Math.round((state.fitWidth ? computeFitScale() : state.zoom) * 100)}%`);
 }
 
-function openCurrentImage() {
-  const image = state.images[0];
-  if (!image) return;
+function downloadCurrentImage() {
+  const images = state.images;
+  if (!images.length) return;
 
-  let opened = null;
-  let url = "";
-  try {
-    url = URL.createObjectURL(base64ToBlob(image.data, image.mime));
-    // 插件页 iframe 没有 allow-popups 时这里会返回 null，回退成下载
-    opened = window.open(url, "_blank", "noopener");
-  } catch {
-    opened = null;
-  }
-
-  if (!opened) {
-    if (url) URL.revokeObjectURL(url);
-    downloadImage(image);
-    setNotice("浏览器拦截了新窗口，已改为下载第 1 页");
-    return;
-  }
-  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+  setNotice(images.length > 1 ? `已开始下载 ${images.length} 页` : "已开始下载第 1 页");
+  // 首张留在点击手势内直接触发，其余逐页错开：同步连发会被浏览器合并或丢弃
+  downloadImage(images[0]);
+  images.slice(1).forEach((image, index) => {
+    window.setTimeout(() => downloadImage(image), DOWNLOAD_STAGGER_MS * (index + 1));
+  });
 }
 
 function downloadImage(image) {
