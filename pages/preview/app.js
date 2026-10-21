@@ -85,6 +85,8 @@ const state = {
   heroHeader: true,
   background: "",
   fontFilter: "",
+  // 重新扫描字体期间禁用按钮, 避免连点触发多次全盘扫描
+  reloadingFonts: false,
   ignoredSelected: [],
   ignoredCustom: [],
   pluginFilter: "",
@@ -171,6 +173,7 @@ const els = {
   fontChips: document.getElementById("font-chips"),
   fontSearch: document.getElementById("font-search"),
   fontList: document.getElementById("font-list"),
+  reloadFonts: document.getElementById("btn-reload-fonts"),
 
   pluginSearch: document.getElementById("plugin-search"),
   pluginList: document.getElementById("plugin-list"),
@@ -2368,6 +2371,12 @@ function bindStaticEvents() {
   els.colorGroups.addEventListener("change", handleColorCommit);
   els.restoreColors.addEventListener("click", restorePresetColors);
 
+  if (els.reloadFonts) {
+    els.reloadFonts.addEventListener("click", () => {
+      void reloadFonts();
+    });
+  }
+
   els.btnReset.addEventListener("click", () => {
     resetToDefaults();
   });
@@ -2557,6 +2566,45 @@ function resetToDefaults() {
   syncControls();
   markDirty();
   setNotice("已恢复默认样式");
+}
+
+/** 重新加载字体：让刚装进系统/自定义目录的字体立刻出现在列表里。 */
+async function reloadFonts() {
+  if (!bridge || !state.options || state.reloadingFonts) return;
+  state.reloadingFonts = true;
+  clearNotice();
+  updateControlAvailability();
+  try {
+    const result = asObject(await bridge.apiPost("preview/fonts", {}));
+    const fonts = normalizeFontList(result.fonts);
+    const missing = asArray(result.missing)
+      .map((name) => String(name).trim())
+      .filter(Boolean);
+    state.fonts = fonts;
+    // 字体文件被删掉后已选条目会静默回退到别的字体，这里直接移除并提示
+    const dropped = state.selectedFonts.filter((name) => !fonts.includes(name));
+    if (dropped.length) {
+      state.selectedFonts = state.selectedFonts.filter((name) => fonts.includes(name));
+      buildFontChips();
+      syncControls();
+      void requestRender();
+    }
+    renderFontList();
+    if (result.scan_ok === false) {
+      setNotice("字体扫描失败，已保留原有字体列表，详情见插件日志");
+    } else if (!fonts.length) {
+      setNotice("没有发现可用字体，请检查字体目录后重试");
+    } else if (dropped.length || missing.length) {
+      setNotice(`已重新加载 ${fonts.length} 个字体；${dropped.length || missing.length} 个字体文件已失效`);
+    } else {
+      setNotice(`已重新加载 ${fonts.length} 个字体`);
+    }
+  } catch (error) {
+    setNotice(`重新加载字体失败：${errorMessage(error)}`);
+  } finally {
+    state.reloadingFonts = false;
+    updateControlAvailability();
+  }
 }
 
 /** 导入当前配置：重新拉取服务端配置覆盖样式控件（未应用的修改会被丢弃）。 */
@@ -2880,6 +2928,7 @@ function updateControlAvailability() {
   els.btnImport.disabled = disabled || busy;
   els.btnApply.disabled = disabled || busy;
   els.btnRefresh.disabled = disabled || state.applying;
+  if (els.reloadFonts) els.reloadFonts.disabled = disabled || busy || state.reloadingFonts;
   els.previewPpiInput.disabled = disabled || busy;
   if ("inert" in els.controlsBody) els.controlsBody.inert = Boolean(state.fatalError) || busy;
 }

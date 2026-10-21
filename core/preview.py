@@ -680,11 +680,9 @@ class PreviewService:
             custom_presets[0]["name"]
         )
 
-    def build_options(self) -> dict[str, Any]:
-        """返回预览页初始化所需的全部选项"""
-        appearance = self.base_config.appearance
-        colors = dict(appearance.get_active_colors())
-        fonts = sorted(
+    def _selectable_fonts(self) -> list[str]:
+        """可选字体家族 (排除固定追加的表情字体, 按名称排序)"""
+        return sorted(
             (
                 f
                 for f in self.font_manager.available_families
@@ -692,6 +690,29 @@ class PreviewService:
             ),
             key=str.casefold,
         )
+
+    def build_font_state(self) -> dict[str, Any]:
+        """返回最新扫描到的可选字体, 供预览页「重新加载字体」刷新下拉"""
+        fonts = self._selectable_fonts()
+        available = self.font_manager.available_families
+        # 已选字体若从系统里消失, 渲染侧会静默换字体, 面板需要知道是哪一个
+        missing = [
+            name
+            for name in self.base_config.appearance.font_order
+            if name and name != DefaultCFG.EMOJI_FONT and name not in available
+        ]
+        return {
+            "fonts": fonts,
+            "count": len(fonts),
+            "scan_ok": self.font_manager.last_scan_ok,
+            "missing": missing,
+        }
+
+    def build_options(self) -> dict[str, Any]:
+        """返回预览页初始化所需的全部选项"""
+        appearance = self.base_config.appearance
+        colors = dict(appearance.get_active_colors())
+        fonts = self._selectable_fonts()
 
         preset_names = [DefaultCFG.DEFAULT_PRESET]
         preset_names.extend(

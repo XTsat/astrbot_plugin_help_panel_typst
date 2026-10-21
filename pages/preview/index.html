@@ -302,7 +302,21 @@
             <details class="ct-section">
               <summary>字体</summary>
               <div class="ct-section-body">
-                <p class="field-hint">顺序即优先级；未选时跟随插件配置</p>
+                <div class="font-actions">
+                  <p class="field-hint">顺序即优先级；未选时跟随插件配置</p>
+                  <button
+                    class="text-btn"
+                    id="btn-reload-fonts"
+                    type="button"
+                    title="重新扫描系统字体与自定义字体目录；装好新字体后点一下即可，无需重载插件"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M20 11a8 8 0 1 0 -2.34 5.66" />
+                      <path d="M20 4v7h-7" />
+                    </svg>
+                    重新加载字体
+                  </button>
+                </div>
                 <div class="font-chips" id="font-chips"></div>
                 <input
                   type="search"

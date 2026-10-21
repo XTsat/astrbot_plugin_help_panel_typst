@@ -137,6 +137,12 @@ class HelpTypst(Star):
                 "获取样式预览可选项",
             ),
             (
+                f"/{plugin_name}/preview/fonts",
+                self.api_preview_fonts,
+                ["POST"],
+                "重新扫描字体并返回可选字体",
+            ),
+            (
                 f"/{plugin_name}/preview/render",
                 self.api_preview_render,
                 ["POST"],
@@ -569,6 +575,19 @@ class HelpTypst(Star):
         except Exception as e:
             logger.error(f"[HelpTypst] 读取预览选项失败: {e}", exc_info=True)
             return error_response("读取预览选项失败，请查看插件日志")
+
+    async def api_preview_fonts(self) -> Any:
+        """插件页 API：重新扫描字体目录并返回最新可选字体"""
+        from astrbot.api.web import error_response, json_response
+
+        try:
+            # 与 /typst font 共用同一条扫描链路: 扫描 + 内存 Schema 同步 + 配置清洗
+            await asyncio.to_thread(self._refresh_resources)
+            data = await asyncio.to_thread(self.preview_service.build_font_state)
+            return json_response(data)
+        except Exception as e:
+            logger.error(f"[HelpTypst] 重新加载字体失败: {e}", exc_info=True)
+            return error_response("重新加载字体失败，请查看插件日志")
 
     async def api_preview_render(self) -> Any:
         """插件页 API：按样式渲染预览图"""

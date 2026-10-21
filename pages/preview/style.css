@@ -1547,6 +1547,13 @@ textarea:focus {
   justify-content: flex-end;
 }
 
+.font-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .category-actions {
   justify-content: space-between;
   gap: 8px;
