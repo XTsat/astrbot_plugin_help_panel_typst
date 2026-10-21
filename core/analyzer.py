@@ -25,6 +25,7 @@ from astrbot.core.star.filter.event_message_type import (
 from astrbot.core.agent.mcp_client import MCPTool
 
 from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
+from ..utils.view import TypstLayout
 
 
 # 命令监听描述识别: 头部含「命令/指令」, 冒号后为顿号/逗号分隔的关键词列表
@@ -84,7 +85,9 @@ def get_safe_plugin_info(star_meta: Any) -> dict[str, str | None]:
         parts = str(raw_module).split(".")
         safe_name = parts[-2] if len(parts) > 2 and parts[-1] == "main" else parts[-1]
     else:
-        safe_name = f"Unknown_{id(star_meta)}"  # 正常不应走到这，因为无标识符插件根本加载不了
+        safe_name = (
+            f"Unknown_{id(star_meta)}"  # 正常不应走到这，因为无标识符插件根本加载不了
+        )
 
     # 其他字段
     display = getattr(star_meta, "display_name", None)
@@ -118,7 +121,9 @@ def list_installed_plugins(context: Context) -> list[dict[str, Any]]:
     try:
         stars = context.get_all_stars()
     except Exception as exc:
-        logger.warning(f"[HelpTypst] 读取已安装插件列表失败, 屏蔽项回退为手动填写: {exc}")
+        logger.warning(
+            f"[HelpTypst] 读取已安装插件列表失败, 屏蔽项回退为手动填写: {exc}"
+        )
         return []
 
     plugins: dict[str, dict[str, Any]] = {}
@@ -386,7 +391,10 @@ class BaseAnalyzer:
         # 只排根模块不够 —— 插件目录里再注册一个 Star (内嵌子插件) 时, 子插件的
         # 兄弟模块与我们同处一个父包, 会被当成「我们的模块」并进来, 同一条指令就在
         # 两张插件卡片上各出现一次。排除它的包前缀即可, 但别排到我们自己的祖先层。
-        own_prefixes = (raw_module, raw_module.rsplit(".", 1)[0] if "." in raw_module else "")
+        own_prefixes = (
+            raw_module,
+            raw_module.rsplit(".", 1)[0] if "." in raw_module else "",
+        )
         foreign: list[str] = []
         for root in star_roots:
             if raw_module == root or raw_module.startswith(root + "."):
@@ -489,7 +497,9 @@ class CommandAnalyzer(BaseAnalyzer):
                     )
                 )
                 if not nodes:
-                    logger.debug(f"[HelpTypst] 插件 {safe_name} 无注册指令，仅展示基本信息。")
+                    logger.debug(
+                        f"[HelpTypst] 插件 {safe_name} 无注册指令，仅展示基本信息。"
+                    )
             except Exception as e:
                 logger.warning(f"[HelpTypst] 处理插件 {safe_name} 时发生异常: {e}")
                 continue
@@ -503,30 +513,13 @@ class CommandAnalyzer(BaseAnalyzer):
     def _assign_global_order(
         self, plugins: list[PluginMetadata]
     ) -> list[PluginMetadata]:
-        """按分类分组排序, 为每个插件分配跨分类连续的全局编号 order"""
-        fallback = self.cfg.category.fallback
+        """为每个插件分配跨分类连续的全局编号 order
 
-        # 按分类聚合
-        grouped: dict[str, list[PluginMetadata]] = {}
-        for p in plugins:
-            cat = (p.category or "").strip() or fallback
-            grouped.setdefault(cat, []).append(p)
-
-        # 分类名升序, 兜底分类置底
-        names = sorted(grouped.keys())
-        if fallback in names:
-            names.remove(fallback)
-            names.append(fallback)
-
-        # 分类内插件排序, 展平为全局序列
-        ordered: list[PluginMetadata] = []
-        for name in names:
-            plist = sorted(
-                grouped[name], key=lambda x: (x.display_name is None, x.name)
-            )
-            ordered.extend(plist)
-
-        # 分配全局连续编号
+        编号顺序 = 指令面板的阅读顺序 (左列自上而下, 再右列), 这份顺序由 utils/view.py 的
+        resolve_menu_order 算出: 面板会把整张分类卡搬进较矮的一列, 编号跟着搬完后的位置走,
+        才不会出现「左列读到 16 号, 右列又从 6 号开始」的跳号。
+        """
+        ordered = TypstLayout(self.cfg).resolve_menu_order(plugins)
         for idx, p in enumerate(ordered, start=1):
             p.order = idx
         return ordered

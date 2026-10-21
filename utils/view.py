@@ -4,7 +4,7 @@ import math
 import os
 import unicodedata
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NamedTuple, TypedDict
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
@@ -141,6 +141,308 @@ class MsgRecall:
             return val
 
         return None
+
+
+# ---- 两列高度估算 ----
+# 系数统一维护在 InternalCFG.EST_* (domain/constants.py 的「两列高度估算系数」),
+# 它们只影响左右分列的平衡, 不参与渲染; 校准说明见那边注释。
+
+
+class _CommandPayload(TypedDict, total=False):
+    """能力区指令 chip 的数据形状 (模板只读 name/aliases)"""
+
+    name: str
+    aliases: list[str]
+
+
+class _GroupPayload(TypedDict, total=False):
+    """能力区指令组的数据形状"""
+
+    name: str
+    commands: list[_CommandPayload]
+
+
+class _CapabilitiesPayload(TypedDict, total=False):
+    """插件能力树的数据形状"""
+
+    commands: list[_CommandPayload]
+    groups: list[_GroupPayload]
+    listeners: list[str]
+
+
+class _EstimateGeometry(NamedTuple):
+    """随页宽/列数变化的排版尺寸 (pt)"""
+
+    plugin_chip_width: float
+    group_chip_width: float
+
+
+def _estimate_geometry(page_width: float, columns: int) -> _EstimateGeometry:
+    """按页宽与分类列数换算 chip 可用行宽
+
+    分类卡内部宽度随页面宽度线性变化, 固定行宽会让窄页面下的 chip 折行数被系统性低估。
+    """
+    column_count = max(1, columns)
+    region = page_width - 2 * InternalCFG.EST_PAGE_MARGIN_X
+    card_width = (
+        region - (column_count - 1) * InternalCFG.EST_COLUMN_GUTTER
+    ) / column_count
+    plugin_chip = card_width - InternalCFG.EST_DETAIL_CARD_PADDING_X
+    return _EstimateGeometry(
+        # 极端窄页时行宽不能压到 0, 否则折行数无穷大
+        plugin_chip_width=max(60.0, plugin_chip),
+        group_chip_width=max(
+            48.0, plugin_chip - InternalCFG.EST_DETAIL_GROUP_PADDING_X
+        ),
+    )
+
+
+def _category_card_head(cat: dict[str, Any], detail: bool) -> float:
+    """分类卡片的固定开销: 卡片头部与内边距, 加上与下一张卡的间距"""
+    base = (
+        InternalCFG.EST_DETAIL_CATEGORY_BASE
+        if detail
+        else InternalCFG.EST_CATEGORY_BASE
+    )
+    return base + InternalCFG.EST_CATEGORY_STACK_GAP
+
+
+def _category_plugin_rows(
+    cat: dict[str, Any], detail: bool, geometry: _EstimateGeometry
+) -> list[float]:
+    """分类内每个插件条目的估算高度序列 (累加后即分类卡内容高度)"""
+    plugins = cat.get("plugins") or []
+    if detail:
+        return [_estimate_plugin_detail_height(p, geometry) for p in plugins]
+    return [_estimate_plugin_row_height(p) for p in plugins]
+
+
+def _partition_gap(
+    heights_variants: list[list[float]], left: list[int], right: list[int]
+) -> tuple[float, float]:
+    """返回 (两列最大落差, 两列落差之和), 多套排版取其中最大的一套"""
+    worst = 0.0
+    total = 0.0
+    for heights in heights_variants:
+        left_sum = sum(heights[i] for i in left)
+        right_sum = sum(heights[i] for i in right)
+        gap = abs(left_sum - right_sum)
+        worst = max(worst, gap)
+        total += gap
+    return worst, total
+
+
+def _column_runs(mask: int, count: int) -> int:
+    """统计分类在编号顺序上被分到两列的次数, 用来在同样齐平时优先选少交错的排法"""
+    runs = 1
+    for i in range(1, count):
+        if (mask >> i & 1) != (mask >> (i - 1) & 1):
+            runs += 1
+    return runs
+
+
+def _partition_two_columns(
+    heights_variants: list[list[float]], count: int
+) -> list[list[int]]:
+    """两列: 直接枚举所有划分取最优
+
+    分类卡只有个位数, 2^count 枚举的成本可以忽略; 贪心+局部搜索会卡在「先走一步不改善、
+    再走一步才改善」的台阶上, 实测真实面板会被卡住, 所以这里用穷举。
+    评分顺序: 最差那套排版的落差 → 两套落差之和 → 交错次数 (尽量少拆散分类顺序)。
+    """
+    all_mask = (1 << count) - 1
+    best: tuple[float, float, int] | None = None
+    best_mask = 1
+    # 固定第一个分类在左列, 只枚举另一半, 省掉左右镜像的重复
+    for mask in range(1, all_mask + 1, 2):
+        if mask == all_mask:
+            continue
+        left = [i for i in range(count) if mask >> i & 1]
+        right = [i for i in range(count) if not mask >> i & 1]
+        worst, total = _partition_gap(heights_variants, left, right)
+        cost = (round(worst, 1), round(total, 1), _column_runs(mask, count))
+        if best is None or cost < best:
+            best, best_mask = cost, mask
+    return [
+        [i for i in range(count) if best_mask >> i & 1],
+        [i for i in range(count) if not best_mask >> i & 1],
+    ]
+
+
+def _partition_greedy(
+    heights_variants: list[list[float]], columns: int
+) -> list[list[int]]:
+    """三列及以上的兜底: 按高度占比从高到低装进当前最矮的一列, 再做单块/两块微调"""
+    count = len(heights_variants[0])
+    # 各套排版绝对高度差着量级, 装填权重按占比平均, 避免被长的那套吃掉
+    shares = [
+        [h / (sum(heights) or 1.0) for h in heights] for heights in heights_variants
+    ]
+    weight = [sum(s[i] for s in shares) / len(shares) for i in range(count)]
+
+    assign = [0] * count
+    placed = [False] * count
+    for idx in sorted(range(count), key=lambda i: weight[i], reverse=True):
+        sums = [0.0] * columns
+        for i in range(count):
+            if placed[i]:
+                sums[assign[i]] += weight[i]
+        assign[idx] = sums.index(min(sums))
+        placed[idx] = True
+
+    def buckets_of(state: list[int]) -> list[list[int]]:
+        buckets: list[list[int]] = [[] for _ in range(columns)]
+        for i, col in enumerate(state):
+            buckets[col].append(i)
+        return [sorted(bucket) for bucket in buckets]
+
+    def worst_gap(state: list[int]) -> float:
+        buckets = buckets_of(state)
+        return max(
+            _partition_gap(heights_variants, buckets[a], buckets[b])[0]
+            for a in range(columns)
+            for b in range(a + 1, columns)
+        )
+
+    best = worst_gap(assign)
+    for _ in range(6):
+        improved = False
+        for i in range(count):
+            origin = assign[i]
+            for other in range(columns):
+                if other == origin:
+                    continue
+                assign[i] = other
+                gap = worst_gap(assign)
+                if gap < best - 0.5:
+                    best, improved = gap, True
+                    break
+                assign[i] = origin
+        for i in range(count):
+            for j in range(i + 1, count):
+                if assign[i] == assign[j]:
+                    continue
+                assign[i], assign[j] = assign[j], assign[i]
+                gap = worst_gap(assign)
+                if gap < best - 0.5:
+                    best, improved = gap, True
+                else:
+                    assign[i], assign[j] = assign[j], assign[i]
+        if not improved:
+            break
+    return buckets_of(assign)
+
+
+def _partition_indices(
+    heights_variants: list[list[float]], columns: int
+) -> list[list[int]]:
+    """把整块内容装进各列 (返回每列的下标, 列内按下标升序)
+
+    内容块不能像文字那样在行间断开, 所以只能在列之间整块搬动; 传入多套高度 (指令模式 /
+    详细模式) 时按各套落差的较大者评分: 两个面板共用一份列分配, 编号才能跟着走。
+    """
+    count = len(heights_variants[0]) if heights_variants else 0
+    if count == 0:
+        return [[] for _ in range(columns)]
+    if count < columns:
+        return [[i] for i in range(count)] + [[] for _ in range(columns - count)]
+    # 穷举只在分类数不多时划算 (2^n 增长), 分类特别多的面板退化成贪心 + 微调
+    if columns == 2 and count <= InternalCFG.EST_BALANCE_EXHAUSTIVE_LIMIT:
+        return _partition_two_columns(heights_variants, count)
+    return _partition_greedy(heights_variants, columns)
+
+
+def _estimate_text_width(text: str, size: float) -> float:
+    """按全宽/半宽比例估算一段文本的排版宽度 (pt)"""
+    width = 0.0
+    for char in text:
+        wide = unicodedata.east_asian_width(char) in ("W", "F")
+        width += size if wide else size * 0.52
+    return width
+
+
+def _estimate_chip_rows(widths: list[float], line_width: float) -> int:
+    """按模板 par 的折行行为估算 chip 占用的行数"""
+    rows = 1
+    used = 0.0
+    for width in widths:
+        chunk = width + InternalCFG.EST_CHIP_GAP
+        if used and used + chunk > line_width:
+            rows += 1
+            used = chunk
+        else:
+            used += chunk
+    return rows
+
+
+def _estimate_command_chip_widths(commands: list[_CommandPayload]) -> list[float]:
+    """指令 chip 及其别名 chip 的宽度序列 (字号与字距取自模板)"""
+    widths: list[float] = []
+    for command in commands:
+        name = command.get("name") or ""
+        # 主指令 chip: 8.5pt 粗体 + 0.5pt 字距; 别名 chip: 8pt 带 ↳ 前缀
+        widths.append(
+            _estimate_text_width(name, 8.5) * 1.02
+            + 0.5 * max(0, len(name) - 1)
+            + InternalCFG.EST_CHIP_PADDING
+        )
+        for alias in command.get("aliases") or []:
+            widths.append(
+                _estimate_text_width(f"↳ {alias}", 8.0) + InternalCFG.EST_CHIP_PADDING
+            )
+    return widths
+
+
+def _estimate_listener_chip_widths(listeners: list[str]) -> list[float]:
+    """监听器 chip 的宽度序列 (8pt 常规字重)"""
+    return [
+        _estimate_text_width(name, 8.0) + InternalCFG.EST_CHIP_PADDING
+        for name in listeners
+    ]
+
+
+def _estimate_plugin_row_height(plugin: dict[str, Any]) -> float:
+    """估算指令模式下一个插件行的高度 (pt)"""
+    name = plugin.get("display_name") or plugin.get("name") or ""
+    lines = max(
+        1,
+        math.ceil(_estimate_text_width(name, 10.0) / InternalCFG.EST_PLUGIN_NAME_WIDTH),
+    )
+    return InternalCFG.EST_PLUGIN_ROW + (lines - 1) * InternalCFG.EST_PLUGIN_NAME_LINE
+
+
+def _estimate_plugin_detail_height(
+    plugin: dict[str, Any], geometry: _EstimateGeometry
+) -> float:
+    """估算详细模式下一个插件条目 (含能力区) 的高度 (pt)"""
+    capabilities: _CapabilitiesPayload = plugin.get("capabilities") or {}
+    commands = capabilities.get("commands") or []
+    groups = capabilities.get("groups") or []
+    listeners = capabilities.get("listeners") or []
+    if not (commands or groups or listeners):
+        return InternalCFG.EST_DETAIL_PLUGIN_ROW
+
+    height = InternalCFG.EST_DETAIL_PLUGIN_ROW + InternalCFG.EST_DETAIL_CAPABILITY_BLOCK
+    if commands:
+        height += InternalCFG.EST_DETAIL_SECTION_LABEL
+        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
+            _estimate_command_chip_widths(commands), geometry.plugin_chip_width
+        )
+    for group in groups:
+        group_commands = group.get("commands") or []
+        # 空指令组模板不渲染, 不占高度
+        if not group_commands:
+            continue
+        height += InternalCFG.EST_DETAIL_GROUP_OVERHEAD
+        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
+            _estimate_command_chip_widths(group_commands), geometry.group_chip_width
+        )
+    if listeners:
+        height += InternalCFG.EST_DETAIL_SECTION_LABEL
+        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
+            _estimate_listener_chip_widths(listeners), geometry.plugin_chip_width
+        )
+    return height
 
 
 class TypstLayout:
@@ -320,8 +622,8 @@ class TypstLayout:
     ) -> dict[str, Any]:
         """指令模式: 按分类分组为卡片, 并均衡分配到多列 (窄页宽时单列)"""
         categories = self._group_by_category(plugins)
-        cols = self._balance_categories(
-            categories, columns=self._resolve_column_count("command")
+        cols = self._arrange_columns(
+            categories, plugins, self._resolve_column_count("command")
         )
 
         return {
@@ -344,10 +646,8 @@ class TypstLayout:
     ) -> dict[str, Any]:
         """详细指令模式: 分类卡片 + 每个插件展示能力树 (指令/指令组/监听器)"""
         categories = self._group_by_category_detail(plugins)
-        cols = self._balance_categories(
-            categories,
-            detail=True,
-            columns=self._resolve_column_count("command_detail"),
+        cols = self._arrange_columns(
+            categories, plugins, self._resolve_column_count("command_detail")
         )
 
         return {
@@ -361,9 +661,7 @@ class TypstLayout:
             "category_columns": cols,
         }
 
-    def _build_plugin_capabilities(
-        self, plugin: PluginMetadata
-    ) -> dict[str, Any]:
+    def _build_plugin_capabilities(self, plugin: PluginMetadata) -> dict[str, Any]:
         """构建插件能力树。
 
         参数占位已并入 chip 显示名, 模板只消费指令名/别名与分组名, 因此不再单独输出。
@@ -379,9 +677,7 @@ class TypstLayout:
         for node in plugin.nodes:
             if node.is_group:
                 # 指令组: 递归收集所有子指令
-                group_cmds = self._collect_group_commands(
-                    node.children, prefix=""
-                )
+                group_cmds = self._collect_group_commands(node.children, prefix="")
                 if group_cmds:
                     groups.append(
                         {
@@ -678,75 +974,107 @@ class TypstLayout:
             )
         return categories
 
-    def _balance_categories(
+    def resolve_menu_order(
+        self, plugins: list[PluginMetadata], detail: bool = False
+    ) -> list[PluginMetadata]:
+        """按面板阅读顺序 (左列自上而下, 再右列自上而下) 返回插件序列
+
+        分类卡会被整张搬进较矮的一列, 所以面板里的编号必须按搬完后的顺序重排: 否则左列
+        读到十几号会突然跳回右列中间号。渲染与「按编号查详情」共用这一份顺序, 不能各算各的,
+        因此 detail 不参与列分配 (签名保留给调用方显式说明意图)。
+        """
+        if not plugins:
+            return []
+        groups = self._group_plugins(plugins)
+        if len(groups) <= 1:
+            return [p for _, plist in groups for p in plist]
+        layout = self._balance_groups(groups, self._resolve_column_count("command"))
+        by_name = {name: plist for name, plist in groups}
+        return [
+            plugin for names in layout for name in names for plugin in by_name[name]
+        ]
+
+    def _arrange_columns(
         self,
         categories: list[dict[str, Any]],
-        detail: bool = False,
-        columns: int = 2,
+        plugins: list[PluginMetadata],
+        columns: int,
     ) -> list[list[dict[str, Any]]]:
-        """将分类卡片按全局编号顺序切分到各列
+        """把分类卡摆进各列 (列内顺序仍按编号, 跨列允许交错)
 
-        指令模式最多两列, 两列时必须连续切分: 左列取前 k 个分类、右列接续剩余分类,
-        这样从上到下、从左到右读到的编号始终递增; 若按高度自由组合, 左栏读完十几号会
-        突然跳回右栏的中间号。k 取估算高度最接近对半的位置, 尽量让两列等高。
-        单列原样返回, 三列及以上退化为按高度贪心装填 (事件/过滤器模式无全局编号)。
-        估算高度按模板的实际排版参数折算, 见 _estimate_category_height。
+        列分配必须与 resolve_menu_order 完全一致, 否则卡片位置和卡里的编号会对不上,
+        所以这里也走 _balance_groups, 只是把分类名换回卡片数据。
         """
         if not categories:
             return []
-        if columns <= 1 or len(categories) == 1:
-            return [list(categories)]
-        if columns > 2:
-            return self._balance_categories_greedy(categories, detail, columns)
+        by_name = {c["name"]: c for c in categories}
+        index_of = {c["name"]: i for i, c in enumerate(categories)}
+        layout = self._balance_groups(self._group_plugins(plugins), columns)
+        return [
+            [by_name[name] for name in sorted(names, key=lambda n: index_of[n])]
+            for names in layout
+            if names
+        ]
 
-        heights = [self._estimate_category_height(c, detail) for c in categories]
-        total = sum(heights)
-        best_k = 1
-        best_gap = total
-        left_height = 0
-        for k in range(1, len(categories)):
-            left_height += heights[k - 1]
-            gap = abs(total - 2 * left_height)
-            if gap < best_gap:
-                best_gap = gap
-                best_k = k
-        return [list(categories[:best_k]), list(categories[best_k:])]
+    def _estimate_payload(self, plugin: PluginMetadata) -> dict[str, Any]:
+        """高度估算用的插件字典: 只保留 _estimate_plugin_* 会读到的字段"""
+        return {
+            "id": plugin.order,
+            "name": plugin.name,
+            "display_name": plugin.display_name,
+            "capabilities": self._build_plugin_capabilities(plugin),
+        }
 
-    def _balance_categories_greedy(
-        self,
-        categories: list[dict[str, Any]],
-        detail: bool,
-        columns: int,
-    ) -> list[list[dict[str, Any]]]:
-        """三列及以上的兜底分列: 按估算高度从高到低装进当前最矮的一列"""
-        heights = [self._estimate_category_height(c, detail) for c in categories]
-        buckets: list[list[dict[str, Any]]] = [[] for _ in range(columns)]
-        bucket_heights = [0] * columns
-        order = sorted(range(len(categories)), key=lambda i: heights[i], reverse=True)
-        for idx in order:
-            target_col = bucket_heights.index(min(bucket_heights))
-            buckets[target_col].append(categories[idx])
-            bucket_heights[target_col] += heights[idx]
-        return buckets
+    def _balance_groups(
+        self, groups: list[tuple[str, list[PluginMetadata]]], columns: int
+    ) -> list[list[str]]:
+        """返回每列的分类名序列 (指令面板与详细面板共用同一份列分配)
 
-    def _estimate_category_height(self, cat: dict[str, Any], detail: bool = False) -> int:
-        """估算单个分类卡片在列内占用的高度 (pt)
-
-        按模板 category_card 的真实排版折算: 固定头部/内边距 + 每个插件条目的实际高度。
-        detail=True 时按能力区 chip 的折行数累加指令/指令组/监听器的高度。
-        估算以默认 830pt 页宽为基准: 页宽更窄时文字折行更多, 只求两列大致均衡。
+        两个面板的分类卡高度差着量级, 各自求最优会得到不同的列分配, 编号就会跟着打架。
+        这里同时用两套排版估算, 挑「两个面板里较难对齐的那一侧也尽量齐平」的分配。
         """
-        plugins = cat.get("plugins") or []
-        if detail:
-            height = InternalCFG.EST_DETAIL_CATEGORY_BASE + sum(
-                _estimate_plugin_detail_height(p) for p in plugins
+        names = [name for name, _ in groups]
+        if len(groups) <= 1 or columns <= 1:
+            return [names]
+        geometry = _estimate_geometry(self.cfg.rendering.page_width, columns)
+        heights_simple: list[float] = []
+        heights_detail: list[float] = []
+        for _, plist in groups:
+            card = {"name": "", "plugins": [self._estimate_payload(p) for p in plist]}
+            heights_simple.append(
+                float(_category_card_head(card, False))
+                + sum(_category_plugin_rows(card, False, geometry))
             )
-        else:
-            height = InternalCFG.EST_CATEGORY_BASE + sum(
-                _estimate_plugin_row_height(p) for p in plugins
+            heights_detail.append(
+                float(_category_card_head(card, True))
+                + sum(_category_plugin_rows(card, True, geometry))
             )
-        # 分类卡片之间的 stack spacing: 两列卡片数不同时, 列高差主要差在这里
-        return int(round(height + InternalCFG.EST_CATEGORY_STACK_GAP))
+        buckets = _partition_indices([heights_simple, heights_detail], columns)
+        return [[names[i] for i in bucket] for bucket in buckets]
+
+    def _group_plugins(
+        self, plugins: list[PluginMetadata]
+    ) -> list[tuple[str, list[PluginMetadata]]]:
+        """按分类聚合插件并排出分类顺序 (名称升序, 兜底分类置底)
+
+        分类内先按名称排序: 分配编号时插件还没有 order, 必须有一个不依赖编号的确定性顺序。
+        """
+        fallback = self.cfg.category.fallback
+        grouped: dict[str, list[PluginMetadata]] = {}
+        for plugin in plugins:
+            cat = (plugin.category or "").strip() or fallback
+            grouped.setdefault(cat, []).append(plugin)
+        names = sorted(grouped.keys())
+        if fallback in names:
+            names.remove(fallback)
+            names.append(fallback)
+        return [
+            (
+                name,
+                sorted(grouped[name], key=lambda x: (x.display_name is None, x.name)),
+            )
+            for name in names
+        ]
 
     def _estimate_height(self, nodes: list[RenderNode]) -> int:
         """高度估算器(暂硬编码，等待完善模板逻辑)"""
@@ -767,116 +1095,3 @@ class TypstLayout:
             total_h += rows * 30 + 10
 
         return total_h
-
-
-# ---- 两列高度估算 ----
-# 系数统一维护在 InternalCFG.EST_* (domain/constants.py 的「两列高度估算系数」),
-# 它们只影响左右分列的平衡, 不参与渲染; 校准说明见那边注释。
-
-
-class _CommandPayload(TypedDict, total=False):
-    """能力区指令 chip 的数据形状 (模板只读 name/aliases)"""
-
-    name: str
-    aliases: list[str]
-
-
-class _GroupPayload(TypedDict, total=False):
-    """能力区指令组的数据形状"""
-
-    name: str
-    commands: list[_CommandPayload]
-
-
-class _CapabilitiesPayload(TypedDict, total=False):
-    """插件能力树的数据形状"""
-
-    commands: list[_CommandPayload]
-    groups: list[_GroupPayload]
-    listeners: list[str]
-
-
-def _estimate_text_width(text: str, size: float) -> float:
-    """按全宽/半宽比例估算一段文本的排版宽度 (pt)"""
-    width = 0.0
-    for char in text:
-        wide = unicodedata.east_asian_width(char) in ("W", "F")
-        width += size if wide else size * 0.52
-    return width
-
-
-def _estimate_chip_rows(widths: list[float], line_width: float) -> int:
-    """按模板 par 的折行行为估算 chip 占用的行数"""
-    rows = 1
-    used = 0.0
-    for width in widths:
-        chunk = width + InternalCFG.EST_CHIP_GAP
-        if used and used + chunk > line_width:
-            rows += 1
-            used = chunk
-        else:
-            used += chunk
-    return rows
-
-
-def _estimate_command_chip_widths(commands: list[_CommandPayload]) -> list[float]:
-    """指令 chip 及其别名 chip 的宽度序列 (字号与字距取自模板)"""
-    widths: list[float] = []
-    for command in commands:
-        name = command.get("name") or ""
-        # 主指令 chip: 8.5pt 粗体 + 0.5pt 字距; 别名 chip: 8pt 带 ↳ 前缀
-        widths.append(
-            _estimate_text_width(name, 8.5) * 1.02
-            + 0.5 * max(0, len(name) - 1)
-            + InternalCFG.EST_CHIP_PADDING
-        )
-        for alias in command.get("aliases") or []:
-            widths.append(_estimate_text_width(f"↳ {alias}", 8.0) + InternalCFG.EST_CHIP_PADDING)
-    return widths
-
-
-def _estimate_listener_chip_widths(listeners: list[str]) -> list[float]:
-    """监听器 chip 的宽度序列 (8pt 常规字重)"""
-    return [
-        _estimate_text_width(name, 8.0) + InternalCFG.EST_CHIP_PADDING for name in listeners
-    ]
-
-
-def _estimate_plugin_row_height(plugin: dict[str, Any]) -> float:
-    """估算指令模式下一个插件行的高度 (pt)"""
-    name = plugin.get("display_name") or plugin.get("name") or ""
-    lines = max(1, math.ceil(_estimate_text_width(name, 10.0) / InternalCFG.EST_PLUGIN_NAME_WIDTH))
-    return InternalCFG.EST_PLUGIN_ROW + (lines - 1) * InternalCFG.EST_PLUGIN_NAME_LINE
-
-
-def _estimate_plugin_detail_height(plugin: dict[str, Any]) -> float:
-    """估算详细模式下一个插件条目 (含能力区) 的高度 (pt)"""
-    capabilities: _CapabilitiesPayload = plugin.get("capabilities") or {}
-    commands = capabilities.get("commands") or []
-    groups = capabilities.get("groups") or []
-    listeners = capabilities.get("listeners") or []
-    if not (commands or groups or listeners):
-        return InternalCFG.EST_DETAIL_PLUGIN_ROW
-
-    height = InternalCFG.EST_DETAIL_PLUGIN_ROW + InternalCFG.EST_DETAIL_CAPABILITY_BLOCK
-    if commands:
-        height += InternalCFG.EST_DETAIL_SECTION_LABEL
-        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
-            _estimate_command_chip_widths(commands), InternalCFG.EST_DETAIL_CHIP_WIDTH
-        )
-    for group in groups:
-        group_commands = group.get("commands") or []
-        # 空指令组模板不渲染, 不占高度
-        if not group_commands:
-            continue
-        height += InternalCFG.EST_DETAIL_GROUP_OVERHEAD
-        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
-            _estimate_command_chip_widths(group_commands),
-            InternalCFG.EST_DETAIL_GROUP_CHIP_WIDTH,
-        )
-    if listeners:
-        height += InternalCFG.EST_DETAIL_SECTION_LABEL
-        height += InternalCFG.EST_DETAIL_CHIP_ROW * _estimate_chip_rows(
-            _estimate_listener_chip_widths(listeners), InternalCFG.EST_DETAIL_CHIP_WIDTH
-        )
-    return height

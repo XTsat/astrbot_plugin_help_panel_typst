@@ -397,23 +397,35 @@ class InternalCFG:
     CATEGORY_FALLBACK: str = "其他"
     # 默认分类关键词映射已迁移至 DefaultCFG.DEFAULT_CATEGORY_KEYWORDS (设置面板 category.rules 的预置默认值)
     # 两列高度估算系数 (pt): 只参与 utils/view.py 的分列决策, 不参与渲染。
-    # 按 base.typ 的排版 (830pt 页宽、分类卡内边距、chip 字号) 折算, 并用真实渲染结果校准;
-    # 页宽 / 字号 / 模板结构变化后需重新校准 (详见 utils/view.py 的 _estimate_category_height)。
+    # 按 base.typ 的排版 (分类卡内边距、chip 字号) 折算, 并用真实渲染结果校准; 行宽类尺寸由页宽/列数
+    # 现算 (见 _estimate_geometry), 只有不随页宽变化的间距/行高留在这里。
+    # 字号 / 模板排版变化后需重新校准 (详见 utils/view.py 的 _category_plugin_rows)。
     EST_CATEGORY_BASE: float = 42.0  # 指令模式: 分类卡片头部 + 列表内边距
     EST_CATEGORY_STACK_GAP: float = 12.0  # 分类卡片之间的 stack spacing
     EST_PLUGIN_ROW: float = 26.0  # 指令模式: 单个插件行 (含行距)
     EST_PLUGIN_NAME_WIDTH: float = 200.0  # 指令模式: 插件名可用宽度, 超出折行
     EST_PLUGIN_NAME_LINE: float = 14.0  # 插件名每多折一行的增量
-    EST_DETAIL_CATEGORY_BASE: float = 50.0  # 详细模式: 分类卡片固定开销
-    EST_DETAIL_PLUGIN_ROW: float = 40.0  # 详细模式: 插件条目头部行
-    EST_DETAIL_CAPABILITY_BLOCK: float = 14.0  # 能力区: 分割线上下的留白
+    EST_DETAIL_CATEGORY_BASE: float = 40.0  # 详细模式: 分类卡片固定开销 (实测 39.9)
+    EST_DETAIL_PLUGIN_ROW: float = 41.8  # 详细模式: 插件条目头部行 (实测 41.75)
+    EST_DETAIL_CAPABILITY_BLOCK: float = (
+        36.8  # 能力区: 分割线上下留白 (与下一项合计实测 56.8)
+    )
     EST_DETAIL_SECTION_LABEL: float = 20.0  # Commands / Listeners 小节标题
-    EST_DETAIL_GROUP_OVERHEAD: float = 24.0  # 指令组容器: 内边距 + 组名
-    EST_DETAIL_CHIP_ROW: float = 19.0  # 单行 chip 高度 (含行距)
-    EST_DETAIL_CHIP_WIDTH: float = 356.0  # 插件条目内 chip 可用行宽
-    EST_DETAIL_GROUP_CHIP_WIDTH: float = 350.0  # 指令组内 chip 可用行宽
+    EST_DETAIL_GROUP_OVERHEAD: float = (
+        24.0  # 指令组容器: 内边距 + 组名 (多个组时误差较大, 取中值)
+    )
+    EST_DETAIL_CHIP_ROW: float = 14.5  # 单行 chip 高度 (含行距, 实测 14.45)
+    # chip 可用行宽随页宽/列数变化: 这里只记版心几何, 由 utils/view.py 的 _estimate_geometry 换算。
+    # 固定行宽会让窄页宽下的折行数被系统性低估, 列高差随之偏大
+    EST_PAGE_MARGIN_X: float = 28.0  # 页面左右留白 (base.typ 的 set page margin x)
+    EST_COLUMN_GUTTER: float = 14.0  # 分类卡片多列 grid 的列间距
+    EST_DETAIL_CARD_PADDING_X: float = (
+        38.0  # 分类卡右内边距 2 + 插件列表 8x2 + 插件条目 10x2
+    )
+    EST_DETAIL_GROUP_PADDING_X: float = 14.0  # 指令组容器的左右内边距 7x2
     EST_CHIP_PADDING: float = 12.0  # chip 左右内边距 + 边框
     EST_CHIP_GAP: float = 3.0  # 相邻 chip 间距
+    EST_BALANCE_EXHAUSTIVE_LIMIT: int = 16  # 分类数不超过该值时穷举两列划分
 
     # 禁用插件灰化色板 (主题无关的固定值, 供 /helps 指令菜单灰化展示)
     DISABLED_COLORS: dict[str, str] = {
