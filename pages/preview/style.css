@@ -1128,9 +1128,13 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 220px;
+  /* 固定初值 + resize：用户可拖动底部边角加高，避免插件多时只能靠滚动 */
+  height: 220px;
+  min-height: 88px;
+  max-height: 60vh;
   padding: 4px;
   overflow-y: auto;
+  resize: vertical;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2);
