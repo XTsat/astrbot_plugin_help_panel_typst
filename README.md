@@ -10,17 +10,29 @@
 
 ## 效果预览
 
-| 插件菜单（Hero 横幅） | 网页样式预览 |
-| :---: | :---: |
-| <img src="./preview/hero_preview.png" height="320"> | <img src="./preview/web_preview.png" height="320"> |
+<table width="100%">
+<thead><tr><th align="center">插件菜单（Hero 横幅）</th><th align="center">网页样式预览</th></tr></thead>
+<tbody><tr>
+<td align="center" width="40.1%"><img src="./preview/hero_preview.png" width="100%"></td>
+<td align="center" width="59.9%"><img src="./preview/web_preview.png" width="100%"></td>
+</tr></tbody>
+</table>
 
-| 搜索高亮 | 插件详情 |
-| :---: | :---: |
-| <img src="./preview/search.png" height="320"> | <img src="./preview/id.webp" height="320"> |
+<table width="100%">
+<thead><tr><th align="center">搜索高亮</th><th align="center">插件详情</th></tr></thead>
+<tbody><tr>
+<td align="center" width="52.2%"><img src="./preview/search.png" width="100%"></td>
+<td align="center" width="47.8%"><img src="./preview/id.webp" width="100%"></td>
+</tr></tbody>
+</table>
 
-| 事件监听 | 过滤器 |
-| :---: | :---: |
-| <img src="./preview/events.jpg" height="320"> | <img src="./preview/filters.jpg" height="320"> |
+<table width="100%">
+<thead><tr><th align="center">事件监听</th><th align="center">过滤器</th></tr></thead>
+<tbody><tr>
+<td align="center" width="46.7%"><img src="./preview/events.jpg" width="100%"></td>
+<td align="center" width="53.3%"><img src="./preview/filters.jpg" width="100%"></td>
+</tr></tbody>
+</table>
 
 ## 特性
 
