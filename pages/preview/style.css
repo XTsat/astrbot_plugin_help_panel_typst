@@ -2109,6 +2109,30 @@ textarea:focus {
   gap: 4px;
 }
 
+/* 工具条内的紧凑开关：与其它控件同高，不占据整行 */
+.compare-toggle {
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.compare-toggle .switch {
+  width: 30px;
+  height: 17px;
+}
+
+.compare-toggle .switch::after {
+  width: 11px;
+  height: 11px;
+}
+
+.compare-toggle input:checked + .switch::after {
+  transform: translateX(13px);
+}
+
 .compare-close {
   margin-left: 2px;
 }

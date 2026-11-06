@@ -550,6 +550,9 @@ class _CacheEntry:
     total_pages: int
     created_at: float
     size: int
+    # 该图最近一次实际编译耗时: 命中缓存时前端仍能显示真实渲染成本,
+    # 否则只会看到「读取缓存」的 0.00s, 无法比较不同精度
+    render_ms: int = 0
 
 
 class _PreviewCache:
@@ -573,13 +576,18 @@ class _PreviewCache:
         return entry
 
     def put(
-        self, key: str, images: list[_PreviewImage], total_pages: int
+        self,
+        key: str,
+        images: list[_PreviewImage],
+        total_pages: int,
+        render_ms: int = 0,
     ) -> _CacheEntry:
         entry = _CacheEntry(
             images=images,
             total_pages=total_pages,
             created_at=time.monotonic(),
             size=sum(len(image.data) for image in images),
+            render_ms=render_ms,
         )
         self._items[key] = entry
         self._items.move_to_end(key)
@@ -989,6 +997,9 @@ class PreviewService:
         mode, query = self._parse_request(payload)
         style = self._parse_style(payload.get("style"))
         ppis, ppi_warnings = self._parse_compare_ppis(payload.get("ppis"))
+        # 「不用缓存」每次强制重新编译: 返回的耗时才是该精度真实的渲染成本,
+        # 而不是读缓存的时间; 缓存仍会更新, 关掉开关后可直接复用最新结果
+        use_cache = not _as_bool(payload.get("no_cache"), False)
         started = time.perf_counter()
         # 各列共用同一 pt 裁剪高度: 显示宽度一致时, 顶部内容才能逐像素对齐;
         # 高度按最大档位反推, 避免高 DPI 首屏把浏览器内存打爆。
@@ -1030,6 +1041,7 @@ class PreviewService:
                         max_pages=InternalCFG.PREVIEW_COMPARE_MAX_PAGES,
                         cache_scope="compare",
                         max_height=crop_height,
+                        use_cache=use_cache,
                     )
                 except PreviewError as exc:
                     items.append(self._compare_error_item(ppi, str(exc)))
@@ -1046,6 +1058,7 @@ class PreviewService:
                             "ppi": ppi,
                             "images": response["images"],
                             "elapsed_ms": response["elapsed_ms"],
+                            "render_ms": response["render_ms"],
                             "cached": response["cached"],
                             "total_pages": response["total_pages"],
                             "truncated": response["truncated"],
@@ -1073,6 +1086,7 @@ class PreviewService:
             "ppi": ppi,
             "images": [],
             "elapsed_ms": 0,
+            "render_ms": 0,
             "cached": False,
             "total_pages": 0,
             "truncated": False,
@@ -1181,12 +1195,15 @@ class PreviewService:
         max_pages: int,
         cache_scope: str,
         max_height: int | None,
+        use_cache: bool = True,
     ) -> dict[str, Any]:
         """用已准备好的面板数据编译一档预览图
 
         cache_scope 把「完整预览」与「对比列」的缓存分开: 对比列只保留首屏,
         与完整预览共用缓存会让后者的分页图被截短。max_height 让对比列裁剪超长首屏,
         同时进入缓存键, 否则调整对比档位后会复用错误高度的旧图。
+        use_cache=False 用于精度对比的「不用缓存」: 跳过读取, 每次都真实编译,
+        耗时数据才可用于比较不同清晰度的渲染成本。
         """
         renderer = TypstRenderer(
             star=self.star,
@@ -1201,26 +1218,29 @@ class PreviewService:
         cache_key = self._cache_key(
             mode, query, style, renderer, bg_image, content_hash, scope
         )
-        cached = self._cache.get(cache_key)
+        cached = self._cache.get(cache_key) if use_cache else None
         if cached is not None:
             return self._build_response(
                 cached,
                 cached=True,
                 elapsed_ms=int((time.perf_counter() - started) * 1000),
+                render_ms=cached.render_ms,
                 warnings=warnings,
             )
 
         async with self._render_lock:
             # 等锁期间可能有同款请求已经编译完成
-            cached = self._cache.get(cache_key)
+            cached = self._cache.get(cache_key) if use_cache else None
             if cached is not None:
                 return self._build_response(
                     cached,
                     cached=True,
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    render_ms=cached.render_ms,
                     warnings=warnings,
                 )
 
+            compile_started = time.perf_counter()
             result, error = await renderer.render(
                 prepared_provider, mode, query or None, force_temp=True
             )
@@ -1240,14 +1260,22 @@ class PreviewService:
             finally:
                 # 预览图已读进内存，临时文件立即可删，避免数据目录堆积
                 await asyncio.to_thread(self._remove_files, result.temp_files)
+            # 编译 + 读图才是这张预览图的真实生成成本, 不含等锁与分析耗时
+            render_ms = int((time.perf_counter() - compile_started) * 1000)
 
         if total_pages > max_pages:
             warnings.append(f"面板共 {total_pages} 页，预览只返回前 {max_pages} 页")
             images = images[:max_pages]
 
-        entry = self._cache.put(cache_key, images, total_pages)
+        entry = self._cache.put(
+            cache_key, images, total_pages, render_ms=render_ms
+        )
         return self._build_response(
-            entry, cached=False, elapsed_ms=elapsed_ms, warnings=warnings
+            entry,
+            cached=False,
+            elapsed_ms=elapsed_ms,
+            render_ms=render_ms,
+            warnings=warnings,
         )
 
     # ---- data preparation ----
@@ -1972,6 +2000,7 @@ class PreviewService:
         *,
         cached: bool,
         elapsed_ms: int,
+        render_ms: int,
         warnings: list[str],
     ) -> dict[str, Any]:
         return {
@@ -1987,6 +2016,8 @@ class PreviewService:
                 for image in entry.images
             ],
             "elapsed_ms": elapsed_ms,
+            # 实际编译耗时: 缓存命中时沿用该图上次的生成耗时, 供前端显示与比较
+            "render_ms": render_ms,
             "cached": cached,
             "total_pages": entry.total_pages,
             "truncated": entry.total_pages > len(entry.images),

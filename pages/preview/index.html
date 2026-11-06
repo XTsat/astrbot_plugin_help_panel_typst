@@ -415,7 +415,7 @@
             <div class="compare-heading">
               <h2 class="compare-title" id="compare-title">清晰度对比</h2>
               <p class="compare-desc" id="compare-desc">
-                同一面板按多个清晰度各渲染一页（长图自动截取顶部区域），并排对比字体锐度；可自定义清晰度，点击图片还能放大同一局部。
+                同一面板按多个清晰度各渲染一页（长图自动截取顶部区域），并排对比字体锐度；可自定义清晰度，点击图片还能放大同一局部。打开「不用缓存」会逐档重新编译，耗时可反映各清晰度的实际渲染成本。
               </p>
             </div>
             <div class="compare-toolbar">
@@ -433,6 +433,14 @@
                 />
                 <button class="text-btn" id="compare-custom-add" type="button" title="添加自定义清晰度并参与对比">添加</button>
               </div>
+              <label
+                class="switch-row compare-toggle"
+                title="跳过预览缓存，每次都重新编译；对比卡片上的耗时会变成本次实际渲染耗时"
+              >
+                <span>不用缓存</span>
+                <input type="checkbox" id="compare-no-cache" />
+                <span class="switch" aria-hidden="true"></span>
+              </label>
               <button
                 class="text-btn"
                 id="compare-detail-toggle"

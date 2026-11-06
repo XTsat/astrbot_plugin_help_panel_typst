@@ -148,6 +148,8 @@ const state = {
     loading: false,
     error: "",
     elapsedMs: 0,
+    // 打开后每次对比都跳过预览缓存，耗时列才是各精度本次的真实渲染成本
+    noCache: false,
     zoom: 1,
     fit: true,
     timer: null,
@@ -192,6 +194,7 @@ const els = {
   compareClose: document.getElementById("compare-close"),
   compareCustomInput: document.getElementById("compare-custom-ppi"),
   compareCustomAdd: document.getElementById("compare-custom-add"),
+  compareNoCache: document.getElementById("compare-no-cache"),
   compareDetailToggle: document.getElementById("compare-detail-toggle"),
   compareDetail: document.getElementById("compare-detail"),
   compareDetailRow: document.getElementById("compare-detail-row"),
@@ -2272,6 +2275,11 @@ function bindStaticEvents() {
     toggleComparePpi(Number(chip.dataset.ppi));
   });
   els.compareCustomAdd.addEventListener("click", addCustomComparePpi);
+  els.compareNoCache.addEventListener("change", () => {
+    state.compare.noCache = els.compareNoCache.checked;
+    // 打开开关需要立刻重算一遍耗时；关闭时下一轮请求自然回到缓存
+    if (state.compare.open) scheduleCompareRender();
+  });
   els.compareCustomInput.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
@@ -3200,6 +3208,7 @@ function openCompare() {
   cancelScheduledRender();
   state.compare.open = true;
   els.compareOverlay.hidden = false;
+  els.compareNoCache.checked = state.compare.noCache;
   setCompareBackgroundInert(true);
   // 主预览图在浮层后面看不到，先卸下释放高分辨率图的解码内存
   renderStage();
@@ -3441,6 +3450,7 @@ async function requestCompare() {
         bridge.apiPost("preview/compare", {
           ...buildPayload(),
           ppis,
+          no_cache: state.compare.noCache,
         }),
         COMPARE_TIMEOUT_MS,
         "对比超时，请减少精度数量后重试",
@@ -3498,6 +3508,8 @@ function applyCompareResult(rawResult) {
       images,
       error: typeof item.error === "string" ? item.error : "",
       elapsedMs: Math.max(0, asNumber(item.elapsed_ms, 0)),
+      // 缓存命中时 elapsed_ms 只是读缓存耗时；render_ms 是该图最近一次真实编译耗时
+      renderMs: Math.max(0, asNumber(item.render_ms, item.elapsed_ms)),
       cached: item.cached === true,
       totalPages: Math.max(images.length, asNumber(item.total_pages, images.length)),
       cropped: item.cropped === true || images.some((image) => image.cropped),
@@ -3522,9 +3534,13 @@ function compareCardMetaText(item) {
   // 分页信息放进标题行：压在图上会挡住面板标题与头部内容
   const pages = item.totalPages > 1 ? `第 ${image.page} / 共 ${item.totalPages} 页` : "";
   const cropped = item.cropped ? "顶部截取" : "";
-  return [size, formatSeconds(item.elapsedMs), pages, cropped]
-    .filter(Boolean)
-    .join(" · ");
+  // 缓存命中时 elapsedMs 只是读缓存耗时，统一显示该图最近一次的真实编译耗时，
+  // 才能横向比较不同清晰度的渲染成本
+  const took =
+    item.renderMs > 0
+      ? `${item.cached ? "上次渲染" : "渲染"} ${formatSeconds(item.renderMs)}`
+      : `读取 ${formatSeconds(item.elapsedMs)}`;
+  return [size, took, pages, cropped].filter(Boolean).join(" · ");
 }
 
 /** 判断两档结果是否可复用旧卡片：图片数据一致时不再触发一次解码 */
@@ -3597,6 +3613,8 @@ function renderCompareStage() {
       const cached = document.createElement("span");
       cached.className = "compare-cached";
       cached.textContent = "缓存";
+      cached.title =
+        "本次直接复用缓存，没有重新编译；耗时列显示该图最近一次的实际渲染耗时";
       head.appendChild(cached);
     }
     card.appendChild(head);
@@ -3821,13 +3839,13 @@ function renderCompareChrome() {
 
   const loading = state.compare.loading;
   const hasItems = state.compare.items.length > 0;
+  const loadingText = state.compare.noCache
+    ? `正在按 ${state.compare.selected.length} 个精度重新编译（不用缓存）…`
+    : `正在按 ${state.compare.selected.length} 个精度渲染…首次约需数秒`;
   show(els.compareLoading, loading && !hasItems);
   els.compareGrid.classList.toggle("is-stale", loading && hasItems);
   if (loading) {
-    setText(
-      els.compareLoadingText,
-      `正在按 ${state.compare.selected.length} 个精度渲染…首次约需数秒`,
-    );
+    setText(els.compareLoadingText, loadingText);
   }
 
   let status = "";
@@ -3836,7 +3854,7 @@ function renderCompareChrome() {
     status = `对比失败：${state.compare.error}`;
     statusState = "error";
   } else if (loading) {
-    status = `正在按 ${state.compare.selected.length} 个精度渲染…首次约需数秒`;
+    status = loadingText;
     statusState = "loading";
   } else if (hasItems) {
     const failed = state.compare.items.filter((item) => item.error).length;
@@ -3844,6 +3862,7 @@ function renderCompareChrome() {
       `${state.compare.items.length} 个精度`,
       `总耗时 ${formatSeconds(state.compare.elapsedMs)}`,
     ];
+    if (state.compare.noCache) parts.push("未用缓存");
     if (failed) parts.push(`${failed} 个精度失败`);
     if (state.compare.warnings.length) parts.push(state.compare.warnings[0]);
     status = parts.join(" · ");
