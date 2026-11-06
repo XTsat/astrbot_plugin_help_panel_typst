@@ -58,6 +58,20 @@
               <span class="meta-item" id="meta-render"></span>
               <button
                 class="text-btn"
+                id="btn-compare"
+                type="button"
+                disabled
+                title="把当前面板按多个清晰度同时渲染，并排对比字体锐度"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="7" height="16" rx="1.5" />
+                  <rect x="14" y="4" width="7" height="16" rx="1.5" />
+                  <path d="M6.5 8.5h0M17.5 8.5h0" />
+                </svg>
+                <span class="preview-tab-label">清晰度对比</span>
+              </button>
+              <button
+                class="text-btn"
                 id="btn-open-image"
                 type="button"
                 disabled
@@ -387,6 +401,94 @@
           </div>
         </aside>
       </main>
+
+      <!-- ==================== 清晰度对比浮层 ==================== -->
+      <div class="compare-overlay" id="compare-overlay" hidden>
+        <div
+          class="compare-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="compare-title"
+          aria-describedby="compare-desc"
+        >
+          <header class="compare-header">
+            <div class="compare-heading">
+              <h2 class="compare-title" id="compare-title">清晰度对比</h2>
+              <p class="compare-desc" id="compare-desc">
+                同一面板按多个清晰度各渲染一页（长图自动截取顶部区域），并排对比字体锐度；可自定义清晰度，点击图片还能放大同一局部。
+              </p>
+            </div>
+            <div class="compare-toolbar">
+              <div class="compare-ppis" id="compare-ppis" role="group" aria-label="参与对比的清晰度"></div>
+              <div class="compare-custom">
+                <input
+                  id="compare-custom-ppi"
+                  type="number"
+                  inputmode="numeric"
+                  min="72"
+                  max="384"
+                  step="1"
+                  placeholder="自定义 ppi"
+                  aria-label="自定义清晰度 (ppi)"
+                />
+                <button class="text-btn" id="compare-custom-add" type="button" title="添加自定义清晰度并参与对比">添加</button>
+              </div>
+              <button
+                class="text-btn"
+                id="compare-detail-toggle"
+                type="button"
+                aria-pressed="false"
+                disabled
+                title="点击对比图后，在下方并排查看同一局部的高倍放大"
+              >
+                局部对比
+              </button>
+              <div class="compare-zoom" role="group" aria-label="对比缩放">
+                <button class="icon-btn" id="compare-zoom-out" type="button" title="缩小" aria-label="缩小">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M5 12h14" />
+                  </svg>
+                </button>
+                <span class="zoom-value" id="compare-zoom-value" aria-live="off">100%</span>
+                <button class="icon-btn" id="compare-zoom-in" type="button" title="放大" aria-label="放大">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+                <button class="text-btn" id="compare-zoom-fit" type="button" title="缩放回整排可见">适应宽度</button>
+              </div>
+              <button class="icon-btn compare-close" id="compare-close" type="button" title="关闭对比（Esc）" aria-label="关闭对比">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          <div class="compare-status-row">
+            <p class="compare-status" id="compare-status" role="status" aria-live="polite"></p>
+            <button class="text-btn" id="compare-retry" type="button" hidden>重试</button>
+          </div>
+
+          <div class="compare-body" id="compare-body">
+            <div class="compare-grid" id="compare-grid"></div>
+            <div class="compare-loading" id="compare-loading" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <span id="compare-loading-text">正在按多个精度渲染…</span>
+            </div>
+          </div>
+
+          <section class="compare-detail" id="compare-detail" hidden>
+            <div class="compare-detail-head">
+              <span class="compare-detail-title">局部对比</span>
+              <span class="compare-detail-hint" id="compare-detail-hint">点击上方对比图选择位置</span>
+              <span class="compare-detail-point" id="compare-detail-point"></span>
+              <button class="text-btn" id="compare-detail-close" type="button">收起</button>
+            </div>
+            <div class="compare-detail-row" id="compare-detail-row"></div>
+          </section>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="./app.js"></script>

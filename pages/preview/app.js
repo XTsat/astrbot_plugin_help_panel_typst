@@ -23,11 +23,29 @@ const NOTICE_DURATION_MS = 4000;
 const DOWNLOAD_STAGGER_MS = 150;
 /** 「渲染用测试精度」只保存在本机，换浏览器/清缓存后回到 144 */
 const TEST_PPI_KEY = "helpTypst.previewTestPpi";
+/** 精度对比的兜底档位；正常由后端 options.compare 下发 */
+const COMPARE_FALLBACK_PPIS = [72, 96, 128, 144, 192, 256, 384];
+const COMPARE_FALLBACK_DEFAULT_PPIS = [96, 144, 256, 384];
+const COMPARE_FALLBACK_MAX = 5;
+const COMPARE_ZOOM_STEP = 0.25;
+const COMPARE_ZOOM_MAX = 4;
+/** 连续点选精度时只发最后一轮，避免把逐档编译排成一长队 */
+const COMPARE_DEBOUNCE_MS = 400;
+const COMPARE_MIN_COLUMN_WIDTH = 180;
+/** 多档编译总时长兜底：服务端也会按总预算跳过剩余档位，这里负责解锁界面 */
+const COMPARE_TIMEOUT_MS = 90000;
 
 /** 当前渲染在途的 Promise；用于合并并发请求 */
 let inFlight = null;
 /** color key -> { swatch, hex }，避免每次改色都重新查询 DOM */
 const colorInputs = new Map();
+/** 对比卡片 -> 上次渲染的 item：切换精度时复用未变化的列，避免整列重新解码 */
+const compareCardItems = new WeakMap();
+/** 局部对比：把整页按固定虚拟宽度渲染到小画布，保证各档位是同一物理尺度 */
+const COMPARE_DETAIL_PAGE_WIDTH = 2400;
+const COMPARE_DETAIL_WINDOW_WIDTH = 320;
+const COMPARE_DETAIL_WINDOW_HEIGHT = 200;
+const COMPARE_DETAIL_DPR = 2;
 
 const state = {
   options: null,
@@ -114,10 +132,39 @@ const state = {
   requestSeq: 0,
   zoom: 1,
   fitWidth: true,
+
+  // 精度对比浮层：选中档位、各档渲染结果与相对缩放
+  compare: {
+    open: false,
+    available: false,
+    presets: [...COMPARE_FALLBACK_PPIS],
+    // 后端下发的档位；当前配置的清晰度可能不在其中，openCompare 时临时补进 presets
+    basePresets: [...COMPARE_FALLBACK_PPIS],
+    defaultPpis: [...COMPARE_FALLBACK_DEFAULT_PPIS],
+    selected: [...COMPARE_FALLBACK_DEFAULT_PPIS],
+    maxPpis: COMPARE_FALLBACK_MAX,
+    items: [],
+    warnings: [],
+    loading: false,
+    error: "",
+    elapsedMs: 0,
+    zoom: 1,
+    fit: true,
+    timer: null,
+    inFlight: null,
+    pending: false,
+    seq: 0,
+    // 会话内添加的自定义清晰度；不进配置，只影响本次对比
+    customPpis: [],
+    // 局部对比：active 时在底部展示各档位同一位置的放大裁剪
+    detail: { active: false, x: 0.5, y: 0.2 },
+  },
 };
 
 const els = {
   app: document.getElementById("app"),
+  topbar: document.querySelector(".topbar"),
+  workspace: document.querySelector(".workspace"),
   topbarStatus: document.getElementById("topbar-status"),
   topbarStatusText: document.getElementById("topbar-status-text"),
 
@@ -127,7 +174,30 @@ const els = {
   zoomFit: document.getElementById("zoom-fit"),
   metaPages: document.getElementById("meta-pages"),
   metaRender: document.getElementById("meta-render"),
+  btnCompare: document.getElementById("btn-compare"),
   openImage: document.getElementById("btn-open-image"),
+
+  compareOverlay: document.getElementById("compare-overlay"),
+  compareGrid: document.getElementById("compare-grid"),
+  compareBody: document.getElementById("compare-body"),
+  comparePpis: document.getElementById("compare-ppis"),
+  compareStatus: document.getElementById("compare-status"),
+  compareRetry: document.getElementById("compare-retry"),
+  compareLoading: document.getElementById("compare-loading"),
+  compareLoadingText: document.getElementById("compare-loading-text"),
+  compareZoomOut: document.getElementById("compare-zoom-out"),
+  compareZoomIn: document.getElementById("compare-zoom-in"),
+  compareZoomFit: document.getElementById("compare-zoom-fit"),
+  compareZoomValue: document.getElementById("compare-zoom-value"),
+  compareClose: document.getElementById("compare-close"),
+  compareCustomInput: document.getElementById("compare-custom-ppi"),
+  compareCustomAdd: document.getElementById("compare-custom-add"),
+  compareDetailToggle: document.getElementById("compare-detail-toggle"),
+  compareDetail: document.getElementById("compare-detail"),
+  compareDetailRow: document.getElementById("compare-detail-row"),
+  compareDetailHint: document.getElementById("compare-detail-hint"),
+  compareDetailPoint: document.getElementById("compare-detail-point"),
+  compareDetailClose: document.getElementById("compare-detail-close"),
 
   error: document.getElementById("preview-error"),
   errorTitle: document.getElementById("preview-error-title"),
@@ -719,11 +789,51 @@ function applyOptions(rawOptions, viewOptions = {}) {
     // 后端会拒绝超长关键词，输入框直接按同一上限截断，避免白跑一次请求
     maxQueryLen: Math.max(1, asNumber(limits.max_query_len, 80)),
   };
+  if (els.compareCustomInput) {
+    els.compareCustomInput.min = String(Math.ceil(state.limits.ppi.min));
+    els.compareCustomInput.max = String(Math.floor(state.limits.ppi.max));
+  }
   state.preview = {
     ppi: clamp(asNumber(preview.ppi, 144), 36, 512),
     maxPages: asNumber(preview.max_pages, 4),
     debounceMs: clamp(asNumber(preview.debounce_ms, DEFAULT_DEBOUNCE_MS), 80, 2000),
   };
+
+  // 精度对比档位：后端可配置，旧后端缺字段时用页面内兜底值
+  const compareOptions = asObject(options.compare);
+  // 后端没有 compare 字段说明接口不存在，入口直接禁用，避免每次点击都失败
+  state.compare.available = Object.keys(compareOptions).length > 0;
+  const comparePresets = asArray(compareOptions.presets)
+    .map((value) => Math.round(asNumber(value, 0)))
+    .filter((value) => value >= state.limits.ppi.min && value <= state.limits.ppi.max);
+  state.compare.basePresets = comparePresets.length
+    ? [...new Set(comparePresets)].sort((left, right) => left - right)
+    : [...COMPARE_FALLBACK_PPIS];
+  rebuildComparePresets();
+  state.compare.maxPpis = Math.max(
+    1,
+    Math.round(asNumber(compareOptions.max_ppis, COMPARE_FALLBACK_MAX)),
+  );
+  const defaultPpis = asArray(compareOptions.default_ppis)
+    .map((value) => Math.round(asNumber(value, 0)))
+    .filter((value) => state.compare.presets.includes(value));
+  const fallbackDefaults = COMPARE_FALLBACK_DEFAULT_PPIS.filter((value) =>
+    state.compare.presets.includes(value),
+  );
+  state.compare.defaultPpis = (defaultPpis.length ? defaultPpis : fallbackDefaults)
+    .slice(0, state.compare.maxPpis);
+  if (!state.compare.defaultPpis.length) {
+    state.compare.defaultPpis = state.compare.presets.slice(
+      0,
+      Math.min(4, state.compare.presets.length),
+    );
+  }
+  const keptComparePpis = state.compare.selected.filter((value) =>
+    state.compare.presets.includes(value),
+  );
+  state.compare.selected = keptComparePpis.length
+    ? keptComparePpis.slice(0, state.compare.maxPpis)
+    : [...state.compare.defaultPpis];
 
   if (viewOptions.keepView) {
     // 导入当前配置：只覆盖样式，保留正在预览的面板类型与搜索词
@@ -2141,6 +2251,47 @@ function bindStaticEvents() {
   });
   els.openImage.addEventListener("click", downloadCurrentImage);
 
+  els.btnCompare.addEventListener("click", openCompare);
+  els.compareClose.addEventListener("click", closeCompare);
+  els.compareOverlay.addEventListener("click", (event) => {
+    if (event.target === els.compareOverlay) closeCompare();
+  });
+  els.compareZoomOut.addEventListener("click", () => changeCompareZoom(-COMPARE_ZOOM_STEP));
+  els.compareZoomIn.addEventListener("click", () => changeCompareZoom(COMPARE_ZOOM_STEP));
+  els.compareZoomFit.addEventListener("click", () => {
+    state.compare.fit = true;
+    applyCompareZoom();
+  });
+  els.compareRetry.addEventListener("click", () => {
+    void requestCompare();
+  });
+  els.comparePpis.addEventListener("click", (event) => {
+    const chip =
+      event.target instanceof Element ? event.target.closest(".compare-chip") : null;
+    if (!chip || chip.disabled) return;
+    toggleComparePpi(Number(chip.dataset.ppi));
+  });
+  els.compareCustomAdd.addEventListener("click", addCustomComparePpi);
+  els.compareCustomInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addCustomComparePpi();
+  });
+  els.compareDetailToggle.addEventListener("click", toggleCompareDetail);
+  els.compareDetailClose.addEventListener("click", () => {
+    setCompareDetailActive(false);
+  });
+  els.compareGrid.addEventListener("click", handleCompareGridClick);
+  document.addEventListener("keydown", (event) => {
+    if (!state.compare.open) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCompare();
+      return;
+    }
+    if (event.key === "Tab") trapCompareFocus(event);
+  });
+
   els.errorRetry.addEventListener("click", () => {
     if (state.options) {
       void requestRender();
@@ -2393,6 +2544,7 @@ function bindStaticEvents() {
 
   window.addEventListener("resize", () => {
     if (state.fitWidth) applyZoom();
+    if (state.compare.open) applyCompareZoom();
   });
   if (typeof ResizeObserver === "function") {
     // 侧栏折叠、iframe 尺寸变化时 clientWidth 变化不一定触发 window.resize
@@ -2400,6 +2552,10 @@ function bindStaticEvents() {
       if (state.fitWidth) applyZoom();
     });
     observer.observe(els.viewport);
+    const compareObserver = new ResizeObserver(() => {
+      if (state.compare.open) applyCompareZoom();
+    });
+    compareObserver.observe(els.compareBody);
   }
 }
 
@@ -2853,6 +3009,13 @@ function applyRenderResult(rawResult) {
    ========================================================================== */
 
 function renderStage() {
+  // 对比浮层打开时卸下主预览图片，释放高分辨率图占用的解码内存；
+  // 关闭浮层会再次调用 renderStage 从内存里的 base64 恢复。
+  if (state.compare.open) {
+    els.stage.replaceChildren();
+    return;
+  }
+
   const fragment = document.createDocumentFragment();
 
   state.images.forEach((image, index) => {
@@ -2928,6 +3091,10 @@ function updateControlAvailability() {
   els.btnImport.disabled = disabled || busy;
   els.btnApply.disabled = disabled || busy;
   els.btnRefresh.disabled = disabled || state.applying;
+  els.btnCompare.disabled = disabled || busy || !state.compare.available;
+  els.btnCompare.title = state.compare.available
+    ? "把当前面板按多个清晰度同时渲染，并排对比字体锐度"
+    : "当前页面没有清晰度对比接口，请更新插件后刷新";
   if (els.reloadFonts) els.reloadFonts.disabled = disabled || busy || state.reloadingFonts;
   els.previewPpiInput.disabled = disabled || busy;
   if ("inert" in els.controlsBody) els.controlsBody.inert = Boolean(state.fatalError) || busy;
@@ -3021,6 +3188,730 @@ function updateStatus() {
 
   setText(els.footerError, state.renderError);
   show(els.footerError, Boolean(state.renderError));
+}
+
+/* ==========================================================================
+   清晰度对比
+   ========================================================================== */
+
+function openCompare() {
+  if (!state.options || state.fatalError || !state.compare.available) return;
+  ensureCompareCurrentPpi();
+  cancelScheduledRender();
+  state.compare.open = true;
+  els.compareOverlay.hidden = false;
+  setCompareBackgroundInert(true);
+  // 主预览图在浮层后面看不到，先卸下释放高分辨率图的解码内存
+  renderStage();
+  if (!state.compare.selected.length) {
+    state.compare.selected = [...state.compare.defaultPpis];
+  }
+  buildCompareChips();
+  renderCompareChrome();
+  // 打开即自动渲染一轮：点击一次就能看到多档对比
+  void requestCompare();
+  window.requestAnimationFrame(() => applyCompareZoom());
+  if (!els.compareClose.disabled) els.compareClose.focus();
+}
+
+/** 预设档位 = 后端默认 + 会话内自定义 + 当前配置值 */
+function rebuildComparePresets() {
+  const presets = new Set(state.compare.basePresets);
+  for (const ppi of state.compare.customPpis) presets.add(ppi);
+  const current = Math.round(state.ppi);
+  if (
+    Number.isFinite(current) &&
+    current >= state.limits.ppi.min &&
+    current <= state.limits.ppi.max
+  ) {
+    presets.add(current);
+  }
+  state.compare.presets = [...presets].sort((left, right) => left - right);
+}
+
+/** 配置里的清晰度可能不在预设档位里：补一枚 chip，保证当前值可选、可标记 */
+function ensureCompareCurrentPpi() {
+  rebuildComparePresets();
+
+  // 配置改到别的清晰度后，已选档位可能已不在预设里，回落到默认档位
+  const kept = state.compare.selected.filter((value) =>
+    state.compare.presets.includes(value),
+  );
+  if (!kept.length) {
+    const defaults = state.compare.defaultPpis.filter((value) =>
+      state.compare.presets.includes(value),
+    );
+    state.compare.selected = defaults.length
+      ? defaults.slice(0, state.compare.maxPpis)
+      : state.compare.presets.slice(0, Math.min(4, state.compare.presets.length));
+  } else {
+    state.compare.selected = kept.slice(0, state.compare.maxPpis);
+  }
+}
+
+/** 添加一个自定义清晰度档位；范围与插件「图片清晰度」一致 */
+function addCustomComparePpi() {
+  if (!state.compare.open) return;
+  const raw = els.compareCustomInput.value.trim();
+  const value = Number(raw);
+  const min = Math.ceil(state.limits.ppi.min);
+  const max = Math.floor(state.limits.ppi.max);
+  if (!raw || !Number.isInteger(value) || value < min || value > max) {
+    setText(els.compareStatus, `请输入 ${min}–${max} 之间的整数清晰度`);
+    els.compareStatus.dataset.state = "error";
+    els.compareCustomInput.focus();
+    return;
+  }
+  const ppi = value;
+  if (!state.compare.basePresets.includes(ppi) && !state.compare.customPpis.includes(ppi)) {
+    state.compare.customPpis.push(ppi);
+    state.compare.customPpis.sort((left, right) => left - right);
+  }
+  rebuildComparePresets();
+  els.compareCustomInput.value = "";
+
+  if (state.compare.selected.includes(ppi)) {
+    buildCompareChips();
+    setText(els.compareStatus, `${ppi} ppi 已在对比中`);
+    els.compareStatus.dataset.state = "idle";
+    return;
+  }
+
+  if (state.compare.selected.length >= state.compare.maxPpis) {
+    buildCompareChips();
+    setText(
+      els.compareStatus,
+      `最多同时对比 ${state.compare.maxPpis} 个精度；已新增 ${ppi} ppi，请先取消一个再选它`,
+    );
+    els.compareStatus.dataset.state = "idle";
+    return;
+  }
+
+  state.compare.selected.push(ppi);
+  state.compare.selected.sort((left, right) => left - right);
+  buildCompareChips();
+  renderCompareChrome();
+  scheduleCompareRender();
+}
+
+function closeCompare() {
+  if (!state.compare.open) return;
+  state.compare.open = false;
+  // 在途响应回来后不再写入已关闭的浮层
+  state.compare.seq += 1;
+  cancelCompareScheduledRender();
+  els.compareOverlay.hidden = true;
+  setCompareBackgroundInert(false);
+  // 对比期间主预览的图片已卸下，关闭时按现有结果恢复，避免整块空白
+  renderStage();
+  if (state.dirty) scheduleRender();
+  if (!els.btnCompare.disabled) els.btnCompare.focus();
+}
+
+/** 浮层打开时让背景不可聚焦，避免 Tab 键跑到被遮住的控制栏 */
+function setCompareBackgroundInert(value) {
+  for (const node of [els.topbar, els.workspace]) {
+    if (node && "inert" in node) node.inert = value;
+  }
+}
+
+/** Tab 在浮层内部循环，配合 inert 把焦点限制在对话框里 */
+function trapCompareFocus(event) {
+  const focusables = [
+    ...els.compareOverlay.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter((node) => node instanceof HTMLElement && node.offsetParent !== null);
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function buildCompareChips() {
+  const fragment = document.createDocumentFragment();
+  const currentPpi = Math.round(state.ppi);
+  for (const ppi of state.compare.presets) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "compare-chip";
+    chip.dataset.ppi = String(ppi);
+    if (ppi === currentPpi) {
+      chip.classList.add("is-current");
+      chip.dataset.current = "1";
+    }
+    if (state.compare.customPpis.includes(ppi)) {
+      chip.classList.add("is-custom");
+    }
+    chip.textContent = `${ppi} ppi`;
+    fragment.appendChild(chip);
+  }
+  els.comparePpis.replaceChildren(fragment);
+  syncCompareChips();
+}
+
+function syncCompareChips() {
+  const selected = new Set(state.compare.selected);
+  const atMax = selected.size >= state.compare.maxPpis;
+  for (const chip of els.comparePpis.querySelectorAll(".compare-chip")) {
+    const ppi = Number(chip.dataset.ppi);
+    const active = selected.has(ppi);
+    chip.setAttribute("aria-pressed", String(active));
+    chip.disabled = !active && atMax;
+    chip.classList.toggle("is-custom", state.compare.customPpis.includes(ppi));
+    const action = active
+      ? "点击移出对比"
+      : atMax
+        ? `最多同时对比 ${state.compare.maxPpis} 个精度`
+        : "点击加入对比";
+    const suffix = [
+      chip.dataset.current === "1" ? "当前配置的图片清晰度" : "",
+      state.compare.customPpis.includes(ppi) ? "自定义档位" : "",
+    ]
+      .filter(Boolean)
+      .join("；");
+    chip.title = suffix ? `${action}；${suffix}` : action;
+  }
+}
+
+function toggleComparePpi(ppi) {
+  if (!Number.isFinite(ppi)) return;
+  const index = state.compare.selected.indexOf(ppi);
+  if (index >= 0) {
+    if (state.compare.selected.length <= 1) {
+      setText(els.compareStatus, "至少保留一个精度");
+      els.compareStatus.dataset.state = "idle";
+      return;
+    }
+    state.compare.selected.splice(index, 1);
+  } else {
+    if (state.compare.selected.length >= state.compare.maxPpis) {
+      setText(els.compareStatus, `最多同时对比 ${state.compare.maxPpis} 个精度`);
+      els.compareStatus.dataset.state = "idle";
+      return;
+    }
+    state.compare.selected.push(ppi);
+  }
+  state.compare.selected.sort((left, right) => left - right);
+  syncCompareChips();
+  scheduleCompareRender();
+}
+
+function scheduleCompareRender() {
+  if (!state.compare.open) return;
+  cancelCompareScheduledRender();
+  state.compare.timer = window.setTimeout(() => {
+    state.compare.timer = null;
+    void requestCompare();
+  }, COMPARE_DEBOUNCE_MS);
+}
+
+function cancelCompareScheduledRender() {
+  if (state.compare.timer !== null) {
+    window.clearTimeout(state.compare.timer);
+    state.compare.timer = null;
+  }
+}
+
+async function requestCompare() {
+  if (!state.compare.open || !state.options || !bridge) return;
+  cancelCompareScheduledRender();
+
+  if (state.compare.inFlight) {
+    state.compare.pending = true;
+    return state.compare.inFlight;
+  }
+
+  state.compare.pending = false;
+  const sequence = ++state.compare.seq;
+  state.compare.loading = true;
+  state.compare.error = "";
+  const ppis = [...state.compare.selected].sort((left, right) => left - right);
+  renderCompareChrome();
+
+  const promise = (async () => {
+    try {
+      const result = await withTimeout(
+        bridge.apiPost("preview/compare", {
+          ...buildPayload(),
+          ppis,
+        }),
+        COMPARE_TIMEOUT_MS,
+        "对比超时，请减少精度数量后重试",
+      );
+      if (sequence !== state.compare.seq) return;
+      applyCompareResult(result);
+    } catch (error) {
+      if (sequence !== state.compare.seq) return;
+      state.compare.error = describeRenderError(error);
+    } finally {
+      if (sequence === state.compare.seq) {
+        state.compare.loading = false;
+        renderCompareChrome();
+      }
+    }
+  })();
+
+  state.compare.inFlight = promise;
+  try {
+    await promise;
+  } finally {
+    if (state.compare.inFlight === promise) state.compare.inFlight = null;
+    if (state.compare.pending) {
+      state.compare.pending = false;
+      void requestCompare();
+    }
+  }
+}
+
+function applyCompareResult(rawResult) {
+  const result = asObject(rawResult);
+  const items = [];
+
+  asArray(result.items).forEach((rawItem) => {
+    const item = asObject(rawItem);
+    const ppi = Math.round(asNumber(item.ppi, 0));
+    if (!ppi) return;
+    const images = [];
+    asArray(item.images).forEach((rawImage, index) => {
+      const image = asObject(rawImage);
+      if (typeof image.data !== "string" || !image.data) return;
+      images.push({
+        page: asNumber(image.page, index + 1),
+        mime:
+          typeof image.mime === "string" && image.mime ? image.mime : "image/webp",
+        data: image.data,
+        width: asNumber(image.width, 0),
+        height: asNumber(image.height, 0),
+        cropped: image.cropped === true,
+      });
+    });
+    images.sort((left, right) => left.page - right.page);
+    items.push({
+      ppi,
+      images,
+      error: typeof item.error === "string" ? item.error : "",
+      elapsedMs: Math.max(0, asNumber(item.elapsed_ms, 0)),
+      cached: item.cached === true,
+      totalPages: Math.max(images.length, asNumber(item.total_pages, images.length)),
+      cropped: item.cropped === true || images.some((image) => image.cropped),
+    });
+  });
+  items.sort((left, right) => left.ppi - right.ppi);
+
+  state.compare.items = items;
+  state.compare.warnings = asArray(result.warnings)
+    .map((warning) => String(warning))
+    .filter(Boolean);
+  state.compare.elapsedMs = Math.max(0, asNumber(result.elapsed_ms, 0));
+  state.compare.error = items.length ? "" : "对比结果为空";
+  renderCompareStage();
+  renderCompareChrome();
+}
+
+function compareCardMetaText(item) {
+  const image = item.images[0];
+  if (!image) return "未生成";
+  const size = image.width && image.height ? `${image.width}×${image.height}px` : "";
+  // 分页信息放进标题行：压在图上会挡住面板标题与头部内容
+  const pages = item.totalPages > 1 ? `第 ${image.page} / 共 ${item.totalPages} 页` : "";
+  const cropped = item.cropped ? "顶部截取" : "";
+  return [size, formatSeconds(item.elapsedMs), pages, cropped]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** 判断两档结果是否可复用旧卡片：图片数据一致时不再触发一次解码 */
+function sameCompareItem(previous, next) {
+  if (!previous) return false;
+  if (
+    previous.ppi !== next.ppi ||
+    previous.error !== next.error ||
+    previous.cached !== next.cached ||
+    previous.totalPages !== next.totalPages ||
+    previous.cropped !== next.cropped
+  ) {
+    return false;
+  }
+  const left = previous.images[0];
+  const right = next.images[0];
+  if (!left || !right) return !left && !right;
+  return (
+    left.page === right.page &&
+    left.mime === right.mime &&
+    left.width === right.width &&
+    left.height === right.height &&
+    left.data === right.data
+  );
+}
+
+function updateCompareCardMeta(card, item) {
+  const meta = card.querySelector(".compare-card-meta");
+  if (!meta) return;
+  meta.textContent = compareCardMetaText(item);
+  meta.title = meta.textContent;
+}
+
+function renderCompareStage() {
+  const fragment = document.createDocumentFragment();
+  const previousCards = new Map();
+  for (const card of els.compareGrid.querySelectorAll(".compare-card")) {
+    previousCards.set(Number(card.dataset.ppi), card);
+  }
+
+  for (const item of state.compare.items) {
+    const previousCard = previousCards.get(item.ppi);
+    if (previousCard && sameCompareItem(compareCardItems.get(previousCard), item)) {
+      previousCards.delete(item.ppi);
+      updateCompareCardMeta(previousCard, item);
+      compareCardItems.set(previousCard, item);
+      fragment.appendChild(previousCard);
+      continue;
+    }
+
+    const card = document.createElement("article");
+    card.className = "compare-card";
+    card.dataset.ppi = String(item.ppi);
+
+    const head = document.createElement("header");
+    head.className = "compare-card-head";
+    const ppiLabel = document.createElement("span");
+    ppiLabel.className = "compare-card-ppi";
+    ppiLabel.textContent = `${item.ppi} ppi`;
+    head.appendChild(ppiLabel);
+
+    const image = item.images[0];
+    const meta = document.createElement("span");
+    meta.className = "compare-card-meta";
+    meta.textContent = compareCardMetaText(item);
+    meta.title = meta.textContent;
+    head.appendChild(meta);
+
+    if (item.cached) {
+      const cached = document.createElement("span");
+      cached.className = "compare-cached";
+      cached.textContent = "缓存";
+      head.appendChild(cached);
+    }
+    card.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "compare-card-body";
+    if (item.error) {
+      const error = document.createElement("p");
+      error.className = "compare-card-error";
+      error.textContent = item.error;
+      body.appendChild(error);
+    } else if (image) {
+      const wrap = document.createElement("div");
+      wrap.className = "compare-card-image";
+      const img = document.createElement("img");
+      img.className = "compare-card-img";
+      img.src = `data:${image.mime};base64,${image.data}`;
+      img.alt = `${item.ppi} ppi 渲染结果`;
+      img.decoding = "async";
+      img.draggable = false;
+      wrap.appendChild(img);
+      body.appendChild(wrap);
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "compare-card-error";
+      empty.textContent = "没有可展示的内容";
+      body.appendChild(empty);
+    }
+    card.appendChild(body);
+    compareCardItems.set(card, item);
+    fragment.appendChild(card);
+  }
+
+  els.compareGrid.replaceChildren(fragment);
+  applyCompareZoom();
+  updateCompareMarkers();
+  renderCompareDetail();
+}
+
+function setCompareDetailPoint(x, y) {
+  state.compare.detail.x = clamp(x, 0, 1);
+  state.compare.detail.y = clamp(y, 0, 1);
+  state.compare.detail.active = true;
+  updateCompareMarkers();
+  renderCompareDetail();
+  updateCompareDetailToggle();
+}
+
+/** 点击任意对比图：记录同一归一化位置，并打开局部对比 */
+function handleCompareGridClick(event) {
+  const wrapper =
+    event.target instanceof Element ? event.target.closest(".compare-card-image") : null;
+  if (!wrapper) return;
+  const rect = wrapper.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  setCompareDetailPoint(
+    (event.clientX - rect.left) / rect.width,
+    (event.clientY - rect.top) / rect.height,
+  );
+}
+
+function toggleCompareDetail() {
+  if (!state.compare.items.length) return;
+  setCompareDetailActive(!state.compare.detail.active);
+}
+
+function setCompareDetailActive(active) {
+  state.compare.detail.active = Boolean(active) && state.compare.items.length > 0;
+  updateCompareMarkers();
+  renderCompareDetail();
+  updateCompareDetailToggle();
+}
+
+function updateCompareDetailToggle() {
+  if (!els.compareDetailToggle) return;
+  const active = state.compare.detail.active;
+  els.compareDetailToggle.classList.toggle("is-active", active);
+  els.compareDetailToggle.setAttribute("aria-pressed", String(active));
+  els.compareDetailToggle.disabled = !state.compare.items.some(
+    (item) => item.images.length > 0,
+  );
+}
+
+/** 在各列图上标出局部对比的取景中心 */
+function updateCompareMarkers() {
+  const active = state.compare.detail.active;
+  for (const card of els.compareGrid.querySelectorAll(".compare-card")) {
+    const wrapper = card.querySelector(".compare-card-image");
+    if (!wrapper) continue;
+    let marker = wrapper.querySelector(".compare-marker");
+    if (!marker) {
+      marker = document.createElement("span");
+      marker.className = "compare-marker";
+      marker.setAttribute("aria-hidden", "true");
+      wrapper.appendChild(marker);
+    }
+    marker.hidden = !active;
+    if (active) {
+      marker.style.left = `${state.compare.detail.x * 100}%`;
+      marker.style.top = `${state.compare.detail.y * 100}%`;
+    }
+  }
+}
+
+function updateCompareDetailPointLabel() {
+  if (!els.compareDetailPoint) return;
+  if (!state.compare.detail.active) {
+    setText(els.compareDetailPoint, "");
+    return;
+  }
+  setText(
+    els.compareDetailPoint,
+    `位置 ${Math.round(state.compare.detail.x * 100)}% · ${Math.round(state.compare.detail.y * 100)}%`,
+  );
+}
+
+/** 局部对比托盘：每档用同一物理尺度裁出相同区域，便于并排看字形 */
+function renderCompareDetail() {
+  const active = state.compare.detail.active;
+  const drawable = state.compare.items.some((item) => item.images.length > 0);
+  if (!active || !drawable) {
+    show(els.compareDetail, false);
+    els.compareDetailRow.replaceChildren();
+    updateCompareDetailPointLabel();
+    return;
+  }
+
+  show(els.compareDetail, true);
+  const fragment = document.createDocumentFragment();
+  const tiles = [];
+  for (const item of state.compare.items) {
+    const card = document.createElement("article");
+    card.className = "compare-detail-card";
+    card.dataset.ppi = String(item.ppi);
+
+    const head = document.createElement("header");
+    head.className = "compare-detail-card-head";
+    const label = document.createElement("span");
+    label.className = "compare-detail-card-ppi";
+    label.textContent = `${item.ppi} ppi`;
+    head.appendChild(label);
+    const meta = document.createElement("span");
+    meta.className = "compare-detail-card-meta";
+    meta.textContent = item.images.length ? "同一局部" : item.error || "无图";
+    meta.title = meta.textContent;
+    head.appendChild(meta);
+
+    const canvas = document.createElement("canvas");
+    canvas.className = "compare-detail-canvas";
+    canvas.width = COMPARE_DETAIL_WINDOW_WIDTH * COMPARE_DETAIL_DPR;
+    canvas.height = COMPARE_DETAIL_WINDOW_HEIGHT * COMPARE_DETAIL_DPR;
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", `${item.ppi} ppi 局部放大对比`);
+
+    card.append(head, canvas);
+    fragment.appendChild(card);
+    tiles.push({ item, canvas });
+  }
+  els.compareDetailRow.replaceChildren(fragment);
+
+  for (const tile of tiles) {
+    const img = els.compareGrid.querySelector(
+      `.compare-card[data-ppi="${tile.item.ppi}"] .compare-card-img`,
+    );
+    if (!img) {
+      const context = tile.canvas.getContext("2d");
+      if (context) context.clearRect(0, 0, tile.canvas.width, tile.canvas.height);
+      continue;
+    }
+    drawCompareDetailTile(tile.canvas, img);
+  }
+  updateCompareDetailPointLabel();
+}
+
+function drawCompareDetailTile(canvas, img) {
+  const paint = () => {
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const width = canvas.width;
+    const height = canvas.height;
+    context.clearRect(0, 0, width, height);
+    if (!img.naturalWidth || !img.naturalHeight) return;
+
+    // 按同一虚拟页宽映射回图片像素：不同 ppi 的裁剪窗口对应相同的物理区域
+    const sourceWidth =
+      (COMPARE_DETAIL_WINDOW_WIDTH / COMPARE_DETAIL_PAGE_WIDTH) * img.naturalWidth;
+    const sourceHeight = sourceWidth * (height / width);
+    const centerX = state.compare.detail.x * img.naturalWidth;
+    const centerY = state.compare.detail.y * img.naturalHeight;
+    const sourceX = clamp(
+      centerX - sourceWidth / 2,
+      0,
+      Math.max(0, img.naturalWidth - sourceWidth),
+    );
+    const sourceY = clamp(
+      centerY - sourceHeight / 2,
+      0,
+      Math.max(0, img.naturalHeight - sourceHeight),
+    );
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(
+      img,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      width,
+      height,
+    );
+  };
+
+  if (img.complete && img.naturalWidth) paint();
+  else img.addEventListener("load", paint, { once: true });
+}
+
+function renderCompareChrome() {
+  syncCompareChips();
+
+  const loading = state.compare.loading;
+  const hasItems = state.compare.items.length > 0;
+  show(els.compareLoading, loading && !hasItems);
+  els.compareGrid.classList.toggle("is-stale", loading && hasItems);
+  if (loading) {
+    setText(
+      els.compareLoadingText,
+      `正在按 ${state.compare.selected.length} 个精度渲染…首次约需数秒`,
+    );
+  }
+
+  let status = "";
+  let statusState = "idle";
+  if (state.compare.error) {
+    status = `对比失败：${state.compare.error}`;
+    statusState = "error";
+  } else if (loading) {
+    status = `正在按 ${state.compare.selected.length} 个精度渲染…首次约需数秒`;
+    statusState = "loading";
+  } else if (hasItems) {
+    const failed = state.compare.items.filter((item) => item.error).length;
+    const parts = [
+      `${state.compare.items.length} 个精度`,
+      `总耗时 ${formatSeconds(state.compare.elapsedMs)}`,
+    ];
+    if (failed) parts.push(`${failed} 个精度失败`);
+    if (state.compare.warnings.length) parts.push(state.compare.warnings[0]);
+    status = parts.join(" · ");
+  }
+  setText(els.compareStatus, status);
+  els.compareStatus.dataset.state = statusState;
+  if (state.compare.warnings.length) {
+    els.compareStatus.title = state.compare.warnings.join("\n");
+  } else {
+    els.compareStatus.removeAttribute("title");
+  }
+  const allFailed = hasItems && state.compare.items.every((item) => item.error);
+  show(els.compareRetry, !loading && (Boolean(state.compare.error) || allFailed));
+  const drawable = state.compare.items.some((item) => item.images.length > 0);
+  if (!drawable) {
+    state.compare.detail.active = false;
+    show(els.compareDetail, false);
+  }
+  updateCompareDetailToggle();
+  updateCompareZoomLabel();
+}
+
+function changeCompareZoom(delta) {
+  if (!state.compare.items.length) return;
+  state.compare.fit = false;
+  state.compare.zoom = clamp(
+    Math.round((state.compare.zoom + delta) * 100) / 100,
+    1,
+    COMPARE_ZOOM_MAX,
+  );
+  applyCompareZoom();
+}
+
+function applyCompareZoom() {
+  const cards = els.compareGrid.querySelectorAll(".compare-card");
+  if (!cards.length) {
+    updateCompareZoomLabel();
+    return;
+  }
+
+  const count = cards.length;
+  const gridStyle = window.getComputedStyle(els.compareGrid);
+  const paddingLeft = Number.parseFloat(gridStyle.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(gridStyle.paddingRight) || 0;
+  const gap = Number.parseFloat(gridStyle.columnGap) || 14;
+  const available = els.compareBody.clientWidth - paddingLeft - paddingRight;
+  // 所有列等宽是「同一内容同一尺度」的前提：只有等宽才能直接并排看字体锐度。
+  // 适应宽度模式下窄屏允许列宽小到 72px，否则 4~5 列在手机上必然横向溢出。
+  const fitted = (available - gap * (count - 1)) / count;
+  if (state.compare.fit) state.compare.zoom = 1;
+  const scale = clamp(state.compare.zoom, 1, COMPARE_ZOOM_MAX);
+  const base = state.compare.fit
+    ? Math.max(72, fitted)
+    : Math.max(COMPARE_MIN_COLUMN_WIDTH, fitted);
+  // 适应宽度用向下取整：多列时四舍五入累积一两像素就会触发横向滚动条
+  const width = Math.max(
+    72,
+    state.compare.fit ? Math.floor(base * scale) : Math.round(base * scale),
+  );
+  for (const card of cards) card.style.width = `${width}px`;
+  updateCompareZoomLabel();
+}
+
+function updateCompareZoomLabel() {
+  const scale = state.compare.fit ? 1 : clamp(state.compare.zoom, 1, COMPARE_ZOOM_MAX);
+  setText(els.compareZoomValue, `${Math.round(scale * 100)}%`);
+  els.compareZoomFit.classList.toggle("is-active", state.compare.fit);
+  els.compareZoomFit.setAttribute("aria-pressed", String(state.compare.fit));
 }
 
 /* ==========================================================================

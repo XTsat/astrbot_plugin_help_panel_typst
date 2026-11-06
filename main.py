@@ -149,6 +149,12 @@ class HelpTypst(Star):
                 "按样式渲染预览图",
             ),
             (
+                f"/{plugin_name}/preview/compare",
+                self.api_preview_compare,
+                ["POST"],
+                "按多个清晰度渲染同一面板供对比",
+            ),
+            (
                 f"/{plugin_name}/preview/apply",
                 self.api_preview_apply,
                 ["POST"],
@@ -607,6 +613,25 @@ class HelpTypst(Star):
         except Exception as e:
             logger.error(f"[HelpTypst] 预览渲染失败: {e}", exc_info=True)
             return error_response("预览渲染失败，请查看插件日志")
+
+    async def api_preview_compare(self) -> Any:
+        """插件页 API：按多个清晰度渲染同一面板，供并排对比字体细节"""
+        from astrbot.api.web import error_response, json_response, request
+
+        try:
+            payload = await request.json(default={})
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 解析精度对比请求失败: {e}")
+            return error_response("请求内容解析失败")
+
+        try:
+            data = await self.preview_service.compare(payload)
+            return json_response(data)
+        except PreviewError as e:
+            return error_response(str(e))
+        except Exception as e:
+            logger.error(f"[HelpTypst] 精度对比渲染失败: {e}", exc_info=True)
+            return error_response("精度对比渲染失败，请查看插件日志")
 
     async def api_preview_apply(self) -> Any:
         """插件页 API：把预览样式写入插件配置并热重载插件"""

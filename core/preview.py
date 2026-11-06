@@ -10,6 +10,7 @@ import copy
 import hashlib
 import io
 import json
+import math
 import re
 import time
 import uuid
@@ -539,6 +540,8 @@ class _PreviewImage:
     width: int
     height: int
     data: bytes
+    # 精度对比会裁掉超长首屏的底部，前端据此提示「顶部截取」
+    cropped: bool = False
 
 
 @dataclass
@@ -863,6 +866,12 @@ class PreviewService:
                 "max_pages": InternalCFG.PREVIEW_MAX_PAGES,
                 "debounce_ms": InternalCFG.PREVIEW_DEBOUNCE_MS,
             },
+            "compare": {
+                "presets": list(InternalCFG.PREVIEW_COMPARE_PPI_PRESETS),
+                "default_ppis": list(InternalCFG.PREVIEW_COMPARE_DEFAULT_PPIS),
+                "max_ppis": InternalCFG.PREVIEW_COMPARE_MAX_PPIS,
+                "max_pages": InternalCFG.PREVIEW_COMPARE_MAX_PAGES,
+            },
         }
 
     def _build_color_groups(self, colors: dict[str, str]) -> list[dict[str, Any]]:
@@ -944,6 +953,134 @@ class PreviewService:
 
     async def render(self, payload: Any) -> dict[str, Any]:
         """执行一次预览渲染，返回可直接 JSON 序列化的响应"""
+        mode, query = self._parse_request(payload)
+        style = self._parse_style(payload.get("style"))
+        started = time.perf_counter()
+        cfg, warnings = self._compose_config(style)
+        provider = await self._build_provider(mode, query, cfg)
+        # 先把面板数据落成 JSON 并取内容 hash: 缓存必须随插件/指令变化失效，
+        # 否则安装或禁用插件后预览会一直返回旧图。
+        prepared_provider, content_hash, prepared_json = await self._prepare_provider(
+            provider, cfg
+        )
+        try:
+            return await self._render_prepared(
+                mode=mode,
+                query=query,
+                style=style,
+                cfg=cfg,
+                prepared_provider=prepared_provider,
+                content_hash=content_hash,
+                warnings=warnings,
+                started=started,
+                max_pages=InternalCFG.PREVIEW_MAX_PAGES,
+                cache_scope="preview",
+                max_height=None,
+            )
+        finally:
+            await asyncio.to_thread(self._remove_files, [prepared_json])
+
+    async def compare(self, payload: Any) -> dict[str, Any]:
+        """按多个清晰度渲染同一面板，供预览页并排对比字体锐度
+
+        面板数据只分析一次, 每个精度单独编译并带缓存; 单个精度失败只影响该列,
+        其余精度仍正常返回, 免得一次超时让整组对比都白等。
+        """
+        mode, query = self._parse_request(payload)
+        style = self._parse_style(payload.get("style"))
+        ppis, ppi_warnings = self._parse_compare_ppis(payload.get("ppis"))
+        started = time.perf_counter()
+        # 各列共用同一 pt 裁剪高度: 显示宽度一致时, 顶部内容才能逐像素对齐;
+        # 高度按最大档位反推, 避免高 DPI 首屏把浏览器内存打爆。
+        crop_pt = self._compare_crop_pt(style.page_width, max(ppis))
+        deadline = started + InternalCFG.PREVIEW_COMPARE_TOTAL_TIMEOUT
+        cfg, warnings = self._compose_config(style)
+        warnings.extend(ppi_warnings)
+        provider = await self._build_provider(mode, query, cfg)
+        prepared_provider, content_hash, prepared_json = await self._prepare_provider(
+            provider, cfg
+        )
+        items: list[dict[str, Any]] = []
+        try:
+            for ppi in ppis:
+                if time.perf_counter() >= deadline:
+                    items.append(
+                        self._compare_error_item(ppi, "对比总时长超时，已跳过该精度")
+                    )
+                    continue
+                # 同一份数据只换渲染精度: 内容 hash 与布局 JSON 完全相同,
+                # 逐档编译才能保证字体栅格化差异是唯一变量。
+                item_cfg = copy.deepcopy(cfg)
+                item_cfg.rendering.ppi = float(ppi)
+                item_style = copy.copy(style)
+                item_style.ppi = float(ppi)
+                item_style.test_ppi = float(ppi)
+                crop_height = max(1, int(round(crop_pt * ppi / 72.0)))
+                item_started = time.perf_counter()
+                try:
+                    response = await self._render_prepared(
+                        mode=mode,
+                        query=query,
+                        style=item_style,
+                        cfg=item_cfg,
+                        prepared_provider=prepared_provider,
+                        content_hash=content_hash,
+                        warnings=[],
+                        started=item_started,
+                        max_pages=InternalCFG.PREVIEW_COMPARE_MAX_PAGES,
+                        cache_scope="compare",
+                        max_height=crop_height,
+                    )
+                except PreviewError as exc:
+                    items.append(self._compare_error_item(ppi, str(exc)))
+                except Exception as exc:
+                    logger.error(
+                        f"[HelpTypst] 对比精度 {ppi} 渲染失败: {exc}", exc_info=True
+                    )
+                    items.append(
+                        self._compare_error_item(ppi, "该精度渲染失败，请查看插件日志")
+                    )
+                else:
+                    items.append(
+                        {
+                            "ppi": ppi,
+                            "images": response["images"],
+                            "elapsed_ms": response["elapsed_ms"],
+                            "cached": response["cached"],
+                            "total_pages": response["total_pages"],
+                            "truncated": response["truncated"],
+                            "cropped": any(
+                                image.get("cropped") for image in response["images"]
+                            ),
+                        }
+                    )
+        finally:
+            await asyncio.to_thread(self._remove_files, [prepared_json])
+
+        if any(item.get("cropped") for item in items):
+            warnings.append(
+                f"长图仅对比顶部约 {round(crop_pt)} pt 内容，以控制内存占用"
+            )
+        return {
+            "items": items,
+            "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _compare_error_item(ppi: int, message: str) -> dict[str, Any]:
+        return {
+            "ppi": ppi,
+            "images": [],
+            "elapsed_ms": 0,
+            "cached": False,
+            "total_pages": 0,
+            "truncated": False,
+            "error": message,
+        }
+
+    def _parse_request(self, payload: Any) -> tuple[str, str]:
+        """校验渲染请求的公共字段 (面板类型 + 搜索词)"""
         if not isinstance(payload, dict):
             raise PreviewError("请求内容格式不正确")
 
@@ -962,13 +1099,66 @@ class PreviewService:
             raise PreviewError(
                 f"搜索关键词最多 {InternalCFG.PREVIEW_MAX_QUERY_LEN} 个字符"
             )
+        return mode, query
 
-        style = self._parse_style(payload.get("style"))
-        started = time.perf_counter()
-        cfg, warnings = self._compose_config(style)
+    def _parse_compare_ppis(self, raw: Any) -> tuple[list[int], list[str]]:
+        """收敛对比精度: 去重、排序、限制数量；非数值忽略，越界收敛到可用区间"""
+        warnings: list[str] = []
+        ppis: list[int] = []
+        raw_list = raw if isinstance(raw, list) else []
+        for item in raw_list:
+            if isinstance(item, bool):
+                continue
+            try:
+                value = float(item)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(value):
+                continue
+            value = int(round(value))
+            value = int(
+                _clamp_float(
+                    value,
+                    float(InternalCFG.PREVIEW_TEST_PPI),
+                    InternalCFG.PREVIEW_MIN_PPI,
+                    InternalCFG.PREVIEW_MAX_PPI,
+                )
+            )
+            if value not in ppis:
+                ppis.append(value)
+
+        if not ppis:
+            ppis = list(InternalCFG.PREVIEW_COMPARE_DEFAULT_PPIS)
+        ppis.sort()
+        max_ppis = InternalCFG.PREVIEW_COMPARE_MAX_PPIS
+        if len(ppis) > max_ppis:
+            dropped = len(ppis) - max_ppis
+            ppis = ppis[:max_ppis]
+            warnings.append(f"最多同时对比 {max_ppis} 个精度，已忽略 {dropped} 个")
+        return ppis, warnings
+
+    def _compare_crop_pt(self, page_width: float, max_ppi: int) -> float:
+        """按页宽与最大档位反推对比图共同的顶部裁剪高度 (pt)
+
+        像素预算按最大档位计算: 低档位按同一 pt 高度裁切后像素更少,
+        所有列展示的内容区域保持一致。
+        """
+        scale = max_ppi / 72.0
+        width_px = max(1.0, page_width * scale)
+        height_px = InternalCFG.PREVIEW_COMPARE_MAX_PIXELS / width_px
+        crop_pt = height_px / max(0.001, scale)
+        return max(
+            InternalCFG.PREVIEW_COMPARE_MIN_CROP_PT,
+            min(crop_pt, InternalCFG.PREVIEW_COMPARE_MAX_CROP_PT),
+        )
+
+    async def _build_provider(
+        self, mode: str, query: str, cfg: TypstPluginConfig
+    ) -> DataProvider:
+        """按生效配置构造面板数据流 (persona 名称也要取一次)"""
         layout = TypstLayout(cfg)
         persona_name = await self.persona_getter()
-        provider = self.provider_builder(
+        return self.provider_builder(
             mode,
             query or None,
             layout,
@@ -976,24 +1166,52 @@ class PreviewService:
             persona_name,
             cfg,
         )
-        # 先把面板数据落成 JSON 并取内容 hash: 缓存必须随插件/指令变化失效，
-        # 否则安装或禁用插件后预览会一直返回旧图。
-        prepared_provider, content_hash, prepared_json = await self._prepare_provider(
-            provider, cfg
+
+    async def _render_prepared(
+        self,
+        *,
+        mode: str,
+        query: str,
+        style: PreviewStyle,
+        cfg: TypstPluginConfig,
+        prepared_provider: DataProvider,
+        content_hash: str,
+        warnings: list[str],
+        started: float,
+        max_pages: int,
+        cache_scope: str,
+        max_height: int | None,
+    ) -> dict[str, Any]:
+        """用已准备好的面板数据编译一档预览图
+
+        cache_scope 把「完整预览」与「对比列」的缓存分开: 对比列只保留首屏,
+        与完整预览共用缓存会让后者的分页图被截短。max_height 让对比列裁剪超长首屏,
+        同时进入缓存键, 否则调整对比档位后会复用错误高度的旧图。
+        """
+        renderer = TypstRenderer(
+            star=self.star,
+            data_dir=self.data_dir,
+            template_path=self.template_path,
+            font_dirs=self.font_dirs,
+            config=cfg,
         )
-        try:
-            renderer = TypstRenderer(
-                star=self.star,
-                data_dir=self.data_dir,
-                template_path=self.template_path,
-                font_dirs=self.font_dirs,
-                config=cfg,
+
+        bg_image = renderer.resolve_background_image(deterministic=True)
+        scope = cache_scope if max_height is None else f"{cache_scope}:{max_height}"
+        cache_key = self._cache_key(
+            mode, query, style, renderer, bg_image, content_hash, scope
+        )
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return self._build_response(
+                cached,
+                cached=True,
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                warnings=warnings,
             )
 
-            bg_image = renderer.resolve_background_image(deterministic=True)
-            cache_key = self._cache_key(
-                mode, query, style, renderer, bg_image, content_hash
-            )
+        async with self._render_lock:
+            # 等锁期间可能有同款请求已经编译完成
             cached = self._cache.get(cache_key)
             if cached is not None:
                 return self._build_response(
@@ -1003,42 +1221,29 @@ class PreviewService:
                     warnings=warnings,
                 )
 
-            async with self._render_lock:
-                # 等锁期间可能有同款请求已经编译完成
-                cached = self._cache.get(cache_key)
-                if cached is not None:
-                    return self._build_response(
-                        cached,
-                        cached=True,
-                        elapsed_ms=int((time.perf_counter() - started) * 1000),
-                        warnings=warnings,
-                    )
-
-                result, error = await renderer.render(
-                    prepared_provider, mode, query or None, force_temp=True
-                )
-                elapsed_ms = int((time.perf_counter() - started) * 1000)
-
-                if result is None:
-                    raise PreviewError(self._friendly_error(error))
-
-                try:
-                    images = await asyncio.to_thread(
-                        self._read_images, [Path(p) for p in result.images]
-                    )
-                finally:
-                    # 预览图已读进内存，临时文件立即可删，避免数据目录堆积
-                    await asyncio.to_thread(self._remove_files, result.temp_files)
-        finally:
-            await asyncio.to_thread(self._remove_files, [prepared_json])
-
-        total_pages = len(images)
-        if total_pages > InternalCFG.PREVIEW_MAX_PAGES:
-            warnings.append(
-                f"面板共 {total_pages} 页，预览只返回前 "
-                f"{InternalCFG.PREVIEW_MAX_PAGES} 页"
+            result, error = await renderer.render(
+                prepared_provider, mode, query or None, force_temp=True
             )
-            images = images[: InternalCFG.PREVIEW_MAX_PAGES]
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+            if result is None:
+                raise PreviewError(self._friendly_error(error))
+
+            total_pages = len(result.images)
+            try:
+                images = await asyncio.to_thread(
+                    self._read_images,
+                    [Path(p) for p in result.images],
+                    max_pages,
+                    max_height,
+                )
+            finally:
+                # 预览图已读进内存，临时文件立即可删，避免数据目录堆积
+                await asyncio.to_thread(self._remove_files, result.temp_files)
+
+        if total_pages > max_pages:
+            warnings.append(f"面板共 {total_pages} 页，预览只返回前 {max_pages} 页")
+            images = images[:max_pages]
 
         entry = self._cache.put(cache_key, images, total_pages)
         return self._build_response(
@@ -1649,10 +1854,15 @@ class PreviewService:
         renderer: TypstRenderer,
         bg_image: Path | None,
         content_hash: str,
+        scope: str = "preview",
     ) -> str:
-        """缓存键 = 面板内容 + 样式 + 配置/资源快照"""
+        """缓存键 = 面板内容 + 样式 + 配置/资源快照 + 用途
+
+        scope 隔离完整预览与精度对比: 两者保留的页数不同, 共用缓存会让预览页数变少。
+        """
         snapshot = renderer.get_config_snapshot(bg_image)
         payload = {
+            "scope": scope,
             "mode": mode,
             "query": query,
             "style": style.to_plain(),
@@ -1666,12 +1876,30 @@ class PreviewService:
 
     # ---- io helpers ----
 
-    def _read_images(self, paths: list[Path]) -> list[_PreviewImage]:
-        """读取编译产物，并用 PIL 补齐宽高（Pillow 由 AstrBot 运行环境提供）"""
+    def _read_images(
+        self,
+        paths: list[Path],
+        limit: int | None = None,
+        max_height: int | None = None,
+    ) -> list[_PreviewImage]:
+        """读取编译产物，并用 PIL 补齐宽高（Pillow 由 AstrBot 运行环境提供）
+
+        limit 用于精度对比: 对比只看首屏, 不必把每档的分页图都读进内存。
+        max_height 把超长首屏裁到顶部固定高度, 避免高 DPI 图在浏览器里解码时
+        占用过多内存; 裁剪失败时保留原图, 只损失内存保护, 不影响对比功能。
+        """
         images: list[_PreviewImage] = []
-        for index, path in enumerate(paths):
+        selected = paths if limit is None else paths[:limit]
+        for index, path in enumerate(selected):
             data = path.read_bytes()
             width, height = self._image_size(data, path)
+            cropped = False
+            if max_height is not None and height > max_height:
+                cropped_data = self._crop_top_image(data, path, max_height)
+                if cropped_data is not None:
+                    data = cropped_data
+                    height = max_height
+                    cropped = True
             images.append(
                 _PreviewImage(
                     page=index + 1,
@@ -1679,9 +1907,36 @@ class PreviewService:
                     width=width,
                     height=height,
                     data=data,
+                    cropped=cropped,
                 )
             )
         return images
+
+    def _crop_top_image(self, data: bytes, path: Path, max_height: int) -> bytes | None:
+        """把图片裁到顶部 max_height 像素并重新编码为原格式"""
+        try:
+            from PIL import Image
+        except ImportError:
+            # 运行环境缺 Pillow 时预览仍可用，只是失去对比图的内存保护
+            return None
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                cropped = image.crop((0, 0, image.width, max_height))
+                buffer = io.BytesIO()
+                mime = self._mime_for(path)
+                if mime == "image/png":
+                    cropped.save(buffer, "PNG", optimize=True, compress_level=6)
+                elif mime == "image/jpeg":
+                    cropped.convert("RGB").save(
+                        buffer, "JPEG", quality=92, optimize=True, subsampling=0
+                    )
+                else:
+                    # 原图已是 WebP 80, 裁剪重编码用更高画质, 避免二次压缩模糊字体
+                    cropped.save(buffer, "WEBP", quality=92, method=6)
+                return buffer.getvalue()
+        except OSError as exc:
+            logger.warning(f"[HelpTypst] 裁剪对比图失败 {path}: {exc}")
+            return None
 
     def _image_size(self, data: bytes, path: Path) -> tuple[int, int]:
         try:
@@ -1727,6 +1982,7 @@ class PreviewService:
                     "width": image.width,
                     "height": image.height,
                     "data": base64.b64encode(image.data).decode("ascii"),
+                    "cropped": image.cropped,
                 }
                 for image in entry.images
             ],

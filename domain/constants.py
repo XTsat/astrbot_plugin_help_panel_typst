@@ -151,6 +151,22 @@ class InternalCFG:
     PREVIEW_CACHE_TTL: float = 600.0
     PREVIEW_CACHE_MAX_ENTRIES: int = 12
     PREVIEW_CACHE_MAX_BYTES: int = 32 * 1024 * 1024
+    # 精度对比: 同一面板一次渲染多个清晰度, 供预览页并排查看字体锐度;
+    # 数量上限兼顾响应体积与逐档编译耗时 (每档一次完整编译)
+    PREVIEW_COMPARE_MAX_PPIS: int = 5
+    PREVIEW_COMPARE_MAX_PAGES: int = 1
+    # 单列像素预算: 高 DPI 首屏解码成 RGBA 会占用大量浏览器内存, 按最大档位反推
+    # 各列共同的顶部裁剪高度, 既保住 1:1 字体锐度, 又让总解码量可控
+    PREVIEW_COMPARE_MAX_PIXELS: int = 16_000_000
+    PREVIEW_COMPARE_MIN_CROP_PT: float = 400.0
+    PREVIEW_COMPARE_MAX_CROP_PT: float = 4000.0
+    # 逐档编译的总时长上限: 单档超时已有 timeout_compile, 这里防止多档叠加成数分钟
+    PREVIEW_COMPARE_TOTAL_TIMEOUT: float = 60.0
+    # 默认档位覆盖低/中/高与配置默认值 256, 逐档差异足够明显
+    PREVIEW_COMPARE_DEFAULT_PPIS: tuple[int, ...] = (96, 144, 256, 384)
+    # 常用档位: 含配置默认值 256、预览默认 144/128 与两端 72/384
+    PREVIEW_COMPARE_PPI_PRESETS: tuple[int, ...] = (72, 96, 128, 144, 192, 256, 384)
+
     # 自定义模板: 预览页配色列表可增删改的条目; 首条固定名「自定义」并对应 conf presets 首条
     PREVIEW_CUSTOM_PRESET_MAX: int = 8
     # 解析上限: 面板只允许新增到 MAX 条, 但设置面板可直接写入更多, 不能按 MAX 截断丢数据
