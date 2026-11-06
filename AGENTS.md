@@ -3,11 +3,11 @@
 > 本文件是任何 AI 编码助手（agent）进入本项目时的**必读**工作说明书。
 > 它约定插件架构、代码规范、文档维护规则与提交流程。任何对代码、配置、行为的改动，都必须同时遵守本文档的规则。
 >
-> **模板版本**：v0.1.0（2026-10-21） —— 本行标记本文件对应的 `astrbot-plugin` 模板版本；回填项目内容时**不要改动本行**，只有从上游合并到新版本时才更新为合并到的版本。
+> **模板版本**：v0.1.9（2026-11-04） —— 本行标记本文件对应的 `astrbot-plugin` 模板版本；回填项目内容时**不要改动本行**，只有从上游合并到新版本时才更新为合并到的版本。
 > **来源**：本文件派生自 [agent-templates](https://github.com/XTsat/agent-templates) 的 `templates/astrbot-plugin/AGENTS.md`，上游最新版见该仓库 `main` 分支。
 > **更新流程**：用户说「更新 AGENTS」时按以下步骤执行：① 打开来源仓库该模板的 `AGENTS.md`，比对头部「模板版本」与本地是否一致——一致即已是最新，直接结束，不必拉取逐节比对 → ② 不一致才拉取来源模板最新版 → ③ 与本地逐节比对 → ④ 合并（保留本项目已回填的插件名、命令前缀、目录结构与项目特有约定）→ ⑤ 展示 diff 与改动清单，等用户确认后再落盘，并把头部「模板版本」同步改为合并到的版本。**禁止整文件覆盖**。
 >
-> 与上游的已回填差异：日志前缀使用 `[HelpTypst]`；README 为单语（中文）四板块格式；历史 CHANGELOG（v0.4.3 及以前）沿用旧内联格式。
+> 与上游的已回填差异：日志前缀使用 `[HelpTypst]`；README 为单语（中文）四板块格式（上游 v0.1.9 要求中英双语）；历史 CHANGELOG（v0.4.3 及以前）沿用旧内联格式；WebUI 样式预览沿用 `pages/preview/`（上游优先 `views/`，`pages/` 为兼容别名）；本项目不使用 `@register`，插件身份以 `metadata.yaml` 为准。
 
 ---
 
@@ -33,9 +33,9 @@
 | `main.py` | ✅ | 插件入口：注册指令、组装组件、请求编排与消息收发（含自我重载） |
 | `metadata.yaml` | ✅ | 插件元信息（name、version、author、desc、repo、astrbot_version、tags） |
 | `_conf_schema.json` | ✅ | WebUI 配置 Schema；字体/插件下拉 `options` 在运行时同步到内存 Schema，**不改写磁盘文件** |
-| `README.md` | ✅ | 中文文档（功能、指令、配置、常见问题），面向使用者 |
+| `README.md` | ✅ | 中文文档（功能、指令、配置、其它），面向使用者 |
 | `CHANGELOG.md` | ✅ | 变更日志，顶部固定 `[Unreleased]` |
-| `LICENSE` | ✅ | 许可证 |
+| `LICENSE` | 既有 | 许可证文件（上游规则：仅在用户明确指定时新建；README 不写许可证章节） |
 | `logo.png` | ✅ | 插件图标 |
 | `requirements.txt` | ✅ | 运行时依赖（`typst`、`pydantic`） |
 | `domain/` `utils/` `core/` | ✅ | 分层业务代码（见 §2） |
@@ -95,7 +95,7 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 
 ### 2.3 架构风格与分层约束
 
-本项目**固定采用分层多文件风格**（不是单文件风格），新增能力按职责落入既有分层，不另起并行结构。
+上游模板允许新建项目在「单文件」与「分层多文件」两种风格中二选一；本项目已固定采用**分层多文件风格**（不是单文件风格），后续能力按职责落入既有分层，不因模板更新改回单文件。
 
 依赖方向**严格单向**：`main.py → core → utils / domain`；`utils → domain`；`domain/` 只依赖自身（内部 `config.py` 可引用 `constants.py`）。
 
@@ -259,6 +259,18 @@ class HelpTypst(Star):
 - **协议解析集中在模板顶部**：`sys_inputs` 的字符串布尔（`hero_header`）与数组（`prefixes`）在文件头部解析成 `hero_header_enabled` / `primary_prefix` 等变量，后续只用变量；不要在渲染路径里散做 `== "false"` 比较。
 - **Typst 不能探测文件是否存在**（`image()` 缺文件 = 硬编译错误，无 try/catch）：需要模板引用的可选资源（如品牌徽标）由 Python 侧探测后注入相对路径，缺失时注入空串，模板按空串跳过，保证整页仍能编译。
 
+### 4.11 WebUI 视图（views/ 与 pages/）
+
+本项目样式预览页当前放在 `pages/preview/`（AstrBot 仍兼容的旧路径）；新视图优先按上游规则放 `views/<view>/`，`views/` 与 `pages/` 同名时只认 `views/`。
+
+- **何时做视图**：表单复杂、需要状态面板 / 日志 / 文件上传下载 / SSE 实时流 / 图表时做；只是填几个配置项就用 `_conf_schema.json`，不要为了好看写页面。
+- **入口与启用**：`views/<view>/index.html` 是唯一入口；新增/删除视图目录后需重载插件，只改静态资源刷新视图即可；前端零构建（原生 ES module + CSS，不引入打包器与第三方 UI 框架）。
+- **通信只走 bridge**：用 `window.AstrBotPluginView ?? window.AstrBotPluginPage`，先 `await bridge.ready()`；禁止裸 `fetch` / `new EventSource`（沙箱 iframe 无 Dashboard 会话与 token）。取不到 bridge 时给中文提示「请从 AstrBot 插件详情页打开本视图」，不要直接抛裸错。
+- **后端接口**：`context.register_web_api(f"/{PLUGIN_NAME}/<action>", handler, ["GET"], "接口描述")`，路由必须带插件名前缀；视图侧 endpoint 不带前缀。handler 用 `astrbot.api.web` 的 `request` / `json_response` / `error_response` / `file_response` / `stream_response`；视图传来的路径与数值一律不可信，后端再校验。视图专用接口直接返回业务 JSON；需要报错用 `error_response(msg, status_code=400)`。
+- **沙箱限制**：Dashboard 以 `sandbox="allow-scripts allow-forms allow-downloads"` 加载，没有 `allow-same-origin`（`localStorage` / `sessionStorage` / `indexedDB` / `document.cookie` 不可用）、没有 `allow-popups`（`window.open` / `target="_blank"` 被拦）、不能访问父窗口 DOM。页面状态放内存或后端，链接复制文本、下载走 `bridge.download()`。
+- **样式与文案**：颜色/间距走 CSS 变量，`:root` 放亮色、`[data-theme="dark"]` 放暗色（AstrBot 已在 `<html>` 同步 `data-theme`）；视图标题/描述写 `.astrbot-plugin/i18n/<locale>.json` 的 `views.<view_name>.title/description`（旧的 `pages.<view_name>.*` 仅兼容期保留）。插入 DOM 的外部文本必须先转义。
+- **自检**：视图没出现 → 检查入口文件、插件启用与详情页刷新；接口 404 → 检查路由前缀；上传为空 → 字段名固定 `file`；SSE 401 → 是否绕过了 bridge。
+
 ---
 
 ## 5. 配置与数据文件
@@ -267,9 +279,10 @@ class HelpTypst(Star):
 
 - 新增配置项**先**在 `_conf_schema.json` 补 schema（`type` / `hint` / `default` / `options`），**再**在代码中实现读取。
 - 默认值在 **`DefaultCFG` 与 `_conf_schema.json` 的 `default` 两处维护**，修改时必须同步（例如 `ignored_plugins`、字体缺省项）。
-- 文档（README 配置说明、CHANGELOG）引用配置项时，统一写成**「中文名（`key`）」**：中文名取自 schema 的 `hint`，key 用反引号包裹，例如「背景图随机选择（`background_random`）」。
+- 文档（README 配置说明、CHANGELOG）引用配置项时，统一写成**「中文名（`key`）」**：中文名取自 schema 的 `description`（`hint` 只是问号里的补充说明，不要当配置名），key 用反引号包裹，例如「背景图随机选择（`background_random`）」；schema 里有的项必须在 README 配置表出现。
 - 新增会影响布局/图片输出的配置项，必须同时加入 `InternalCFG.CACHE_SENSITIVE_CONFIGS`（见 §5.4）；`rendering` 下的 `ppi`、`split_height`、`giant_threshold`、`output_format` 均已入表（`webp_limit` 已并入 `split_height`，不再是配置项）。
 - 新增主题预设只需在 `DefaultCFG.PRESETS` 登记配色；`active_preset` 与字体下拉 `options` 由 `FontManager.update_json_schema` 在运行时同步到内存 Schema，不要手改 schema 的 `options`。
+- **格式是扁平字典**：顶层 key 即配置项 key，值是该配置项的 schema 节点；没有 `fields` 数组、没有 `schemaVersion` 外壳。常用节点字段：`type`（`string` / `text` / `int` / `float` / `bool` / `object` / `list` / `dict` / `template_list`）、`description`（WebUI 配置名）、`hint`（问号补充说明）、`default`、`options`+`labels`、`slider`（仅 int/float）、`secret`、`items`（object/dict 子 schema）。配置分组用 `object` 嵌套表达，不要发明分组字段。
 
 ### 5.2 配置读取与默认值
 
@@ -387,7 +400,7 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 
 - 顶部固定 `## [Unreleased]`；日常改动先记在这里，**发版时**再移动到 `## vX.Y.Z (YYYY-MM-DD)`（新版本在上）。
 - **先记后合**：记录阶段同一工作周期内的改动各自独立成条（同一功能的多处调整也先各记一条，避免遗漏）；提交或发版前的整理阶段统一过一遍 `[Unreleased]`，把描述同一件事的多条合并成一条，不相关改动保持独立。
-- 发版日期填**当前日期**（以发版当天系统时间为准）。
+- 发版日期填**当前日期**（以发版当天系统时间为准，例如 `2026-11-06`）；版本标题与分类子标题之间可加一行 `> 一句话总结`（可选）。
 - **多会话并行**：更新前必须先读取当前文件，识别并保留其它会话已写入的条目，只追加自己的条目，**严禁整文件覆盖或删除他人记录**。
 
 **格式（分组式，自 `[Unreleased]` 起启用）**
@@ -437,14 +450,13 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 
 - **日常开发不碰版本号**：只往 `[Unreleased]` 追加条目，`metadata.yaml` 的 `version` 保持原值；每个功能、每个修复各自独立提交，提交里不带版本号变更。
 - **发版时一次确认**：把 `[Unreleased]` 移入 `## vX.Y.Z (YYYY-MM-DD)` 的同一次操作里才递增版本号（SemVer 见 §8.3），改 `metadata.yaml` 的 `version`，把 README 的版本信息等辅助位置同步成同一版本号，再打 `git tag vX.Y.Z`。**不能每改一点就递增**，否则版本号会随提交次数突进、与实际发布节奏脱节。
-- **唯一版本源**：`metadata.yaml` 的 `version` 字段；README 的版本徽章与正文版本字样属于辅助信息，不是版本源，需要展示版本时以 `metadata.yaml` 为准。
+- **唯一版本源**：`metadata.yaml` 的 `version` 字段；下列位置只是辅助信息，不是版本源：`main.py` 的 `@register` 版本、README 徽章/正文版本字样、`.astrbot-plugin/i18n` 版本文案。日常提交不动它们；准备发布时逐个同步到同一版本号，不得残留旧版本号或自相矛盾的版本字样。本项目不使用 `@register`、README 也没有版本徽章，发版时只需改 `metadata.yaml` 与 CHANGELOG。
 
 ### 7.2 README
 
 **写作视角（面向用户）**
 
-- 读者是插件使用者；只写用户能直接用到的东西。
-- 该写：能做什么、怎么装、怎么配（配置表）、怎么用（指令表与示例）、出问题怎么办（常见问题、前置条件与限制）。
+- 读者是插件使用者；只写用户能直接用到的东西：能做什么、怎么装、怎么配（配置表）、怎么用（指令表与示例）、出问题怎么办。
 - 不写：实现原理与设计理念、架构分层与模块划分、算法与数据结构、内部调用流程、类名/函数名/文件路径、性能优化手段。
 - 技术细节翻译成用户语言：不写「用 `asyncio.Semaphore` 限制并发」，写「同时处理的任务数量上限」。
 - 判断标准：使用者只读 README，就能独立完成安装 → 配置 → 使用 → 排障。
@@ -456,6 +468,13 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 - ❌ 背景解析优先走 `header_background`，再回退目录扫描
 ```
 
+**头部格式**
+
+- 头部按上游模板：`<img src="logo.png" alt="插件名" width="160" />` + `<h1>`（取 `metadata.yaml` 的 `display_name`）+ `<p><strong>desc</strong></p>` + 重点功能 `<sub>` 标签行；HTML 元素间不留空行，`alt` 必填，宽度固定 160。
+- `metadata.yaml` 的 `tags` 是全量、单概念关键词（复合词拆开），不因头部放不下而删减；README 头部只挑用户能感知的重点功能，可为 `tags` 的变体。
+- **本项目按既有回填差异只维护中文 `README.md`**，因此不写语言切换链接；若后续新增 `README_en.md`：中文版为权威版本（源），改动先落中文、再同步英文，禁止反向；两版章节结构一致，头部语言链接互相指向。
+- **README 一律不放许可证章节**（不写 License 小节、许可证徽章或许可证名）；即使仓库已有 `LICENSE`，也只保留文件本身。
+
 **四大板块**
 
 | 板块 | 内容 |
@@ -463,29 +482,18 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 | 一、功能/介绍 | 功能介绍、特性列表、使用场景、截图/演示 |
 | 二、指令 | 命令表（命令 / 权限 / 说明）、使用示例 |
 | 三、配置 | 配置项表（配置项 / 类型 / 默认值 / 说明） |
-| 四、其它 | 安装、快速开始、运行环境与依赖、常见问题、许可证、鸣谢 |
+| 四、其它 | 安装/前提、依赖要求、常见问题、鸣谢；不放许可证 |
 
-**何时必须更新**
+- **默认不写分步「安装/快速开始」**：插件市场或 WebUI 安装页装完即用，依赖由 AstrBot 自动安装；确实需要手动安装时才补步骤。
+- **版本与协议端不是必写项**：`metadata.yaml` 的 `astrbot_version` 能表达的最低版本不在 README 重复；只有 metadata 表达不了的明确限制（某功能要求更高版本、只支持某协议端）才用一两句说明。
+- **配置板块**：≤ 4 项直接一张表，不硬拆小节；更多按 `_conf_schema.json` 的真实 `object` 分组，每类一个 `###` 子标题 + 一张表，顺序按用户上手顺序；单类 ≥ 4 项整表包进 `<details>` 折叠，`<summary>` 写「类别名（项数）」，首次必填的关键配置不放进折叠。表格列固定「配置项 / 类型 / 默认值 / 说明」，配置项写「中文名（`key`）」。
+- **常见问题可选**：只有用户真的会踩到并反复问的排障问题才补；没有就不建空标题。
+- **何时必须更新**：功能增删 → 一；命令/使用方式变化 → 二；配置项变化 → 三（定位到对应类别）；依赖/版本限制变化 → 四；用户会踩到的行为变化 → 四（常见问题）。纯内部重构、样式调整、不改变用户可见行为的修复不需要更新。
+- **格式与多会话**：正文一段文字保持一行，空行只分隔标题/表格/列表/代码块；更新前先读文件，保留其它会话内容，严禁整文件覆盖。
 
-| 改动类型 | 必须更新的板块 |
-|---|---|
-| 功能新增/删除 | 一、功能/介绍 |
-| 使用方式/命令变化 | 二、指令 |
-| 配置项变化 | 三、配置 |
-| 依赖/版本要求变化 | 四、其它（安装/依赖） |
-| 已知问题/行为变化 | 四、其它（常见问题） |
+**当前状态**
 
-纯内部重构、样式调整、不改变用户可见行为的修复，不需要更新 README。
-
-**当前状态与双语文档**
-
-- 本项目目前仅维护中文 `README.md`，采用重排版式：居中标题 + 一句话介绍 → 效果预览（多页面图片表格，含 `preview/hero_preview.png`）→ 特性 / 快速开始 / 指令 / 配置（按分组收进 `<details>` 折叠块）/ 常见问题 / 许可。
-- 若后续新增英文版 `README_en.md`：中文版为权威版本（源），改动先落中文、再同步英文，**禁止反向**；两版章节结构保持一致，头部语言切换链接互相指向。
-
-**格式与多会话**
-
-- 禁止无意义换行：HTML 头部区块内元素间不留空行；正文一段文字保持一行，空行只用于分隔标题、表格、列表、代码块。
-- 多会话并行修改时先读后改，只追加/修改自己的部分，**严禁整文件覆盖**。
+- 本项目仅维护中文 `README.md`，采用重排版式：居中标头（logo + display_name + desc + 重点功能）→ 效果预览（多页面图片表格，含 `preview/hero_preview.png`）→ 特性 / 指令 / 配置（按分组收进 `<details>` 折叠块）/ 其它（安装与前提、字体、鸣谢）。
 
 ### 7.3 PR 描述规范
 
@@ -533,20 +541,26 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 - 若项目已补充单测，改动后需保证测试通过。
 - 格式化：`python -m ruff format .`（项目历史使用 ruff；未安装可先 `pip install ruff`，不要写入 `requirements.txt`）。
 - 涉及渲染的改动需人工核对缓存失效逻辑（见 §5.4），必要时清缓存后重测。
+- WebUI 静态资源改动至少跑 `node --check pages/preview/app.js`（或对应视图的 JS）；纯静态页无法在本地跑时，用 mock bridge 或 AstrBot 插件页做一次真实访问验证。
 - **不要手改 schema 的 `options`**：字体与屏蔽插件选项由运行时写入内存 Schema，磁盘 `_conf_schema.json` 不再被运行时改写；`git diff` 里出现 `options` 差异说明有人手改过，需要人工核对。
 
 ---
 
 ## 9. 最终检查清单（每次任务完成前）
 
-- [ ] 架构：改动落在既有分层（`main → core → utils/domain`），未破坏依赖方向
+- [ ] 架构：改动落在既有分层（`main → core → utils/domain`），未破坏依赖方向；不因模板更新改成单文件
 - [ ] 注释：只写 non-obvious reason，无残留旧代码 / 调试输出 / 半成品 TODO
 - [ ] 日志：`[HelpTypst]` 前缀，异常分类记录，无空 `except`（或已注释理由）
 - [ ] CHANGELOG：`[Unreleased]` 已按分组式追加条目，**只写相对上一版的变化**、同一变化已合并为一条（无重复条目），面向用户，保留了他人既有记录
 - [ ] README：涉及用户可见变更时已同步，且面向用户书写（无实现原理与内部细节）
-- [ ] 版本号：日常任务不递增版本号；发版时才改 `metadata.yaml` 的 `version`（与 CHANGELOG 新版本段、tag 一致）并同步 README 版本信息
+- [ ] README 头部：logo（`width="160"`、`alt` 已填）+ `display_name` 标题 + `desc` + 重点功能标签；本项目为中文单语，按回填差异不写语言切换
+- [ ] README 配置：> 4 项已按 `_conf_schema.json` 真实分组，单类 ≥ 4 项已用 `<details>` 折叠，`summary` 写「类别名（项数）」，首次必填项未藏进折叠；配置表有「类型」列
+- [ ] README 其它：无许可证章节；安装只保留市场/安装页一句话，版本限制只写 metadata 表达不了的更高要求
+- [ ] 标签：`metadata.yaml` 的 `tags` 为全量、单概念关键词；README 头部只列重点能力，不虚构
+- [ ] 版本号：日常任务不递增版本号；发版时才改 `metadata.yaml` 的 `version`（与 CHANGELOG 新版本段、tag 一致），同步 README/`@register`/i18n 等辅助位置
 - [ ] 配置：schema 与代码同步，默认值两处一致，布局相关配置已入 `CACHE_SENSITIVE_CONFIGS`
 - [ ] 指令：docstring（展示描述）、别名、权限、README 命令表已同步
 - [ ] 缓存：改模板后已清缓存；新增渲染模式已登记 `CACHE_FILES`
+- [ ] 视图（改动 `views/` 或 `pages/` 时）：通信只走 bridge（无裸 `fetch`/`EventSource`）、拿 bridge 有兜底、未依赖 `localStorage` 或 `target="_blank"`、接口路由带插件名前缀、视图标题已进 i18n
 - [ ] 提交：Conventional Commits 格式；已展示文件清单 / `git diff --stat` / 2–3 个候选提交标题（注明侧重与推荐项），并取得**本轮**对**本次改动**的明确确认
-- [ ] 本地自检：`python -m compileall -q .`（及 ruff 格式）通过
+- [ ] 本地自检：`python -m compileall -q .`（及 ruff 格式）通过；WebUI 静态资源改动跑过 `node --check`
