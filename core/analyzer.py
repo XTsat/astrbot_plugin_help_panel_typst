@@ -139,6 +139,8 @@ def list_installed_plugins(context: Context) -> list[dict[str, Any]]:
         plugins[name] = {
             "name": name,
             "display_name": info["display_name"] or name,
+            # 版本号会渲染进面板: 只升版本号(不改描述/指令)也要被指纹发现
+            "version": info["version"],
             # 预览页分类编辑器据此统计高频词, 与分类匹配用的文案保持一致
             "short_desc": info["short_desc"],
             "desc": info["desc"],
@@ -159,7 +161,20 @@ def compute_plugin_fingerprint(context: Context) -> str:
     parts: list[str] = []
     try:
         for item in list_installed_plugins(context):
-            parts.append(f"{item.get('name')}|{int(bool(item.get('disabled')))}")
+            # 展示名/版本/描述直接进面板文本: 改了它们也要重编, 只比插件 ID 会漏掉这类改动
+            parts.append(
+                "|".join(
+                    [
+                        str(item.get("name") or ""),
+                        str(int(bool(item.get("disabled")))),
+                        str(item.get("display_name") or ""),
+                        # 版本号单独参与: 插件升级常常只动版本号, 漏掉它这一轮预热就白等
+                        str(item.get("version") or ""),
+                        str(item.get("short_desc") or ""),
+                        str(item.get("desc") or ""),
+                    ]
+                )
+            )
         for handler in star_handlers_registry:
             if not isinstance(handler, StarHandlerMetadata):
                 continue
