@@ -59,6 +59,12 @@ class InternalCFG:
         "filter": "cache_menu_filter",
     }
 
+    # 预热覆盖的静态模式, 直接取 CACHE_FILES 的键: 新增静态模式时不会漏预热
+    # 顺序即预热的先后 (指令面板最常打开, 先编它)
+    PREWARM_MODES: tuple[str, ...] = tuple(CACHE_FILES.keys())
+    # 启动后延迟预热 (秒): 先让插件加载与首批用户请求拿到 CPU, 也避开 AstrBot 自身的启动风暴
+    PREWARM_STARTUP_DELAY: float = 15.0
+
     EVENT_TYPE_MAP: _EventTypeLabelMap = _build_event_type_map()
 
     # 会引起布局变动的配置项 → 缓存失效
@@ -490,6 +496,12 @@ class DefaultCFG:
     BACKGROUND_DIR: str = ""
     BACKGROUND_RANDOM: bool = True
     HERO_HEADER: bool = True
+    # 自动预热: 启动后与插件条目变化时, 把静态面板提前编译进缓存
+    PREWARM_ENABLED: bool = True
+    # 插件条目变化检测间隔 (分钟): 轮询插件指纹, 变了就重编四张静态图
+    PREWARM_INTERVAL: int = 5
+    MIN_PREWARM_INTERVAL: int = 1
+    MAX_PREWARM_INTERVAL: int = 120
 
     # 1.2 配置值收敛区间 (防御手工改坏的配置; 与设置面板 slider 范围对齐)
     MIN_PPI: float = 72.0

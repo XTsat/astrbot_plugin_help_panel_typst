@@ -6,9 +6,11 @@ from .analyzer import (
     FilterAnalyzer,
     get_safe_plugin_info,
     list_installed_plugins,
+    compute_plugin_fingerprint,
 )
 from .renderer import TypstRenderer, RenderResult
 from .preview import PreviewError, PreviewService
+from .prewarm import PrewarmService
 
 
 __all__ = [
@@ -21,8 +23,10 @@ __all__ = [
     "FilterAnalyzer",
     "get_safe_plugin_info",
     "list_installed_plugins",
+    "compute_plugin_fingerprint",
     "TypstRenderer",
     "RenderResult",
     "PreviewError",
     "PreviewService",
+    "PrewarmService",
 ]

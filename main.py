@@ -1,6 +1,7 @@
 import asyncio
 import shutil
 from collections.abc import AsyncGenerator, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +24,39 @@ from .core import (
     CommandAnalyzer,
     EventAnalyzer,
     FilterAnalyzer,
+    PrewarmService,
     PreviewError,
     PreviewService,
     TypstRenderer,
+    compute_plugin_fingerprint,
     list_installed_plugins,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _StaticPanel:
+    """一个静态面板的调度信息
+
+    指令入口、预热与「插件变化后重编」都从这里取分析器与标题: 标题只有一份,
+    改文案不会出现「指令里改了、预热里还是旧标题」的错位。
+    """
+
+    mode: str
+    analyzer_attr: str
+    title: str
+    label: str
+
+
+_STATIC_PANELS: dict[str, _StaticPanel] = {
+    "command": _StaticPanel(
+        "command", "cmd_analyzer", "AstrBot 指令菜单", "指令菜单"
+    ),
+    "command_detail": _StaticPanel(
+        "command_detail", "cmd_analyzer", "AstrBot 指令菜单(详细)", "详细指令菜单"
+    ),
+    "event": _StaticPanel("event", "evt_analyzer", "AstrBot 事件监听", "事件监听"),
+    "filter": _StaticPanel("filter", "flt_analyzer", "AstrBot 过滤器分析", "过滤器详情"),
+}
 
 
 class HelpTypst(Star):
@@ -117,6 +146,14 @@ class HelpTypst(Star):
             persona_getter=self._get_persona_name,
             plugin_lister=lambda: list_installed_plugins(self.context),
         )
+        # 7. 自动预热: 启动后与插件条目变化时提前把四张静态图编进缓存
+        self.prewarm = PrewarmService(
+            renderer=self.renderer,
+            provider_getter=self._build_static_provider,
+            fingerprint_getter=self._plugin_fingerprint,
+            config=self.plugin_config,
+        )
+
         self._register_preview_apis()
 
     def _register_preview_apis(self) -> None:
@@ -171,6 +208,8 @@ class HelpTypst(Star):
         self._init_prefixes(self.context)
         await asyncio.to_thread(self._refresh_resources)
         await asyncio.to_thread(self._auto_close_rescan_flag)
+        # 放在资源刷新之后: 预热要用最新的字体列表与配置, 否则第一批图按旧配置编
+        self.prewarm.start()
         logger.info("[HelpTypst] 初始化完成")
 
     def _auto_close_rescan_flag(self):
@@ -270,7 +309,10 @@ class HelpTypst(Star):
             logger.info(f"[HelpTypst] 已导入 {copied} 张内置背景图到 {dst_dir}")
 
     async def terminate(self) -> None:
-        """卸载/重载时执行: 清理临时文件、刷新字体资源与配置面板 schema"""
+        """卸载/重载时执行: 停止预热、清理临时文件、刷新字体资源与配置面板 schema"""
+        # 0. 先停预热: 否则在途预热会在卸载途中共用子进程/事件循环, 拖慢重载甚至报错
+        await self.prewarm.stop()
+
         # 1. 清理临时文件
         await self._perform_cleanup()
 
@@ -349,6 +391,20 @@ class HelpTypst(Star):
         except Exception as e:
             yield event.plain_result(f"❌ 自动重载失败: {e}")
 
+    @typst.command("warm")
+    async def cmd_prewarm(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        """立即预热面板缓存"""
+        warmed = await self.prewarm.warm_now()
+        if not warmed:
+            yield event.plain_result(
+                "⚠️ 预热未产出图片（详见插件日志），面板仍会在收到请求时现编"
+            )
+            return
+        labels = "、".join(_STATIC_PANELS[m].label for m in warmed if m in _STATIC_PANELS)
+        yield event.plain_result(f"✅ 预热完成：{labels}。现在打开对应面板会直接使用缓存图")
+
     async def _safe_reload(self, pm, plugin_name):
         """延迟重载"""
         await asyncio.sleep(InternalCFG.DELAY_SEND)
@@ -395,13 +451,13 @@ class HelpTypst(Star):
     async def _handle_request(
         self,
         event: AstrMessageEvent,
-        analyzer: BaseAnalyzer,
-        title: str,
         mode: str,
         query: str | None,
         is_detail: bool = False,
     ) -> AsyncGenerator[MessageEventResult, None]:
-        """通用请求处理逻辑"""
+        """通用请求处理逻辑 (分析器与标题统一取自 _STATIC_PANELS)"""
+        panel = _STATIC_PANELS[mode]
+        analyzer: BaseAnalyzer = getattr(self, panel.analyzer_attr)
         wait_msg_id = None
 
         if self.plugin_config.enable_waiting_message:
@@ -417,7 +473,7 @@ class HelpTypst(Star):
         persona_name = await self._get_persona_name()
         data_pipeline = self._make_data_pipeline(
             analyzer=analyzer,
-            title=title,
+            title=panel.title,
             mode=mode,
             query=query,
             is_detail=is_detail,
@@ -428,6 +484,10 @@ class HelpTypst(Star):
 
         # 2. 执行渲染
         result, error = await self.renderer.render(data_pipeline, mode, query)
+        if result is not None and query is None:
+            # 走静态缓存的请求顺带核对一次插件条目: 别的机器刚装/停用了插件时,
+            # 这次请求就是最早的信号, 不必干等下一次轮询
+            self.prewarm.notify_change("请求后检查")
 
         # 3. 处理结果; 等待提示在结果发出后撤回 (finally), 避免用户先等一次撤回延迟
         try:
@@ -531,6 +591,33 @@ class HelpTypst(Star):
             return len(plugins)
 
         return data_pipeline
+
+    async def _build_static_provider(self, mode: str) -> Callable[[Path], int] | None:
+        """构造某个静态面板的数据流 (预热用; 未知 mode 返回 None)
+
+        预热与指令共用 _make_data_pipeline, 因此预热出的缓存图与用户请求出的图
+        完全一致 —— 包括人格名、字体优先级与分类规则。
+        """
+        panel = _STATIC_PANELS.get(mode)
+        if panel is None:
+            logger.warning(f"[HelpTypst] 未知的预热模式: {mode}")
+            return None
+        analyzer: BaseAnalyzer = getattr(self, panel.analyzer_attr)
+        persona_name = await self._get_persona_name()
+        return self._make_data_pipeline(
+            analyzer=analyzer,
+            title=panel.title,
+            mode=mode,
+            query=None,
+            is_detail=False,
+            layout=self.layout,
+            font_order=self.plugin_config.appearance.get_active_font_order(),
+            persona_name=persona_name,
+        )
+
+    def _plugin_fingerprint(self) -> str:
+        """当前插件条目指纹 (供预热判断是否需要重编)"""
+        return compute_plugin_fingerprint(self.context)
 
     def _build_preview_provider(
         self,
@@ -880,9 +967,7 @@ class HelpTypst(Star):
     async def show_menu(self, event: AstrMessageEvent, query: GreedyStr):
         """显示指令菜单"""
         keyword, is_detail = self._parse_menu_query(query)
-        async for r in self._handle_request(
-            event, self.cmd_analyzer, "AstrBot 指令菜单", "command", keyword, is_detail
-        ):
+        async for r in self._handle_request(event, "command", keyword, is_detail):
             yield r
 
     @filter.command("helpss", alias={"详细帮助", "详细功能", "详细菜单"})
@@ -890,12 +975,7 @@ class HelpTypst(Star):
         """显示详细指令菜单 (含指令标签组)"""
         keyword, is_detail = self._parse_menu_query(query)
         async for r in self._handle_request(
-            event,
-            self.cmd_analyzer,
-            "AstrBot 指令菜单(详细)",
-            "command_detail",
-            keyword,
-            is_detail,
+            event, "command_detail", keyword, is_detail
         ):
             yield r
 
@@ -903,16 +983,12 @@ class HelpTypst(Star):
     async def show_events(self, event: AstrMessageEvent, query: GreedyStr):
         """显示事件监听列表"""
         keyword = self._parse_search_query(query)
-        async for r in self._handle_request(
-            event, self.evt_analyzer, "AstrBot 事件监听", "event", keyword
-        ):
+        async for r in self._handle_request(event, "event", keyword):
             yield r
 
     @filter.command("filters", alias={"过滤器", "过滤"})
     async def show_filters(self, event: AstrMessageEvent, query: GreedyStr):
         """显示过滤器详情"""
         keyword = self._parse_search_query(query)
-        async for r in self._handle_request(
-            event, self.flt_analyzer, "AstrBot 过滤器分析", "filter", keyword
-        ):
+        async for r in self._handle_request(event, "filter", keyword):
             yield r

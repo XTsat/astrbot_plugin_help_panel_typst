@@ -25,6 +25,7 @@ from astrbot.core.star.filter.event_message_type import (
 from astrbot.core.agent.mcp_client import MCPTool
 
 from ..domain import PluginMetadata, RenderNode, InternalCFG, TypstPluginConfig
+from ..utils.hash import calculate_hash
 from ..utils.view import TypstLayout
 
 
@@ -145,6 +146,29 @@ def list_installed_plugins(context: Context) -> list[dict[str, Any]]:
             "disabled": getattr(star, "activated", True) is False,
         }
     return sorted(plugins.values(), key=lambda item: str(item["name"]))
+
+
+def compute_plugin_fingerprint(context: Context) -> str:
+    """插件条目指纹: 已安装插件身份 + 全部已注册 handler 的内容摘要
+
+    预热只在意「哪些条目进了面板」: 装 / 卸 / 启 / 停插件、插件升级后增删指令都会
+    改变指纹; 内容本身要不要重编仍由渲染器的缓存校验兜底, 这里只决定值不值得跑一轮。
+
+    读取失败返回空串, 调用方据此放弃本轮 (不把一次读表失败变成一次误重编)。
+    """
+    parts: list[str] = []
+    try:
+        for item in list_installed_plugins(context):
+            parts.append(f"{item.get('name')}|{int(bool(item.get('disabled')))}")
+        for handler in star_handlers_registry:
+            if not isinstance(handler, StarHandlerMetadata):
+                continue
+            parts.append(f"{handler.handler_module_path}:{handler.handler_name}")
+    except Exception as e:
+        logger.warning(f"[HelpTypst] 读取插件条目指纹失败: {e}")
+        return ""
+    # 排序: 注册表的迭代顺序会随加载时序抖动, 不排序会被当成「条目变了」
+    return calculate_hash("\n".join(sorted(parts)))
 
 
 class BaseAnalyzer:

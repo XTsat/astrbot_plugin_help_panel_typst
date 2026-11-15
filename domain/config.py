@@ -123,6 +123,9 @@ class RenderingConfig:
     single_column_threshold: float
     plugin_two_lines: bool
     output_format: str
+    prewarm_enabled: bool
+    # 插件条目变化检测间隔 (分钟)
+    prewarm_interval: int
 
 
 @dataclass
@@ -444,6 +447,16 @@ def _load_rendering(raw_config: AstrBotConfig) -> RenderingConfig:
             DefaultCFG.PLUGIN_TWO_LINES,
         ),
         output_format=output_format,
+        prewarm_enabled=_as_bool(
+            raw_render.get("prewarm_enabled"),
+            DefaultCFG.PREWARM_ENABLED,
+        ),
+        prewarm_interval=_as_int(
+            raw_render.get("prewarm_interval"),
+            DefaultCFG.PREWARM_INTERVAL,
+            DefaultCFG.MIN_PREWARM_INTERVAL,
+            DefaultCFG.MAX_PREWARM_INTERVAL,
+        ),
     )
     return render_cfg
 

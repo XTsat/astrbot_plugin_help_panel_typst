@@ -69,6 +69,7 @@ core/                # [核心业务层] 纯 Python 逻辑
   renderer.py        #   TypstRenderer：路径策略、缓存、背景图解析、子进程调度
   worker.py          #   RenderTask + execute_render_task（typst.compile，即用即销）
   preview.py         #   PreviewService：样式预览页的取数、试渲染、应用配置与内存缓存
+  prewarm.py         #   PrewarmService：启动后与插件条目变化时的静态缓存预热（后台任务 + 指纹比对）
 templates/base.typ   # 渲染模板
 pages/preview/       # 样式预览页静态资源（app.js / index.html / style.css）
 .astrbot-plugin/     # 插件元数据与多语言文案（i18n/）
@@ -108,7 +109,7 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 
 ```
 /helps|/helpss|/events|/filters [编号 | s 关键词]
-  └─ main.HelpTypst._handle_request(event, analyzer, title, mode, query, is_detail)
+  └─ main.HelpTypst._handle_request(event, mode, query, is_detail)   # 分析器/标题取自 _STATIC_PANELS
        ├─ _get_persona_name()                 # Hero 统计第三列（失败返回空串，不影响渲染）
        ├─ data_pipeline(save_path)            # 经 asyncio.to_thread 执行
        │    ├─ analyzer.get_plugin_by_order(n)    # 编号详情 → 按全局 order 精确命中（main 已判定意图）
@@ -126,6 +127,8 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 ```
 
 **布局模式与缓存模式是两回事**：`plugin_detail` 是「编号」详情页的布局模式，走临时路径、不进静态缓存；静态缓存只对应 `command` / `command_detail` / `event` / `filter` 四种。
+
+**自动预热**（`core/prewarm.py`）：后台任务走与指令完全相同的数据流（`_build_static_provider` → `_make_data_pipeline` → `renderer.render(..., mode)`），因此预热产物与用户请求产物一致。启动后延迟 `InternalCFG.PREWARM_STARTUP_DELAY` 预热一轮，之后每 `prewarm_interval` 分钟比对插件条目指纹（`compute_plugin_fingerprint`：已安装插件 + 全部 handler），指纹变了才重编；`/typst warm` 可手动强制一轮。指纹只决定「值不值得跑」，内容是否需要重编仍由 `_check_cache` 判定，不要在预热里另建一套缓存判断。
 
 ### 2.5 渲染契约（payload / sys_inputs）
 
@@ -315,6 +318,7 @@ class HelpTypst(Star):
 3. **`RenderMode` 枚举是历史遗留**：当前调度使用字符串 mode，以 `CACHE_FILES` 为准，不要只改枚举就以为新增了模式。四个静态模式现已与枚举成员对齐（新增模式仍需按上一条四处登记）。
 4. **静态产物是「临时 stem + 原子替换」**：编译先写 `temp_<uuid>.png/.webp`，成功后 `os.replace` 成 `cache_menu_*`；不要再改回「编译前先删旧文件」，那会删掉在途请求正在发送的图片。
 5. `rendering.timeout_compile` 与 `rendering.max_concurrent_tasks` 已接入渲染路径（编译外层全局信号量 + `wait_for` 超时）；不要绕过信号量直接调用 `execute_render_task`。
+6. **预热只读不写第二套缓存**：`core/prewarm.py` 一律经 `renderer.render(data_pipeline, mode)` 走正常静态路径（同样的 hash/快照校验、同样的原子替换）；`prewarm_enabled` / `prewarm_interval` 只控制何时触发，**不改变出图**，因此不要加入 `CACHE_SENSITIVE_CONFIGS`。
 
 ### 5.5 字体与背景图
 
@@ -385,6 +389,7 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 | `/events [s <关键词>]` | 任意 | 事件监听 + 函数工具（含 MCP）列表（别名：`/事件`、`/事件监听`） |
 | `/filters [s <关键词>]` | 任意 | 过滤器详情（别名：`/过滤器`、`/过滤`） |
 | `/typst font` | 管理员 | 扫描字体并自重载插件 |
+| `/typst warm` | 管理员 | 立即预热四个静态面板的缓存图 |
 
 > `<编号>` 详情仅 `/helps` 与 `/helpss` 支持；`/events`、`/filters` 只接受 `s <关键词>` 搜索。
 

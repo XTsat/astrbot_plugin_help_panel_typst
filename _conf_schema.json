@@ -340,6 +340,23 @@
         "default": 2,
         "hint": "同时进行的 Typst 编译任务数量限制，根据 CPU 调整"
       },
+      "prewarm_enabled": {
+        "description": "自动预热缓存",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后插件启动完成、插件条目发生变化（安装/卸载/启用/停用/升级）时，自动在后台把指令、详细指令、事件、过滤器四个面板提前渲染好，之后打开面板直接用缓存图，省去等待编译的时间"
+      },
+      "prewarm_interval": {
+        "description": "插件变化检测间隔 (分钟)",
+        "type": "int",
+        "slider": {
+          "min": 1,
+          "max": 120,
+          "step": 1
+        },
+        "default": 5,
+        "hint": "每隔多久检查一次插件条目是否变化，变了就自动重新预热；间隔越短越及时，但检查更频繁。其它机器改配置后无需等待，下一次打开面板时也会立即触发检查"
+      },
       "ppi": {
         "description": "图片清晰度 (PPI)",
         "type": "float",
