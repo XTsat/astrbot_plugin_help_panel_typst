@@ -336,6 +336,7 @@ class HelpTypst(Star):
 - 解析优先级：`header_background`（单文件）→ `background_dir`（自定义目录）→ 数据目录 `backgrounds/`。
 - 只扫描目录**根层**的栅格图片（`.png/.jpg/.jpeg/.webp/.gif`，即 `InternalCFG.BACKGROUND_IMAGE_EXTS`，仅 Typst 能解码的格式），排除 `cache_` / `temp_` 前缀，并校验图片头与扩展名一致；扩展名按**小写**比较（Linux 区分大小写，`.PNG` 也算），`header_background` 同样受该白名单约束，不支持时回退目录扫描。
 - `background_random` 在**每批次渲染开始时只随机一次**（`render()` 内的局部变量 `bg_image`，不存实例属性），快照与本次编译使用同一个值；不要在模板或 worker 内再次随机，也不要把背景图放回 `self` 上（并发请求会互相覆盖）。
+- **随机背景跟着「重编」轮换**：静态缓存校验时用 `_cached_background()` 取上次那张图（要求开启随机、未显式指定单图、仍在 `_background_scan_dirs()` 候选目录内且文件完好），命中即沿用，只有真要重编时才用本批次新随机到的 `bg_image`。原理：背景指纹是快照的一部分，若每次请求都重新随机，快照永远对不上，静态缓存等于失效（每次都整页重编）。临时路径（搜索/详情）不查缓存，仍每次随机。
 - 背景图变更通过快照指纹自动使缓存失效；`hero_header` 关闭或无背景图时回到经典白色卡片布局。
 - 背景图注入依赖 Typst `root`：`root = commonpath(模板目录, 数据目录, 插件根目录, 背景图)`。`插件根目录` 必须在内，否则模板里的 `../resources` 徽标会越出沙箱；跨盘符（Windows）或无共同父目录时**只放弃背景图**并回落到插件根目录（整页仍编译），不要假设背景一定可用。
 

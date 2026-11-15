@@ -190,13 +190,7 @@ class TypstRenderer:
                 )
 
         # 2. 目录扫描 (自定义目录 → 默认 backgrounds 目录)
-        scan_dirs: list[Path] = []
-        custom_dir = (self.cfg.background_dir or "").strip()
-        if custom_dir:
-            scan_dirs.append(Path(custom_dir))
-        scan_dirs.append(self.data_dir / InternalCFG.NAME_BACKGROUND_DIR)
-
-        for scan_dir in scan_dirs:
+        for scan_dir in self._background_scan_dirs():
             candidates = self._scan_background_dir(scan_dir)
             if not candidates:
                 continue
@@ -216,6 +210,19 @@ class TypstRenderer:
             return candidates[0]
 
         return None
+
+    def _background_scan_dirs(self) -> list[Path]:
+        """背景图候选目录 (自定义目录 → 数据目录 backgrounds)
+
+        解析、预览选项与「沿用上次背景」三处共用同一份顺序, 否则三处对
+        「这张图还算不算候选」的判断会各说各话。
+        """
+        scan_dirs: list[Path] = []
+        custom_dir = (self.cfg.background_dir or "").strip()
+        if custom_dir:
+            scan_dirs.append(Path(custom_dir))
+        scan_dirs.append(self.data_dir / InternalCFG.NAME_BACKGROUND_DIR)
+        return scan_dirs
 
     def _scan_background_dir(self, scan_dir: Path) -> list[Path]:
         """扫描单个目录内的背景图候选 (仅目录根, 排除 cache_/temp_ 前缀)"""
@@ -275,16 +282,52 @@ class TypstRenderer:
             ):
                 choices[path.name] = path
 
-        scan_dirs: list[Path] = []
-        custom_dir = (self.cfg.background_dir or "").strip()
-        if custom_dir:
-            scan_dirs.append(Path(custom_dir))
-        scan_dirs.append(self.data_dir / InternalCFG.NAME_BACKGROUND_DIR)
-        for scan_dir in scan_dirs:
+        for scan_dir in self._background_scan_dirs():
             for path in self._scan_background_dir(scan_dir):
                 choices.setdefault(path.name, path)
 
         return sorted(choices.items(), key=lambda item: item[0].lower())
+
+    async def _cached_background(self, kv_key: str) -> Path | None:
+        """上次渲染用过的背景图 (仅开启随机时沿用)
+
+        开启随机后如果每次请求都重新随机, 配置快照里的背景指纹永远对不上, 静态缓存
+        等于失效 —— 每次请求都得整页重编, 正是「渲染太久」的根源。因此随机改为跟着
+        重编走: 缓存命中期间保持同一张, 只有需要重新出图(内容/配置变化)时才换。
+
+        返回 None 表示不沿用: 未开启随机、显式指定了单图、没有缓存记录, 或那张图
+        已不在候选目录里 / 已损坏。
+        """
+        if not self.cfg.background_random:
+            return None
+        # 显式单图本身没有随机, 沿用与否结果一致
+        if (self.cfg.header_background or "").strip():
+            return None
+        try:
+            meta = await self.star.get_kv_data(kv_key, default=None)
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 读取缓存背景记录失败: {e}")
+            return None
+        if not isinstance(meta, dict):
+            return None
+        config = meta.get("config")
+        record = config.get("background_image") if isinstance(config, dict) else None
+        path_str = record.get("path") if isinstance(record, dict) else None
+        if not path_str:
+            return None
+
+        path = Path(str(path_str))
+        # 只认仍在候选目录里的文件: 换了背景目录或删了图, 就该跟着新候选走
+        scan_dirs = {str(d.resolve()) for d in self._background_scan_dirs()}
+        try:
+            parent = str(path.parent.resolve())
+        except OSError:
+            return None
+        if parent not in scan_dirs:
+            return None
+        if not path.is_file() or not verify_image_header(path):
+            return None
+        return path
 
     async def render(
         self,
@@ -339,9 +382,12 @@ class TypstRenderer:
                 # --- 2. 缓存校验 (仅静态) ---
                 need_compile = True
                 if not is_temp and json_path.exists():
+                    # 随机背景命中缓存时沿用上次那张 (见 _cached_background): 本次若真要
+                    # 重编, 下面的编译仍用本批次新随机到的 bg_image, 背景就是这么换的
+                    check_bg = await self._cached_background(kv_key) or bg_image
                     # hash + config 双校验
                     need_compile = await self._check_cache(
-                        json_path, kv_key, img_path, bg_image
+                        json_path, kv_key, img_path, check_bg
                     )
 
                 if not need_compile:
