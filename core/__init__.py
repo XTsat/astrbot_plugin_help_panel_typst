@@ -11,6 +11,7 @@ from .analyzer import (
 from .renderer import TypstRenderer, RenderResult
 from .preview import PreviewError, PreviewService
 from .prewarm import PrewarmService
+from .order_index import OrderSnapshotStore
 
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "PreviewError",
     "PreviewService",
     "PrewarmService",
+    "OrderSnapshotStore",
 ]

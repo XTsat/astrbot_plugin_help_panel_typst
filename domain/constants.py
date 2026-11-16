@@ -133,6 +133,9 @@ class InternalCFG:
     NAME_FONT_DIR: str = "fonts"
     # 默认背景图目录 (数据目录下的子目录, 与字体目录一致)
     NAME_BACKGROUND_DIR: str = "backgrounds"
+    # 「编号 → 插件名」快照: 引用回复里的数字按发图那一刻的映射解析
+    NAME_ORDER_INDEX: str = "order_index.json"
+    ORDER_INDEX_VERSION: int = 1
 
     # ---- 网页实时预览 (pages/preview) ----
     # 预览默认按插件设置里的清晰度渲染, 可在面板里临时调低换取更短等待时间
@@ -412,6 +415,14 @@ class InternalCFG:
 
     # 时序
     DELAY_SEND: float = 1
+
+    # ---- 引用回复快捷查询 ----
+    # 被引用消息的纯文本长度上限: 只在里面找编号/插件名, 不需要整段历史
+    QUOTE_TEXT_MAX_LEN: int = 400
+    # 引用消息里「编号」候选的位数上限: 面板编号是连续整数, 不会出现长串数字
+    QUOTE_ORDER_MAX_DIGITS: int = 4
+    # 插件名稳定查询前缀: /helps @插件名
+    PLUGIN_REF_PREFIX: str = "@"
 
     # 分类 (指令模式 /helps) 相关
     # 兜底分类名: 配置缺失/异常时的最终保底 (正常运行时使用 DefaultCFG.DEFAULT_CATEGORY_FALLBACK,

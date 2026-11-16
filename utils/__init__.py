@@ -8,6 +8,15 @@ from .image import (
 )
 from .view import HelpHint, MsgRecall, TypstLayout
 from .schema import sync_plugin_options
+from .query import (
+    FULL_QUERY,
+    Query,
+    QueryIntent,
+    find_quoted_order,
+    join_plain_parts,
+    parse_order_token,
+    parse_query,
+)
 
 __all__ = [
     "FontManager",
@@ -20,4 +29,11 @@ __all__ = [
     "get_image_dimensions",
     "process_image_to_output",
     "sync_plugin_options",
+    "FULL_QUERY",
+    "Query",
+    "QueryIntent",
+    "parse_query",
+    "join_plain_parts",
+    "parse_order_token",
+    "find_quoted_order",
 ]

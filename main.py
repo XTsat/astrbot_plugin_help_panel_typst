@@ -8,15 +8,29 @@ from typing import Any
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.core.star.filter.command import GreedyStr
+from astrbot.core.star.filter.custom_filter import CustomFilter
 from astrbot.api.star import Context, Star, StarTools
-from astrbot.api.message_components import Image
+from astrbot.api.message_components import Image, Plain, Reply
 
-from .domain import DefaultCFG, InternalCFG, RenderFailure, TypstPluginConfig
+from .domain import (
+    DefaultCFG,
+    InternalCFG,
+    PluginMetadata,
+    RenderFailure,
+    TypstPluginConfig,
+)
 from .utils import (
+    FULL_QUERY,
     FontManager,
     HelpHint,
     MsgRecall,
+    Query,
+    QueryIntent,
     TypstLayout,
+    find_quoted_order,
+    join_plain_parts,
+    parse_order_token,
+    parse_query,
     sync_plugin_options,
 )
 from .core import (
@@ -24,6 +38,7 @@ from .core import (
     CommandAnalyzer,
     EventAnalyzer,
     FilterAnalyzer,
+    OrderSnapshotStore,
     PrewarmService,
     PreviewError,
     PreviewService,
@@ -57,6 +72,37 @@ _STATIC_PANELS: dict[str, _StaticPanel] = {
     "event": _StaticPanel("event", "evt_analyzer", "AstrBot 事件监听", "事件监听"),
     "filter": _StaticPanel("filter", "flt_analyzer", "AstrBot 过滤器分析", "过滤器详情"),
 }
+
+
+def _plain_text(event: AstrMessageEvent) -> str:
+    """本次消息的纯文本
+
+    优先 event.message_str; 部分适配器只填消息段, 这时从 Plain 段拼回来,
+    否则「引用 + 数字」在这些平台上永远判不出来。
+    """
+    text = (event.get_message_str() or "").strip()
+    if text:
+        return text
+    parts: list[str] = []
+    for comp in event.get_messages():
+        if isinstance(comp, Plain):
+            parts.append(getattr(comp, "text", "") or "")
+    return join_plain_parts(parts)
+
+
+class QuoteOrderFilter(CustomFilter):
+    """只放行「引用消息 + 只带一个编号」的回复
+
+    这类消息没有唤醒词也没有指令名, 靠指令过滤器根本进不来; 同时又不能放宽到
+    「所有引用回复」——群里正常引用聊天会被插件截胡。因此判断严格限定为:
+    引用了某条消息, 且本次消息去掉引用段后只剩一个 1~4 位数字。
+    """
+
+    def filter(self, event: AstrMessageEvent, cfg: Any) -> bool:
+        if not any(isinstance(comp, Reply) for comp in event.get_messages()):
+            return False
+        # 整条消息必须就是一个编号: 夹在句子里的数字属于正常聊天, 不能截胡
+        return parse_order_token(_plain_text(event)) is not None
 
 
 class HelpTypst(Star):
@@ -146,7 +192,9 @@ class HelpTypst(Star):
             persona_getter=self._get_persona_name,
             plugin_lister=lambda: list_installed_plugins(self.context),
         )
-        # 7. 自动预热: 启动后与插件条目变化时提前把四张静态图编进缓存
+        # 7. 编号快照: 引用回复里的数字按「发图那一刻」的编号解析
+        self.order_index = OrderSnapshotStore(self.data_dir)
+        # 8. 自动预热: 启动后与插件条目变化时提前把四张静态图编进缓存
         self.prewarm = PrewarmService(
             renderer=self.renderer,
             provider_getter=self._build_static_provider,
@@ -448,23 +496,33 @@ class HelpTypst(Star):
             logger.warning(f"[HelpTypst] 获取人格名称失败: {e}")
             return ""
 
+    @staticmethod
+    def _detail_label(query: Query) -> str | None:
+        """详情意图的定位符 (用于空结果提示); 非详情返回 None"""
+        if query.intent is QueryIntent.DETAIL_ORDER:
+            return f"#{query.value}"
+        if query.intent is QueryIntent.DETAIL_NAME:
+            return f"@{query.value}"
+        return None
+
     async def _handle_request(
         self,
         event: AstrMessageEvent,
         mode: str,
-        query: str | None,
-        is_detail: bool = False,
+        query: Query,
+        order_lookup: Callable[[int], str | None] | None = None,
     ) -> AsyncGenerator[MessageEventResult, None]:
         """通用请求处理逻辑 (分析器与标题统一取自 _STATIC_PANELS)"""
         panel = _STATIC_PANELS[mode]
         analyzer: BaseAnalyzer = getattr(self, panel.analyzer_attr)
         wait_msg_id = None
+        search_keyword = query.search_keyword
 
         if self.plugin_config.enable_waiting_message:
             # 1. 发送提示
             hint_text = (
-                self.hint.msg_searching(query)
-                if query and not is_detail
+                self.hint.msg_searching(search_keyword)
+                if search_keyword
                 else self.hint.msg_rendering(mode)
             )
             wait_msg_id = await self.msg.send_wait(event, hint_text)
@@ -476,15 +534,17 @@ class HelpTypst(Star):
             title=panel.title,
             mode=mode,
             query=query,
-            is_detail=is_detail,
             layout=self.layout,
             font_order=self.plugin_config.appearance.get_active_font_order(),
             persona_name=persona_name,
+            order_lookup=order_lookup,
         )
 
         # 2. 执行渲染
-        result, error = await self.renderer.render(data_pipeline, mode, query)
-        if result is not None and query is None:
+        result, error = await self.renderer.render(
+            data_pipeline, mode, search_keyword
+        )
+        if result is not None and search_keyword is None:
             # 走静态缓存的请求顺带核对一次插件条目: 别的机器刚装/停用了插件时,
             # 这次请求就是最早的信号, 不必干等下一次轮询
             self.prewarm.notify_change("请求后检查")
@@ -503,7 +563,10 @@ class HelpTypst(Star):
             else:
                 # 错误处理
                 if error == RenderFailure.EMPTY:
-                    yield event.plain_result(self.hint.msg_empty_result(mode, query))
+                    detail = self._detail_label(query)
+                    yield event.plain_result(
+                        self.hint.msg_empty_result(mode, search_keyword, detail)
+                    )
                 else:
                     yield event.plain_result(error)
         finally:
@@ -520,36 +583,53 @@ class HelpTypst(Star):
         analyzer: BaseAnalyzer,
         title: str,
         mode: str,
-        query: str | None,
-        is_detail: bool,
+        query: Query,
         layout: TypstLayout,
         font_order: list[str],
         persona_name: str,
+        order_lookup: Callable[[int], str | None] | None = None,
+        record_orders: bool = False,
     ) -> Callable[[Path], int]:
         """构造「分析 → 布局 JSON」数据流
 
         指令与网页预览共用这段逻辑；预览使用自己的临时布局与字体，
         因此 layout / font_order / persona_name 全部显式传入，不读 self。
+
+        order_lookup: 引用回复里数字的解析入口 (查发图那一刻的编号快照);
+        为 None 或查不到时按当前面板的编号解析。
+        record_orders: 全量面板出图后记录「编号 → 插件名」快照。只有正式出图要记,
+        预览页用临时样式渲染, 记下来会把快照带偏。
         """
 
+        def _resolve_detail(target: Query) -> list[PluginMetadata]:
+            """详情意图 → 单个插件
+
+            按编号时先问快照: 用户引用的是旧图, 编号可能已被后来的重排换过插件。
+            快照命中但插件已卸载时返回空列表 (而不是拿当前编号硬凑一个别的插件)。
+            """
+            if target.intent is QueryIntent.DETAIL_NAME:
+                return analyzer.get_plugin_by_name(target.value or "")
+            order_text = target.value or ""
+            if not order_text.isdigit():
+                return []
+            order = int(order_text)
+            snapshot_name = order_lookup(order) if order_lookup else None
+            if snapshot_name:
+                return analyzer.get_plugin_by_name(snapshot_name)
+            return analyzer.get_plugin_by_order(order)
+
         def data_pipeline(save_path: Path) -> int:
-            # 数据层：获取对象。意图已由 _parse_menu_query 判定, 此处不再按内容猜测:
-            # 编号详情走显式 API, 关键词搜索/全量走 get_plugins
-            if is_detail:
-                try:
-                    order = int(query or "")
-                except ValueError:
-                    # 纯数字分支之外理论上不会传进来; 转换失败按空结果处理
-                    return 0
-                plugins = analyzer.get_plugin_by_order(order)
+            # 数据层：获取对象。意图已在解析阶段判定, 此处不再按内容猜测
+            if query.is_detail:
+                plugins = _resolve_detail(query)
             else:
-                plugins = analyzer.get_plugins(query)
+                plugins = analyzer.get_plugins(query.search_keyword)
             if not plugins:
                 return 0
 
             # 视图层：决定标题 & 计算布局 & 写入JSON
-            if is_detail:
-                # 数字定位 → 单插件详情页
+            if query.is_detail:
+                # 编号/插件名定位 → 单插件详情页
                 display_title = plugins[0].display_name or plugins[0].name
                 layout_mode = "plugin_detail"
                 # 附加该插件的事件监听器 (含命令式监听); 失败只丢监听区, 不让整页失败
@@ -561,7 +641,8 @@ class HelpTypst(Star):
                     logger.warning(f"[HelpTypst] 获取事件监听失败: {e}")
                     plugins[0].event_nodes = []
             else:
-                display_title = f'搜索结果: "{query}"' if query else title
+                keyword = query.search_keyword
+                display_title = f'搜索结果: "{keyword}"' if keyword else title
                 layout_mode = mode
                 # 详细指令模式: 为每个插件附加事件监听器
                 if layout_mode == "command_detail":
@@ -587,6 +668,13 @@ class HelpTypst(Star):
                 font_list=final_font_list,
                 system_name=persona_name,
             )
+            # 快照只记「全量面板」: 搜索结果与详情页的编号是子集, 不能当全局编号用
+            if (
+                record_orders
+                and query.intent is QueryIntent.FULL
+                and layout_mode in InternalCFG.CACHE_FILES
+            ):
+                self.order_index.record(layout_mode, plugins)
 
             return len(plugins)
 
@@ -608,11 +696,11 @@ class HelpTypst(Star):
             analyzer=analyzer,
             title=panel.title,
             mode=mode,
-            query=None,
-            is_detail=False,
+            query=FULL_QUERY,
             layout=self.layout,
             font_order=self.plugin_config.appearance.get_active_font_order(),
             persona_name=persona_name,
+            record_orders=True,
         )
 
     def _plugin_fingerprint(self) -> str:
@@ -647,12 +735,13 @@ class HelpTypst(Star):
         else:
             raise ValueError(f"不支持的预览模式: {mode}")
 
+        # 预览页只做关键词搜索, 不参与编号/插件名详情, 因此不记录编号快照
+        preview_query = Query(QueryIntent.SEARCH, query) if query else FULL_QUERY
         return self._make_data_pipeline(
             analyzer=analyzer,
             title=title,
             mode=mode,
-            query=query,
-            is_detail=False,
+            query=preview_query,
             layout=layout,
             font_order=font_order,
             persona_name=persona_name,
@@ -939,56 +1028,86 @@ class HelpTypst(Star):
             logger.warning(f"[HelpTypst] 获取唤醒词失败，使用默认值 '/': {e}")
             self.prefixes = ["/"]
 
-    def _parse_search_query(self, raw_query: str) -> str | None:
-        """解析 `s <关键词>` 搜索子命令: 命中返回关键词, 否则返回 None(不搜索)"""
-        query = raw_query.strip()
-        if not query or query == "s":
-            return None
-        if query.startswith("s "):
-            keyword = query[2:].strip()
-            return keyword or None
-        return None
+    # ---- 引用回复快捷查询 ----
 
-    def _parse_menu_query(self, raw_query: str) -> tuple[str | None, bool]:
-        """解析参数: 返回 (搜索关键词, 是否详情页)
+    @staticmethod
+    def _quoted_text(event: AstrMessageEvent) -> str:
+        """被引用消息的纯文本 (取不到返回空串)
 
-        - `s <关键词>` → 搜索模式
-        - `<数字>`     → 指定插件详情页
-        - 空/其它      → 完整菜单
+        OneBot 适配器会通过 get_msg 把被引用消息补全成 Reply.message_str;
+        部分平台只给 id, 此时只能拿到空串, 由调用方回落到当前编号。
         """
-        query = raw_query.strip()
-        if not query:
-            return None, False
-        if query.isdigit():
-            return query, True
-        return self._parse_search_query(query), False
+        for comp in event.get_messages():
+            if isinstance(comp, Reply):
+                text = comp.message_str or ""
+                if text.strip():
+                    return text
+                # 旧字段/平台差异: 有的适配器只填 text
+                return str(comp.text or "")
+        return ""
+
+    def _resolve_quoted_order(
+        self, event: AstrMessageEvent, raw_text: str
+    ) -> str | None:
+        """引用场景下要用的编号: 优先本次消息里的数字, 其次被引用消息里的数字
+
+        被引用的如果是面板图本身, 文本里没有编号; 用户回的「12」就是编号。
+        """
+        direct = find_quoted_order(raw_text)
+        if direct:
+            return direct
+        return find_quoted_order(self._quoted_text(event))
+
+    async def _dispatch_query(
+        self, event: AstrMessageEvent, mode: str, query: Query
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        """指令入口: 按意图分发 (编号按当前面板解析, 不查快照)"""
+        async for r in self._handle_request(event, mode, query):
+            yield r
 
     @filter.command("helps", alias={"功能", "菜单", "帮助"})
     async def show_menu(self, event: AstrMessageEvent, query: GreedyStr):
         """显示指令菜单"""
-        keyword, is_detail = self._parse_menu_query(query)
-        async for r in self._handle_request(event, "command", keyword, is_detail):
+        async for r in self._dispatch_query(event, "command", parse_query(query)):
             yield r
 
     @filter.command("helpss", alias={"详细帮助", "详细功能", "详细菜单"})
     async def show_menu_detail(self, event: AstrMessageEvent, query: GreedyStr):
         """显示详细指令菜单 (含指令标签组)"""
-        keyword, is_detail = self._parse_menu_query(query)
-        async for r in self._handle_request(
-            event, "command_detail", keyword, is_detail
+        async for r in self._dispatch_query(
+            event, "command_detail", parse_query(query)
         ):
             yield r
 
     @filter.command("events", alias={"事件", "事件监听"})
     async def show_events(self, event: AstrMessageEvent, query: GreedyStr):
         """显示事件监听列表"""
-        keyword = self._parse_search_query(query)
-        async for r in self._handle_request(event, "event", keyword):
+        async for r in self._dispatch_query(event, "event", parse_query(query)):
             yield r
 
     @filter.command("filters", alias={"过滤器", "过滤"})
     async def show_filters(self, event: AstrMessageEvent, query: GreedyStr):
         """显示过滤器详情"""
-        keyword = self._parse_search_query(query)
-        async for r in self._handle_request(event, "filter", keyword):
+        async for r in self._dispatch_query(event, "filter", parse_query(query)):
+            yield r
+
+    @filter.custom_filter(QuoteOrderFilter)
+    async def on_quote_reply(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        """引用面板图 + 回复数字 → 直接出该插件详情
+
+        只接管「引用回复且整条消息只有一个编号」的形态: 其它引用内容 (闲聊、别的
+        指令) 一律放行, 免得插件把群里所有带引用的对话都吃掉。
+        """
+        quoted_order = self._resolve_quoted_order(event, _plain_text(event))
+        if not quoted_order:
+            return
+        async for r in self._handle_request(
+            event,
+            "command",
+            Query(QueryIntent.DETAIL_ORDER, quoted_order),
+            # 数字指的是「那张图」上的编号: 查发图那一刻的快照, 而不是当前重排后的编号
+            order_lookup=lambda order: self.order_index.lookup("command", order),
+        ):
             yield r

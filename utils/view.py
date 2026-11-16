@@ -27,7 +27,19 @@ class HelpHint:
     def msg_rendering(self, mode: str) -> str:
         return "正在渲染..." if mode == "command" else "正在获取列表..."
 
-    def msg_empty_result(self, mode: str, query: str | None) -> str:
+    def msg_empty_result(
+        self,
+        mode: str,
+        query: str | None,
+        detail: str | None = None,
+    ) -> str:
+        """空结果提示
+
+        detail 是详情意图的定位符 (编号或插件名): 详情查不到与「面板没有内容」是
+        两回事, 提示要能直接指出是哪个编号/名字不存在。
+        """
+        if detail:
+            return f"未找到插件 {detail}，可能已被卸载或屏蔽。发 /helps 重新查看编号。"
         target = "事件监听器" if mode == "event" else "插件或指令"
         if query:
             return f"未找到包含 '{query}' 的{target}。"

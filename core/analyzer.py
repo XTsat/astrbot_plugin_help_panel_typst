@@ -248,6 +248,33 @@ class BaseAnalyzer:
             logger.error(f"[HelpTypst] 按编号 {order} 分析失败: {e}", exc_info=True)
             return []
 
+    def get_plugin_by_name(self, name: str) -> list[PluginMetadata]:
+        """按插件名精确定位单个插件 (与编号一样是「稳定引用」, 不受重排影响)
+
+        匹配口径从窄到宽: 插件 ID 精确 → 展示名精确 → 名称/展示名大小写不敏感。
+        都未命中时返回空列表, 由调用方决定是否回落到关键词搜索。
+        """
+        target = (name or "").strip()
+        if not target:
+            return []
+        try:
+            plugins = self.analyze_hierarchy()
+        except Exception as e:
+            logger.error(f"[HelpTypst] 按插件名 {name} 分析失败: {e}", exc_info=True)
+            return []
+        lowered = target.lower()
+        for predicate in (
+            lambda p: p.name == target,
+            lambda p: (p.display_name or "") == target,
+            lambda p: (
+                p.name.lower() == lowered or (p.display_name or "").lower() == lowered
+            ),
+        ):
+            for p in plugins:
+                if predicate(p):
+                    return [p]
+        return []
+
     def _is_container_match(self, plugin: PluginMetadata, query: str) -> bool:
         """容器匹配: 可见标题 (display_name, 无则回落 name) + 描述
 

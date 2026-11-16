@@ -63,6 +63,7 @@ utils/               # [通用工具层] 禁止 import core/ 或 main
   font.py            #   FontManager：字体扫描、schema 同步、字体列表清洗
   image.py           #   图片头/扩展名校验、尺寸读取、PNG → WebP 切片
   schema.py          #   运行时同步插件屏蔽项下拉（字体下拉在 font.py）
+  query.py           #   查询意图解析：编号 / @插件名 / s 关键词 / 引用消息里的编号
   view.py            #   HelpHint(文案) / MsgRecall(发送撤回) / TypstLayout(布局 JSON)
 core/                # [核心业务层] 纯 Python 逻辑
   analyzer.py        #   BaseAnalyzer + Command/Event/Filter 分析器（组装 RenderNode 树）
@@ -70,6 +71,7 @@ core/                # [核心业务层] 纯 Python 逻辑
   worker.py          #   RenderTask + execute_render_task（typst.compile，即用即销）
   preview.py         #   PreviewService：样式预览页的取数、试渲染、应用配置与内存缓存
   prewarm.py         #   PrewarmService：启动后与插件条目变化时的静态缓存预热（后台任务 + 指纹比对）
+  order_index.py     #   OrderSnapshotStore：「编号 → 插件名」快照（引用回复按发图那一刻的编号解析）
 templates/base.typ   # 渲染模板
 pages/preview/       # 样式预览页静态资源（app.js / index.html / style.css）
 .astrbot-plugin/     # 插件元数据与多语言文案（i18n/）
@@ -89,6 +91,7 @@ fonts/        # 自定义字体目录（custom_font_path 留空时使用）
 backgrounds/  # 缺省背景图目录；安装时自动导入 resources/images 中的栅格图，已存在文件不覆盖
 cache_menu_{command,command_detail,event,filter}.json/.png/.webp(_partN)   # 静态缓存
 temp_<uuid>.json/.png/.webp(_partN)                                        # 搜索/详情临时文件
+order_index.json                                                           # 各静态面板最近一次的「编号 → 插件名」快照
 ```
 
 - 插件初始化时：扫描字体、同步内存 Schema（字体/预设/屏蔽插件下拉）、清洗非法字体选项、导入内置背景图。
@@ -108,15 +111,19 @@ temp_<uuid>.json/.png/.webp(_partN)                                        # 搜
 ### 2.4 核心数据流
 
 ```
-/helps|/helpss|/events|/filters [编号 | s 关键词]
-  └─ main.HelpTypst._handle_request(event, mode, query, is_detail)   # 分析器/标题取自 _STATIC_PANELS
+/helps|/helpss|/events|/filters [编号 | @插件名 | s 关键词]
+  ├─ utils/query.parse_query(...) → Query(intent, value)            # 意图解析, 不再按内容猜测
+  └─ main.HelpTypst._handle_request(event, mode, query, order_lookup)  # 分析器/标题取自 _STATIC_PANELS
        ├─ _get_persona_name()                 # Hero 统计第三列（失败返回空串，不影响渲染）
        ├─ data_pipeline(save_path)            # 经 asyncio.to_thread 执行
+       │    ├─ order_lookup(n) → 插件名 → get_plugin_by_name()  # 引用场景: 按发图那一刻的编号
        │    ├─ analyzer.get_plugin_by_order(n)    # 编号详情 → 按全局 order 精确命中（main 已判定意图）
+       │    ├─ analyzer.get_plugin_by_name(name)  # @插件名详情 → ID/展示名精确命中
        │    ├─ analyzer.get_plugins(query)        # 关键词 → 插件/节点递归剪枝；无参 → 全量
        │    ├─ (详情 / 详细模式) event_analyzer.get_plugin_event_listeners(...)
        │    ├─ font_manager.get_render_font_list(font_order)
        │    └─ layout.dump_layout_json(...)   # 标题/布局/颜色/字体/人格名 → JSON 落盘
+       │         └─ 全量面板出图后 order_index.record(mode, plugins)  # 刷新编号快照
        └─ renderer.render(data_pipeline, mode, query)
             ├─ query 非空 → temp_<uuid> 临时路径：不读写缓存，发送后延迟清理
             └─ query 为空 → cache_menu_* 静态路径：
@@ -367,8 +374,8 @@ async def cmd_scan_fonts(self, event: AstrMessageEvent) -> ...:
     ...
 ```
 
-- 参数用 `GreedyStr` 接收剩余文本；搜索统一 `s <关键词>` 子命令，编号详情只按全局 `order` 精确命中。
-- 本插件**不注册事件监听器**（只分析其它插件的事件）；如后续需要，使用 `@filter.event_message_type(...)` 并在文档中同步说明。
+- 参数用 `GreedyStr` 接收剩余文本，统一交给 `utils/query.parse_query()` 判意图（`s <关键词>` 搜索 / `@插件名` 名称详情 / `<数字>` 编号详情）；编号详情按全局 `order` 精确命中，引用场景先查编号快照。
+- 本插件**只注册一个事件处理器**：`on_quote_reply` + `QuoteOrderFilter`，用于「引用面板图 + 只回一个数字」的快捷详情。过滤器必须保持严格（有 Reply 段且本次消息只含 1~4 位数字），放宽会截胡群里正常的引用对话。除此之外不监听其它事件；新增监听器需在此处与命令清单同步说明。
 
 ### 6.2 README 命令表格式
 
@@ -385,14 +392,17 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 |---|---|---|
 | `/helps` | 任意 | 卡片式帮助面板（别名：`/功能`、`/菜单`、`/帮助`） |
 | `/helps <编号>` | 任意 | 指定插件详情页（作者/版本/简介/管理员指令/普通指令/事件监听） |
+| `/helps @插件名` | 任意 | 按插件名（ID 或展示名，不区分大小写）看详情；名称类稳定引用 |
 | `/helps s <关键词>` | 任意 | 搜索指令（关键词高亮） |
-| `/helpss` | 任意 | 详细帮助面板，插件下展开指令标签组（别名：`/详细帮助`、`/详细功能`、`/详细菜单`）；同样支持 `<编号>` 与 `s <关键词>` |
+| `/helpss` | 任意 | 详细帮助面板，插件下展开指令标签组（别名：`/详细帮助`、`/详细功能`、`/详细菜单`）；同样支持 `<编号>`、`@插件名` 与 `s <关键词>` |
+| 引用面板图 + 纯数字 | 任意 | 直接回复面板图只发一个数字 → 该编号的插件详情；编号按「那张图」的快照解析 |
 | `/events [s <关键词>]` | 任意 | 事件监听 + 函数工具（含 MCP）列表（别名：`/事件`、`/事件监听`） |
 | `/filters [s <关键词>]` | 任意 | 过滤器详情（别名：`/过滤器`、`/过滤`） |
 | `/typst font` | 管理员 | 扫描字体并自重载插件 |
 | `/typst warm` | 管理员 | 立即预热四个静态面板的缓存图 |
 
-> `<编号>` 详情仅 `/helps` 与 `/helpss` 支持；`/events`、`/filters` 只接受 `s <关键词>` 搜索。
+> `<编号>` / `@插件名` 详情仅 `/helps` 与 `/helpss` 支持；`/events`、`/filters` 只接受 `s <关键词>` 搜索。
+> 引用回复入口由 `QuoteOrderFilter` 收窄到「引用了某条消息 + 本次消息只含一个 1~4 位数字」，避免截胡群里正常的引用对话。
 
 ---
 

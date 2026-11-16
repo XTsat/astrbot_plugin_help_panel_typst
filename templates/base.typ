@@ -489,6 +489,10 @@
   let search_hint = "以上指令都可以在末尾追加 s <关键词> 搜索，例如 " + primary_prefix + "events s 天气"
   v(5pt)
   align(center, text(size: 8pt, fill: c_gray, search_hint))
+  // 详情有两种稳定入口: 引用本图回编号 (按图上的编号), 或直接 @插件名
+  let detail_hint = "看详情: 回复本图 + 编号，或 " + primary_prefix + "helps @插件名"
+  v(2pt)
+  align(center, text(size: 8pt, fill: c_gray, detail_hint))
 }
 
 // ============================================================
