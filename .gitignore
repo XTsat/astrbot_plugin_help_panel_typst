@@ -214,3 +214,7 @@ __marimo__/
 
 # 本地审查报告（不入库）
 review/
+
+# 无人值守运行的过程稿：本地留存、不入库
+RUN_LOG.md
+RUN_REPORT.md
