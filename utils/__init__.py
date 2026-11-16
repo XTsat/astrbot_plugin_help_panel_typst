@@ -14,6 +14,7 @@ from .query import (
     QueryIntent,
     find_quoted_order,
     join_plain_parts,
+    panel_of_quoted_command,
     parse_order_token,
     parse_query,
 )
@@ -35,5 +36,6 @@ __all__ = [
     "parse_query",
     "join_plain_parts",
     "parse_order_token",
+    "panel_of_quoted_command",
     "find_quoted_order",
 ]

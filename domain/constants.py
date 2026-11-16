@@ -423,6 +423,24 @@ class InternalCFG:
     QUOTE_ORDER_MAX_DIGITS: int = 4
     # 插件名稳定查询前缀: /helps @插件名
     PLUGIN_REF_PREFIX: str = "@"
+    # 引用回复时按被引用的指令判断是哪张面板: 指令名 → 静态模式
+    # (别名也登记, 用户可能用 /菜单 之类的别名发图; 顺序无关, 只做全串匹配)
+    QUOTE_PANEL_COMMANDS: dict[str, str] = {
+        "helps": "command",
+        "功能": "command",
+        "菜单": "command",
+        "帮助": "command",
+        "helpss": "command_detail",
+        "详细帮助": "command_detail",
+        "详细功能": "command_detail",
+        "详细菜单": "command_detail",
+        "events": "event",
+        "事件": "event",
+        "事件监听": "event",
+        "filters": "filter",
+        "过滤器": "filter",
+        "过滤": "filter",
+    }
 
     # 分类 (指令模式 /helps) 相关
     # 兜底分类名: 配置缺失/异常时的最终保底 (正常运行时使用 DefaultCFG.DEFAULT_CATEGORY_FALLBACK,

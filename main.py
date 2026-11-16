@@ -29,6 +29,7 @@ from .utils import (
     TypstLayout,
     find_quoted_order,
     join_plain_parts,
+    panel_of_quoted_command,
     parse_order_token,
     parse_query,
     sync_plugin_options,
@@ -1109,11 +1110,13 @@ class HelpTypst(Star):
         quoted_order = self._resolve_quoted_order(event, _plain_text(event))
         if not quoted_order:
             return
+        # 编号属于被引用的那张面板: 引用 /helpss 的图要打开详细面板, 快照也要按该面板查
+        mode = panel_of_quoted_command(self._quoted_text(event), self.prefixes) or "command"
         async for r in self._handle_request(
             event,
-            "command",
+            mode,
             Query(QueryIntent.DETAIL_ORDER, quoted_order),
             # 数字指的是「那张图」上的编号: 查发图那一刻的快照, 而不是当前重排后的编号
-            order_lookup=lambda order: self.order_index.lookup("command", order),
+            order_lookup=lambda order: self.order_index.lookup(mode, order),
         ):
             yield r

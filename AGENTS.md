@@ -124,16 +124,18 @@ order_index.json                                                           # 各
        │    ├─ font_manager.get_render_font_list(font_order)
        │    └─ layout.dump_layout_json(...)   # 标题/布局/颜色/字体/人格名 → JSON 落盘
        │         └─ 全量面板出图后 order_index.record(mode, plugins)  # 刷新编号快照
-       └─ renderer.render(data_pipeline, mode, query)
-            ├─ query 非空 → temp_<uuid> 临时路径：不读写缓存，发送后延迟清理
-            └─ query 为空 → cache_menu_* 静态路径：
+       └─ renderer.render(data_pipeline, mode, 搜索关键词, force_temp=意图是详情)
+            ├─ 详情 / 搜索 / force_temp → temp_<uuid> 临时路径：不读写缓存，发送后延迟清理
+            └─ 只有全量面板 → cache_menu_* 静态路径：
                  ├─ _check_cache（内容 hash + 配置快照 + PNG 头有效性）命中 → 直接返回 WebP
                  └─ 未命中 → RenderTask → ProcessPoolExecutor(1)（全局信号量 + timeout_compile）
                              → typst.compile → process_image_to_webp（quality=80，超高图切 _partN）
                              → 原子替换为 cache_menu_* → 写 AstrBot KV：typst_cache_{mode}
 ```
 
-**布局模式与缓存模式是两回事**：`plugin_detail` 是「编号」详情页的布局模式，走临时路径、不进静态缓存；静态缓存只对应 `command` / `command_detail` / `event` / `filter` 四种。
+**布局模式与缓存模式是两回事**：`plugin_detail` 是「编号 / 插件名」详情页的布局模式，走临时路径、不进静态缓存；静态缓存只对应 `command` / `command_detail` / `event` / `filter` 四种。
+
+**详情必须传 `force_temp=True`**：详情页没有搜索词，若按「关键词为空 = 静态」处理，渲染器会把 `cache_menu_*` 覆盖成详情图，下一次打开面板拿到的就是上一个插件的详情。判断依据只能是意图（`Query.intent`），不要退回「query 是否为空」。
 
 **自动预热**（`core/prewarm.py`）：后台任务走与指令完全相同的数据流（`_build_static_provider` → `_make_data_pipeline` → `renderer.render(..., mode)`），因此预热产物与用户请求产物一致。启动后延迟 `InternalCFG.PREWARM_STARTUP_DELAY` 预热一轮，之后每 `prewarm_interval` 分钟比对插件条目指纹（`compute_plugin_fingerprint`：已安装插件 + 全部 handler），指纹变了才重编；`/typst warm` 可手动强制一轮。指纹只决定「值不值得跑」，内容是否需要重编仍由 `_check_cache` 判定，不要在预热里另建一套缓存判断。
 
@@ -395,7 +397,7 @@ README 中的命令表统一为「命令 / 权限 / 说明」三列：
 | `/helps @插件名` | 任意 | 按插件名（ID 或展示名，不区分大小写）看详情；名称类稳定引用 |
 | `/helps s <关键词>` | 任意 | 搜索指令（关键词高亮） |
 | `/helpss` | 任意 | 详细帮助面板，插件下展开指令标签组（别名：`/详细帮助`、`/详细功能`、`/详细菜单`）；同样支持 `<编号>`、`@插件名` 与 `s <关键词>` |
-| 引用面板图 + 纯数字 | 任意 | 直接回复面板图只发一个数字 → 该编号的插件详情；编号按「那张图」的快照解析 |
+| 引用面板图 + 纯数字 | 任意 | 直接回复面板图只发一个数字 → 该编号的插件详情；面板按被引用的指令判定（`/helps`、`/helpss`、`/events`、`/filters` 及其别名），编号按「那张图」的快照解析 |
 | `/events [s <关键词>]` | 任意 | 事件监听 + 函数工具（含 MCP）列表（别名：`/事件`、`/事件监听`） |
 | `/filters [s <关键词>]` | 任意 | 过滤器详情（别名：`/过滤器`、`/过滤`） |
 | `/typst font` | 管理员 | 扫描字体并自重载插件 |
