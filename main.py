@@ -541,10 +541,16 @@ class HelpTypst(Star):
         )
 
         # 2. 执行渲染
+        # 详情页必须走临时路径: 它的布局与全量面板不同, 落到静态缓存名上会把
+        # cache_menu_* 覆盖成详情图, 下一次 /helps 就拿不到真正的面板
+        is_static = query.intent is QueryIntent.FULL
         result, error = await self.renderer.render(
-            data_pipeline, mode, search_keyword
+            data_pipeline,
+            mode,
+            search_keyword,
+            force_temp=query.is_detail,
         )
-        if result is not None and search_keyword is None:
+        if result is not None and is_static:
             # 走静态缓存的请求顺带核对一次插件条目: 别的机器刚装/停用了插件时,
             # 这次请求就是最早的信号, 不必干等下一次轮询
             self.prewarm.notify_change("请求后检查")
