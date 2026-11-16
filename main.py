@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,6 +196,8 @@ class HelpTypst(Star):
         )
         # 7. 编号快照: 引用回复里的数字按「发图那一刻」的编号解析
         self.order_index = OrderSnapshotStore(self.data_dir)
+        # 7.1 会话 → 最近一次发出的面板: 面板图是纯图片, 被引用消息没有文字可反推是哪张图
+        self._panel_memo: dict[str, tuple[str, float]] = {}
         # 8. 自动预热: 启动后与插件条目变化时提前把四张静态图编进缓存
         self.prewarm = PrewarmService(
             renderer=self.renderer,
@@ -506,6 +509,41 @@ class HelpTypst(Star):
             return f"@{query.value}"
         return None
 
+    # ---- 会话面板记忆 ----
+
+    def _remember_panel(self, event: AstrMessageEvent, mode: str) -> None:
+        """记下本会话刚发出的面板
+
+        面板图是纯图片, 用户引用它时拿不到任何文字, 无法从消息本身判断是哪张图;
+        只能按「这个会话最近发过哪张」反推。同时清理过期项, 避免长期运行堆积。
+        """
+        key = event.unified_msg_origin
+        now = time.monotonic()
+        self._panel_memo[key] = (mode, now)
+        if len(self._panel_memo) <= InternalCFG.PANEL_MEMO_MAX_SESSIONS:
+            return
+        for k, (_, ts) in list(self._panel_memo.items()):
+            if now - ts > InternalCFG.PANEL_MEMO_TTL:
+                self._panel_memo.pop(k, None)
+        # 仍然超量: 按时间从旧到新丢, 保留最近的那批
+        if len(self._panel_memo) > InternalCFG.PANEL_MEMO_MAX_SESSIONS:
+            keep = InternalCFG.PANEL_MEMO_MAX_SESSIONS
+            for k, _ in sorted(self._panel_memo.items(), key=lambda kv: kv[1][1])[
+                : len(self._panel_memo) - keep
+            ]:
+                self._panel_memo.pop(k, None)
+
+    def _last_panel_mode(self, event: AstrMessageEvent) -> str | None:
+        """本会话最近发出的面板模式; 过期或没发过返回 None"""
+        entry = self._panel_memo.get(event.unified_msg_origin)
+        if not entry:
+            return None
+        mode, ts = entry
+        if time.monotonic() - ts > InternalCFG.PANEL_MEMO_TTL:
+            self._panel_memo.pop(event.unified_msg_origin, None)
+            return None
+        return mode
+
     async def _handle_request(
         self,
         event: AstrMessageEvent,
@@ -559,6 +597,8 @@ class HelpTypst(Star):
         # 3. 处理结果; 等待提示在结果发出后撤回 (finally), 避免用户先等一次撤回延迟
         try:
             if result:
+                # 发出的是纯图片面板: 记住本会话刚发的是哪张, 供之后的「引用 + 数字」反推
+                self._remember_panel(event, mode)
                 try:
                     yield event.chain_result(
                         [Image.fromFileSystem(p) for p in result.images]
@@ -1110,8 +1150,14 @@ class HelpTypst(Star):
         quoted_order = self._resolve_quoted_order(event, _plain_text(event))
         if not quoted_order:
             return
-        # 编号属于被引用的那张面板: 引用 /helpss 的图要打开详细面板, 快照也要按该面板查
-        mode = panel_of_quoted_command(self._quoted_text(event), self.prefixes) or "command"
+        # 编号属于被引用的那张面板: 引用 /helpss 的图要打开详细面板, 快照也要按该面板查。
+        # 面板图是纯图片, 被引用消息里通常没有文字, 所以先看本会话刚发过哪张;
+        # 只有用户引用的是「指令文本消息」时, 被引用文字里才带得出指令名。
+        mode = (
+            self._last_panel_mode(event)
+            or panel_of_quoted_command(self._quoted_text(event), self.prefixes)
+            or "command"
+        )
         if mode not in InternalCFG.PLUGIN_ORDER_MODES:
             # 事件/过滤器面板的编号是事件分组, 不是插件: 回数字没有插件可打开。
             # 明确回一句而不是静默放行, 否则私聊里这条消息会掉进 LLM 被当成闲聊

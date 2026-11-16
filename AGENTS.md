@@ -378,6 +378,7 @@ async def cmd_scan_fonts(self, event: AstrMessageEvent) -> ...:
 
 - 参数用 `GreedyStr` 接收剩余文本，统一交给 `utils/query.parse_query()` 判意图（`s <关键词>` 搜索 / `@插件名` 名称详情 / `<数字>` 编号详情）；编号详情按全局 `order` 精确命中，引用场景先查编号快照。
 - 本插件**只注册一个事件处理器**：`on_quote_reply` + `QuoteOrderFilter`，用于「引用面板图 + 只回一个数字」的快捷详情。过滤器必须保持严格（有 Reply 段且本次消息只含 1~4 位数字），放宽会截胡群里正常的引用对话。除此之外不监听其它事件；新增监听器需在此处与命令清单同步说明。
+- 面板图是**纯图片**（`chain_result` 只带 `Image`），被引用消息里没有文字可反推是哪张面板，所以 `_panel_memo` 按 `unified_msg_origin` 记住「本会话最近发出的面板模式」（TTL `PANEL_MEMO_TTL`、上限 `PANEL_MEMO_MAX_SESSIONS`）。判断顺序：会话记忆 → 被引用指令文本 → 默认 `command`。不要把它改成「解析被引用文本」，那条路只有用户引用指令文本消息时才通。
 
 ### 6.2 README 命令表格式
 

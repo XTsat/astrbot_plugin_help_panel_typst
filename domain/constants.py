@@ -426,6 +426,10 @@ class InternalCFG:
     # 编号能定位到「单个插件」的面板: 只有这两张的编号是插件编号
     # (事件/过滤器面板的编号是事件分组, 引用它们回数字没有插件可打开)
     PLUGIN_ORDER_MODES: tuple[str, ...] = ("command", "command_detail")
+    # 会话 → 最近一次发出的面板: 面板图是纯图片, 被引用消息里没有文字可反推面板,
+    # 只能靠「这个会话刚发过哪张图」判断。上限与 TTL 防止长期运行无限增长。
+    PANEL_MEMO_MAX_SESSIONS: int = 128
+    PANEL_MEMO_TTL: float = 3600.0
     # 引用回复时按被引用的指令判断是哪张面板: 指令名 → 静态模式
     # (别名也登记, 用户可能用 /菜单 之类的别名发图; 顺序无关, 只做全串匹配)
     QUOTE_PANEL_COMMANDS: dict[str, str] = {
