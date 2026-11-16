@@ -1112,6 +1112,15 @@ class HelpTypst(Star):
             return
         # 编号属于被引用的那张面板: 引用 /helpss 的图要打开详细面板, 快照也要按该面板查
         mode = panel_of_quoted_command(self._quoted_text(event), self.prefixes) or "command"
+        if mode not in InternalCFG.PLUGIN_ORDER_MODES:
+            # 事件/过滤器面板的编号是事件分组, 不是插件: 回数字没有插件可打开。
+            # 明确回一句而不是静默放行, 否则私聊里这条消息会掉进 LLM 被当成闲聊
+            yield event.plain_result(
+                "⚠️ 事件 / 过滤器面板的编号是分组编号，不支持按编号看插件详情。"
+                f"请引用 {self.prefixes[0] if self.prefixes else '/'}helps 面板图，"
+                "或用 /helps @插件名 查询。"
+            )
+            return
         async for r in self._handle_request(
             event,
             mode,

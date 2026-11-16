@@ -423,6 +423,9 @@ class InternalCFG:
     QUOTE_ORDER_MAX_DIGITS: int = 4
     # 插件名稳定查询前缀: /helps @插件名
     PLUGIN_REF_PREFIX: str = "@"
+    # 编号能定位到「单个插件」的面板: 只有这两张的编号是插件编号
+    # (事件/过滤器面板的编号是事件分组, 引用它们回数字没有插件可打开)
+    PLUGIN_ORDER_MODES: tuple[str, ...] = ("command", "command_detail")
     # 引用回复时按被引用的指令判断是哪张面板: 指令名 → 静态模式
     # (别名也登记, 用户可能用 /菜单 之类的别名发图; 顺序无关, 只做全串匹配)
     QUOTE_PANEL_COMMANDS: dict[str, str] = {
