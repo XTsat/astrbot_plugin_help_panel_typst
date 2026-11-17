@@ -182,6 +182,16 @@ class InternalCFG:
     PREVIEW_CUSTOM_PRESET_HARD_MAX: int = 64
     PREVIEW_PRESET_NAME_MAX: int = 20
 
+    # 样式导出/导入: 一个 JSON 承载「主题 + 分类规则 + 版式」, 便于整包备份与分享。
+    # 版本号写进文件头, 导入时据此判断能否直接读取, 不猜字段。
+    STYLE_EXPORT_SCHEMA_VERSION: int = 1
+    STYLE_EXPORT_KIND: str = "astrbot_help_panel_typst.style"
+    STYLE_EXPORT_FILE_PREFIX: str = "help-panel-style"
+    # 导入文件体积上限: 正常样式包只有几 KB, 超过 1 MiB 基本是选错文件
+    STYLE_EXPORT_MAX_BYTES: int = 1024 * 1024
+    STYLE_EXPORT_MAX_PRESETS: int = PREVIEW_CUSTOM_PRESET_HARD_MAX
+    STYLE_EXPORT_NAME_MAX: int = 40
+
     # 预览页分类编辑器: 与配置面板 category 一一对应, 但只做预览态校验, 落盘仍走 category
     PREVIEW_CATEGORY_RULES_MAX: int = 30
     PREVIEW_CATEGORY_NAME_MAX: int = 16

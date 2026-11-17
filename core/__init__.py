@@ -10,6 +10,7 @@ from .analyzer import (
 )
 from .renderer import TypstRenderer, RenderResult
 from .preview import PreviewError, PreviewService
+from .style_pack import StylePackError, dump_style_pack, parse_style_pack
 from .prewarm import PrewarmService
 from .order_index import OrderSnapshotStore
 
@@ -29,6 +30,9 @@ __all__ = [
     "RenderResult",
     "PreviewError",
     "PreviewService",
+    "StylePackError",
+    "dump_style_pack",
+    "parse_style_pack",
     "PrewarmService",
     "OrderSnapshotStore",
 ]

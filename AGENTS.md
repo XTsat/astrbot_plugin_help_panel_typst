@@ -70,6 +70,7 @@ core/                # [核心业务层] 纯 Python 逻辑
   renderer.py        #   TypstRenderer：路径策略、缓存、背景图解析、子进程调度
   worker.py          #   RenderTask + execute_render_task（typst.compile，即用即销）
   preview.py         #   PreviewService：样式预览页的取数、试渲染、应用配置与内存缓存
+  style_pack.py      #   样式包导出/导入（一个 JSON = 主题 + 分类规则 + 版式），导入复用 preview 的收敛链路
   prewarm.py         #   PrewarmService：启动后与插件条目变化时的静态缓存预热（后台任务 + 指纹比对）
   order_index.py     #   OrderSnapshotStore：「编号 → 插件名」快照（引用回复按发图那一刻的编号解析）
 templates/base.typ   # 渲染模板
@@ -213,7 +214,7 @@ class HelpTypst(Star):
 | 模块级常量 | `UPPER_SNAKE`（`DELAY_SEND`、`BACKGROUND_IMAGE_EXTS`） |
 | 私有方法 | `_` 前缀 + `snake_case`（`_get_config_snapshot`） |
 | 命令方法 | `cmd_` 前缀（`cmd_scan_fonts`；历史 `show_*` 保留） |
-| Web API 方法 | `api_` 前缀（`api_preview_options`、`api_preview_render`、`api_preview_apply`，注册于 `main.py`） |
+| Web API 方法 | `api_` 前缀（`api_preview_options`、`api_preview_render`、`api_preview_apply`、`api_preview_style_export` / `api_preview_style_import`，注册于 `main.py`） |
 | 类名 | `PascalCase`（`TypstRenderer`、`FontManager`） |
 | 文件名 / 模块 | `snake_case`（`renderer.py`、`analyzer.py`） |
 | 配置 key | `snake_case`（`background_random`、`rescan_fonts`） |
@@ -279,7 +280,7 @@ class HelpTypst(Star):
 - **入口与启用**：`views/<view>/index.html` 是唯一入口；新增/删除视图目录后需重载插件，只改静态资源刷新视图即可；前端零构建（原生 ES module + CSS，不引入打包器与第三方 UI 框架）。
 - **通信只走 bridge**：用 `window.AstrBotPluginView ?? window.AstrBotPluginPage`，先 `await bridge.ready()`；禁止裸 `fetch` / `new EventSource`（沙箱 iframe 无 Dashboard 会话与 token）。取不到 bridge 时给中文提示「请从 AstrBot 插件详情页打开本视图」，不要直接抛裸错。
 - **后端接口**：`context.register_web_api(f"/{PLUGIN_NAME}/<action>", handler, ["GET"], "接口描述")`，路由必须带插件名前缀；视图侧 endpoint 不带前缀。handler 用 `astrbot.api.web` 的 `request` / `json_response` / `error_response` / `file_response` / `stream_response`；视图传来的路径与数值一律不可信，后端再校验。视图专用接口直接返回业务 JSON；需要报错用 `error_response(msg, status_code=400)`。
-- **沙箱限制**：Dashboard 以 `sandbox="allow-scripts allow-forms allow-downloads"` 加载，没有 `allow-same-origin`（`localStorage` / `sessionStorage` / `indexedDB` / `document.cookie` 不可用）、没有 `allow-popups`（`window.open` / `target="_blank"` 被拦）、不能访问父窗口 DOM。页面状态放内存或后端，链接复制文本、下载走 `bridge.download()`。
+- **沙箱限制**：Dashboard 以 `sandbox="allow-scripts allow-forms allow-downloads"` 加载，没有 `allow-same-origin`（`localStorage` / `sessionStorage` / `indexedDB` / `document.cookie` 不可用）、没有 `allow-popups`（`window.open` / `target="_blank"` 被拦）、不能访问父窗口 DOM。页面状态放内存或后端，链接复制文本、下载走 `bridge.download()`；页面内已有内容（预览图、样式包 JSON）用 `Blob` / `data:` + `<a download>` 直接下载即可——沙箱带 `allow-downloads`，不必为一次导出在服务端落临时文件。
 - **样式与文案**：颜色/间距走 CSS 变量，`:root` 放亮色、`[data-theme="dark"]` 放暗色（AstrBot 已在 `<html>` 同步 `data-theme`）；视图标题/描述写 `.astrbot-plugin/i18n/<locale>.json` 的 `views.<view_name>.title/description`（旧的 `pages.<view_name>.*` 仅兼容期保留）。插入 DOM 的外部文本必须先转义。
 - **自检**：视图没出现 → 检查入口文件、插件启用与详情页刷新；接口 404 → 检查路由前缀；上传为空 → 字段名固定 `file`；SSE 401 → 是否绕过了 bridge。
 

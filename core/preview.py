@@ -1638,6 +1638,66 @@ class PreviewService:
 
     # ---- style -> plugin config ----
 
+    def parse_style_for_export(self, raw_style: Any) -> PreviewStyle:
+        """按面板同一套规则收敛外部样式（样式包导入、导出都用它）
+
+        单独开一个入口而不是让 style_pack 直接调私有方法: 收敛规则只能有一份,
+        否则导入校验与实际渲染会各按一套标准, 导进来的颜色与预览对不上。
+        """
+        return self._parse_style(raw_style)
+
+    def export_style(
+        self,
+        payload: Any,
+        *,
+        name: str = "",
+        note: str = "",
+        source_version: str = "",
+    ) -> dict[str, Any]:
+        """把面板样式导出成样式包（一个 JSON = 主题 + 分类规则 + 版式）"""
+        from .style_pack import build_style_pack
+
+        return build_style_pack(
+            self,
+            payload,
+            name=name,
+            note=note,
+            source_version=source_version,
+        )
+
+    def import_style(self, text: str, *, source_version: str = "") -> dict[str, Any]:
+        """解析样式包并整理成面板可直接回填的样式 + 变更预览
+
+        返回结构与 `build_options()["active"]` 对齐: 前端只走一条「把样式写进
+        表单」的路径, 不必为导入另写一套控件回填。
+        """
+        from .style_pack import parse_style_pack, style_active_payload
+
+        pack = parse_style_pack(self, text, source_version=source_version)
+        active = style_active_payload(pack.style)
+        # 样式包不承载屏蔽名单: 表单里这一项必须回填「当前配置」,
+        # 否则导入一次样式会顺手把用户的屏蔽列表清空
+        active["ignored"] = {
+            "selected": sorted(self.base_config.ignored_plugins),
+            "custom": sorted(self.base_config.ignored_plugins_custom),
+        }
+        # 复用「应用配置」的计划: 让用户在点应用之前就看到会改哪些项
+        plan = self.build_apply_plan({"style": active})
+        warnings = list(pack.warnings) + list(plan["warnings"])
+        return {
+            "active": active,
+            "custom_presets": [
+                {"name": item["name"], "colors": dict(item["colors"])}
+                for item in pack.style.custom_presets
+            ],
+            "name": pack.name,
+            "note": pack.note,
+            "exported_at": pack.exported_at,
+            "source_version": pack.source_version,
+            "changed": plan["changed"],
+            "warnings": warnings,
+        }
+
     def build_apply_plan(self, payload: Any) -> dict[str, Any]:
         """把面板样式整理成写入插件配置的补丁计划（只计算，不落盘）。
 
@@ -1871,6 +1931,10 @@ class PreviewService:
             "active_preset": active_preset,
             "changed": labels,
         }
+
+    # ---- style pack (export / import) ----
+    # 导出/导入放在应用链路之后: 两者都复用 _parse_style 与 build_apply_plan,
+    # 顺序反过来读代码时容易误以为导入有独立的收敛规则
 
     # ---- cache ----
 

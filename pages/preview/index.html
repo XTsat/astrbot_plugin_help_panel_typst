@@ -397,6 +397,25 @@
                 恢复默认
               </button>
               <button class="btn btn-primary" id="btn-apply" type="button" disabled title="把面板样式写入插件配置，并重载插件使其生效">应用配置</button>
+              <div class="footer-style-pack" role="group" aria-label="样式包">
+                <button class="btn btn-ghost" id="btn-export-style" type="button" disabled title="把当前面板样式（主题 + 分类规则 + 版式）导出成一个 JSON 文件">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 20v-9" />
+                    <path d="m8 15 4-4 4 4" />
+                    <path d="M4 8V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3" />
+                  </svg>
+                  导出样式
+                </button>
+                <button class="btn btn-ghost" id="btn-import-style" type="button" disabled title="读取一个样式包 JSON，把主题、分类规则与版式回填到面板（不会直接保存）">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 4v9" />
+                    <path d="m8 9 4 4 4-4" />
+                    <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+                  </svg>
+                  导入样式
+                </button>
+                <input type="file" id="style-pack-file" accept="application/json,.json" hidden />
+              </div>
             </div>
           </div>
         </aside>

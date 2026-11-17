@@ -1867,6 +1867,22 @@ textarea:focus {
   flex: 1 1 120px;
 }
 
+/* 样式包（导出 / 导入）单独一行：它们改的是「整包外观」，与应用配置不是同一层动作，
+   排在一起容易被误点，所以给一条分隔线 */
+.footer-style-pack {
+  display: flex;
+  flex: 1 1 100%;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.footer-style-pack .btn {
+  flex: 1 1 96px;
+  gap: 4px;
+  padding-inline: 6px;
+}
+
 /* 图标按钮 / 文字按钮 */
 .icon-btn {
   display: inline-flex;

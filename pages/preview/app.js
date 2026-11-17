@@ -53,6 +53,9 @@ const state = {
   fatalError: "",
   importing: false,
   applying: false,
+  // 样式包导入/导出各自的在途标记：两个动作互斥，避免边导边出
+  importingStyle: false,
+  exporting: false,
   renderError: "",
   warnings: [],
   notice: "",
@@ -276,6 +279,9 @@ const els = {
   btnImport: document.getElementById("btn-import"),
   btnApply: document.getElementById("btn-apply"),
   btnRefresh: document.getElementById("btn-refresh"),
+  btnExportStyle: document.getElementById("btn-export-style"),
+  btnImportStyle: document.getElementById("btn-import-style"),
+  stylePackFile: document.getElementById("style-pack-file"),
 };
 
 /* ==========================================================================
@@ -2550,6 +2556,20 @@ function bindStaticEvents() {
     void requestRender();
   });
 
+  els.btnExportStyle.addEventListener("click", () => {
+    void exportStylePack();
+  });
+  els.btnImportStyle.addEventListener("click", () => {
+    if (!els.stylePackFile) return;
+    // 先清空 value：连续导入同一个文件时 change 才会再次触发
+    els.stylePackFile.value = "";
+    els.stylePackFile.click();
+  });
+  els.stylePackFile.addEventListener("change", () => {
+    const file = els.stylePackFile.files && els.stylePackFile.files[0];
+    if (file) void importStylePack(file);
+  });
+
   window.addEventListener("resize", () => {
     if (state.fitWidth) applyZoom();
     if (state.compare.open) applyCompareZoom();
@@ -2793,6 +2813,101 @@ async function importCurrentConfig() {
     state.importing = false;
     renderPreview();
   }
+}
+
+/** 导出样式：把面板当前样式（主题 + 分类规则 + 版式）下载成一个 JSON 文件。 */
+async function exportStylePack() {
+  if (!bridge || !state.options || state.fatalError || state.applying) return;
+  if (state.exporting) return;
+  state.exporting = true;
+  clearNotice();
+  updateControlAvailability();
+  try {
+    const result = asObject(
+      await bridge.apiPost("preview/style/export", { style: buildStyleFromState(true) }),
+    );
+    const content = typeof result.content === "string" ? result.content : "";
+    if (!content) throw new Error("服务端没有返回样式包内容");
+    const filename =
+      typeof result.filename === "string" && result.filename
+        ? result.filename
+        : "help-panel-style.json";
+    downloadTextFile(filename, content);
+    setNotice(`已导出样式包 ${filename}`);
+  } catch (error) {
+    setNotice(`导出样式失败：${errorMessage(error)}`);
+  } finally {
+    state.exporting = false;
+    updateControlAvailability();
+  }
+}
+
+/** 导入样式：读取 JSON 文件，把主题、分类规则与版式回填到表单（不直接保存）。 */
+async function importStylePack(file) {
+  if (!bridge || !state.options || state.fatalError || state.applying) return;
+  if (!file) return;
+  if (state.importingStyle) return;
+  state.importingStyle = true;
+  clearNotice();
+  updateControlAvailability();
+  renderPreview();
+  try {
+    const text = await file.text();
+    if (!text.trim()) throw new Error("文件是空的");
+    const result = asObject(
+      await bridge.apiPost("preview/style/import", { content: text }),
+    );
+    const active = asObject(result.active);
+    if (!Object.keys(active).length) throw new Error("样式包里没有可导入的样式");
+
+    applyImportedStyle(active, result.custom_presets);
+    const changed = asArray(result.changed).map((item) => String(item));
+    const warnings = asArray(result.warnings).map((item) => String(item));
+    const label = typeof result.name === "string" && result.name ? `「${result.name}」` : "";
+    state.importingStyle = false;
+    // 导入只改表单，不落盘：用户看到预览满意后再点「应用配置」
+    await requestRender();
+    if (warnings.length) {
+      setNotice(`已导入${label}样式，有 ${warnings.length} 项提示：${warnings[0]}`);
+    } else if (changed.length) {
+      setNotice(`已导入${label}样式，将变更 ${changed.length} 项，确认后点「应用配置」`);
+    } else {
+      setNotice(`已导入${label}样式，与当前配置一致`);
+    }
+  } catch (error) {
+    state.renderError = `导入样式失败：${errorMessage(error)}`;
+  } finally {
+    state.importingStyle = false;
+    updateControlAvailability();
+    renderPreview();
+  }
+}
+
+/** 把导入的样式写进表单状态：控件按整体刷新，避免逐项同步漏掉某个字段。 */
+function applyImportedStyle(active, rawCustomPresets) {
+  importActiveStyle(active);
+  const presets = normalizeCustomPresets(rawCustomPresets);
+  if (presets.length) {
+    state.customPresets = presets;
+  }
+  ensureCustomPreset();
+  buildPresetControl();
+  syncControls();
+  markDirty();
+}
+
+/** 纯文本下载：样式包很小，直接走 Blob，不必再经 bridge.download 或服务端临时文件。 */
+function downloadTextFile(filename, content) {
+  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /** 应用配置：把面板样式写入插件配置，插件随后自动重载使配置生效。 */
@@ -3094,11 +3209,14 @@ function renderPreview() {
 
 function updateControlAvailability() {
   const disabled = !state.options || Boolean(state.fatalError);
-  const busy = state.importing || state.applying;
+  const busy =
+    state.importing || state.applying || state.importingStyle || state.exporting;
   els.btnReset.disabled = disabled || busy;
   els.btnImport.disabled = disabled || busy;
   els.btnApply.disabled = disabled || busy;
-  els.btnRefresh.disabled = disabled || state.applying;
+  els.btnRefresh.disabled = disabled || state.applying || state.importingStyle;
+  els.btnExportStyle.disabled = disabled || busy;
+  els.btnImportStyle.disabled = disabled || busy;
   els.btnCompare.disabled = disabled || busy || !state.compare.available;
   els.btnCompare.title = state.compare.available
     ? "把当前面板按多个清晰度同时渲染，并排对比字体锐度"
@@ -3163,6 +3281,16 @@ function updateStatus() {
     topText = "正在导入配置…";
     footerState = "loading";
     footerText = "正在导入配置…";
+  } else if (state.exporting) {
+    topState = "loading";
+    topText = "正在导出样式…";
+    footerState = "loading";
+    footerText = "正在导出样式…";
+  } else if (state.importingStyle) {
+    topState = "loading";
+    topText = "正在导入样式包…";
+    footerState = "loading";
+    footerText = "正在导入样式包…";
   } else if (state.rendering) {
     topState = "loading";
     topText = "正在渲染…";

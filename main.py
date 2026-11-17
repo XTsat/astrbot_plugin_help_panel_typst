@@ -43,8 +43,10 @@ from .core import (
     PrewarmService,
     PreviewError,
     PreviewService,
+    StylePackError,
     TypstRenderer,
     compute_plugin_fingerprint,
+    dump_style_pack,
     list_installed_plugins,
 )
 
@@ -274,6 +276,18 @@ class HelpTypst(Star):
                 self.api_preview_apply,
                 ["POST"],
                 "把预览样式写入插件配置",
+            ),
+            (
+                f"/{plugin_name}/preview/style/export",
+                self.api_preview_style_export,
+                ["POST"],
+                "导出样式包（主题 + 分类规则 + 版式）",
+            ),
+            (
+                f"/{plugin_name}/preview/style/import",
+                self.api_preview_style_import,
+                ["POST"],
+                "导入样式包并返回可回填的样式",
             ),
         ):
             try:
@@ -949,6 +963,97 @@ class HelpTypst(Star):
                 ),
             }
         )
+
+    async def api_preview_style_export(self) -> Any:
+        """插件页 API：把当前面板样式导出成样式包 JSON"""
+        from astrbot.api.web import error_response, json_response, request
+
+        try:
+            payload = await request.json(default={})
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 解析样式导出请求失败: {e}")
+            return error_response("请求内容解析失败")
+
+        try:
+            pack = await asyncio.to_thread(
+                self.preview_service.export_style,
+                payload,
+                name=str(payload.get("name") or ""),
+                note=str(payload.get("note") or ""),
+                source_version=self._plugin_version(),
+            )
+            text = await asyncio.to_thread(dump_style_pack, pack)
+        except PreviewError as e:
+            return error_response(str(e))
+        except Exception as e:
+            logger.error(f"[HelpTypst] 导出样式包失败: {e}", exc_info=True)
+            return error_response("导出样式包失败，请查看插件日志")
+
+        logger.info(f"[HelpTypst] 已导出样式包（{len(text.encode('utf-8'))} 字节）")
+        # 直接回文本: 前端用 Blob 下载, 不额外落临时文件, 也不依赖 bridge.download
+        return json_response(
+            {
+                "filename": self._style_pack_filename(pack),
+                "content": text,
+                "schema_version": pack["schema_version"],
+            }
+        )
+
+    async def api_preview_style_import(self) -> Any:
+        """插件页 API：导入样式包，返回可回填到表单的样式与变更预览"""
+        from astrbot.api.web import error_response, json_response, request
+
+        try:
+            payload = await request.json(default={})
+        except Exception as e:
+            logger.warning(f"[HelpTypst] 解析样式导入请求失败: {e}")
+            return error_response("请求内容解析失败")
+
+        text = payload.get("content")
+        if not isinstance(text, str) or not text.strip():
+            return error_response("样式包内容为空，请重新选择文件")
+
+        try:
+            data = await asyncio.to_thread(
+                self.preview_service.import_style,
+                text,
+                source_version=self._plugin_version(),
+            )
+        except StylePackError as e:
+            return error_response(str(e))
+        except PreviewError as e:
+            return error_response(str(e))
+        except Exception as e:
+            logger.error(f"[HelpTypst] 导入样式包失败: {e}", exc_info=True)
+            return error_response("导入样式包失败，请查看插件日志")
+
+        logger.info(
+            "[HelpTypst] 已导入样式包"
+            + (f"「{data['name']}」" if data.get("name") else "")
+            + f"，将变更 {len(data['changed'])} 项"
+        )
+        return json_response(data)
+
+    def _plugin_version(self) -> str:
+        """读 metadata.yaml 的版本号：只用于样式包来源标记，读不到就留空"""
+        try:
+            import yaml
+
+            meta = yaml.safe_load(
+                (self.plugin_dir / "metadata.yaml").read_text(encoding="utf-8")
+            )
+        except Exception as e:
+            # 版本号只影响样式包里的来源标注，缺了不影响导入导出
+            logger.debug(f"[HelpTypst] 读取插件版本号失败: {e}")
+            return ""
+        version = meta.get("version") if isinstance(meta, dict) else None
+        return str(version) if version else ""
+
+    @staticmethod
+    def _style_pack_filename(pack: dict[str, Any]) -> str:
+        """下载文件名：带插件名与日期，多次导出不会互相覆盖"""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        return f"{InternalCFG.STYLE_EXPORT_FILE_PREFIX}-{stamp}.json"
 
     def _build_config_patch(self, plan: dict[str, Any]) -> dict[str, Any]:
         """把应用计划转成配置补丁：只覆盖计划里的键，其余保持原样"""
