@@ -62,12 +62,18 @@ def get_image_dimensions(path: Path) -> tuple[int, int] | None:
 
 def _row_uniform(rgb: Image.Image, width: int, row: int, tolerance: int) -> bool:
     extrema = rgb.crop((0, row, width, row + 1)).getextrema()
-    return all(channel_max - channel_min <= tolerance for channel_min, channel_max in extrema)
+    return all(
+        channel_max - channel_min <= tolerance for channel_min, channel_max in extrema
+    )
 
 
-def _band_uniform(rgb: Image.Image, width: int, top: int, bottom: int, tolerance: int) -> bool:
+def _band_uniform(
+    rgb: Image.Image, width: int, top: int, bottom: int, tolerance: int
+) -> bool:
     extrema = rgb.crop((0, top, width, bottom)).getextrema()
-    return all(channel_max - channel_min <= tolerance for channel_min, channel_max in extrema)
+    return all(
+        channel_max - channel_min <= tolerance for channel_min, channel_max in extrema
+    )
 
 
 def _trim_page_blank(img: Image.Image, pad_px: int, tolerance: int = 2) -> Image.Image:
@@ -135,6 +141,8 @@ def _trim_page_blank(img: Image.Image, pad_px: int, tolerance: int = 2) -> Image
     merged.paste(body, (0, 0))
     merged.paste(bottom_block, (0, body.height + pad_px))
     return merged
+
+
 def _save_rendered(img: Image.Image, path: Path, output_format: str) -> None:
     """按所选格式保存: 面板是大色块 + 文字, 各格式的取舍点不同"""
     if output_format == "png":
@@ -169,7 +177,11 @@ def process_image_to_output(
     if not src_path_obj.exists():
         return []
     try:
-        fmt = output_format if output_format in InternalCFG.FORMAT_EXT else DefaultCFG.OUTPUT_FORMAT
+        fmt = (
+            output_format
+            if output_format in InternalCFG.FORMAT_EXT
+            else DefaultCFG.OUTPUT_FORMAT
+        )
         ext = InternalCFG.FORMAT_EXT[fmt]
         max_side = InternalCFG.FORMAT_MAX_SIDE[fmt]
         # 与 domain/config 的收敛区间保持一致: 非法值回落到下限,

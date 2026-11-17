@@ -56,6 +56,8 @@ const state = {
   // 样式包导入/导出各自的在途标记：两个动作互斥，避免边导边出
   importingStyle: false,
   exporting: false,
+  // 导出时写进文件的名字（仅文件元信息，不写进插件配置）
+  stylePackName: "",
   renderError: "",
   warnings: [],
   notice: "",
@@ -280,6 +282,7 @@ const els = {
   btnApply: document.getElementById("btn-apply"),
   btnRefresh: document.getElementById("btn-refresh"),
   btnExportStyle: document.getElementById("btn-export-style"),
+  stylePackName: document.getElementById("style-pack-name"),
   btnImportStyle: document.getElementById("btn-import-style"),
   stylePackFile: document.getElementById("style-pack-file"),
 };
@@ -2556,6 +2559,11 @@ function bindStaticEvents() {
     void requestRender();
   });
 
+  if (els.stylePackName) {
+    els.stylePackName.addEventListener("input", () => {
+      state.stylePackName = els.stylePackName.value;
+    });
+  }
   els.btnExportStyle.addEventListener("click", () => {
     void exportStylePack();
   });
@@ -2824,7 +2832,11 @@ async function exportStylePack() {
   updateControlAvailability();
   try {
     const result = asObject(
-      await bridge.apiPost("preview/style/export", { style: buildStyleFromState(true) }),
+      await bridge.apiPost("preview/style/export", {
+        style: buildStyleFromState(true),
+        // 名字只是文件里的备注，不写进插件配置；用户不填就不出现在 JSON 里
+        name: state.stylePackName.trim(),
+      }),
     );
     const content = typeof result.content === "string" ? result.content : "";
     if (!content) throw new Error("服务端没有返回样式包内容");

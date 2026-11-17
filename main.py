@@ -66,14 +66,14 @@ class _StaticPanel:
 
 
 _STATIC_PANELS: dict[str, _StaticPanel] = {
-    "command": _StaticPanel(
-        "command", "cmd_analyzer", "AstrBot 指令菜单", "指令菜单"
-    ),
+    "command": _StaticPanel("command", "cmd_analyzer", "AstrBot 指令菜单", "指令菜单"),
     "command_detail": _StaticPanel(
         "command_detail", "cmd_analyzer", "AstrBot 指令菜单(详细)", "详细指令菜单"
     ),
     "event": _StaticPanel("event", "evt_analyzer", "AstrBot 事件监听", "事件监听"),
-    "filter": _StaticPanel("filter", "flt_analyzer", "AstrBot 过滤器分析", "过滤器详情"),
+    "filter": _StaticPanel(
+        "filter", "flt_analyzer", "AstrBot 过滤器分析", "过滤器详情"
+    ),
 }
 
 
@@ -494,8 +494,12 @@ class HelpTypst(Star):
                 "⚠️ 预热未产出图片（详见插件日志），面板仍会在收到请求时现编"
             )
             return
-        labels = "、".join(_STATIC_PANELS[m].label for m in warmed if m in _STATIC_PANELS)
-        yield event.plain_result(f"✅ 预热完成：{labels}。现在打开对应面板会直接使用缓存图")
+        labels = "、".join(
+            _STATIC_PANELS[m].label for m in warmed if m in _STATIC_PANELS
+        )
+        yield event.plain_result(
+            f"✅ 预热完成：{labels}。现在打开对应面板会直接使用缓存图"
+        )
 
     async def _safe_reload(self, pm, plugin_name):
         """延迟重载"""
@@ -735,8 +739,10 @@ class HelpTypst(Star):
                 layout_mode = "plugin_detail"
                 # 附加该插件的事件监听器 (含命令式监听); 失败只丢监听区, 不让整页失败
                 try:
-                    plugins[0].event_nodes = (
-                        self.evt_analyzer.get_plugin_event_listeners(plugins[0].name)
+                    plugins[
+                        0
+                    ].event_nodes = self.evt_analyzer.get_plugin_event_listeners(
+                        plugins[0].name
                     )
                 except Exception as e:
                     logger.warning(f"[HelpTypst] 获取事件监听失败: {e}")
@@ -1122,7 +1128,9 @@ class HelpTypst(Star):
                     sources[index] = raw
                     used.add(raw_index)
                     break
-        spare = [raw_index for raw_index in range(len(raw_entries)) if raw_index not in used]
+        spare = [
+            raw_index for raw_index in range(len(raw_entries)) if raw_index not in used
+        ]
         for index, source in enumerate(sources):
             if source is None and spare:
                 sources[index] = raw_entries[spare.pop(0)]

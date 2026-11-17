@@ -358,6 +358,50 @@
                 <div class="color-groups" id="color-groups"></div>
               </div>
             </details>
+
+            <details class="ct-section" id="style-pack-section">
+              <summary>样式包</summary>
+              <div class="ct-section-body">
+                <p class="field-hint">
+                  把整套外观打包成一个 JSON 文件带走：主题配色（含自定义模板）、分类规则、版式参数都在里面。换机器或分享给群友时导出一次即可。
+                </p>
+                <div class="field">
+                  <label class="field-label" for="style-pack-name">样式包名字</label>
+                  <input
+                    type="text"
+                    id="style-pack-name"
+                    class="style-pack-name"
+                    maxlength="40"
+                    placeholder="可选，例如「夜间配色」"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <p class="field-hint">只写进导出的文件，不影响插件配置；多套配色靠它区分。</p>
+                </div>
+                <div class="style-pack-actions">
+                  <button class="btn btn-ghost" id="btn-export-style" type="button" disabled title="把当前面板样式（主题 + 分类规则 + 版式）导出成一个 JSON 文件">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 20v-9" />
+                      <path d="m8 15 4-4 4 4" />
+                      <path d="M4 8V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3" />
+                    </svg>
+                    导出样式
+                  </button>
+                  <button class="btn btn-ghost" id="btn-import-style" type="button" disabled title="读取一个样式包 JSON，把主题、分类规则与版式回填到面板（不会直接保存）">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 4v9" />
+                      <path d="m8 9 4 4 4-4" />
+                      <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+                    </svg>
+                    导入样式
+                  </button>
+                  <input type="file" id="style-pack-file" accept="application/json,.json" hidden />
+                </div>
+                <p class="field-hint">
+                  导入只回填面板，不会直接保存：先看预览，满意了再点底部「应用配置」。本机没有的背景图、失效的字体与非法颜色会被自动跳过并提示。
+                </p>
+              </div>
+            </details>
           </div>
 
           <!-- 粘性底部操作栏 -->
@@ -397,25 +441,6 @@
                 恢复默认
               </button>
               <button class="btn btn-primary" id="btn-apply" type="button" disabled title="把面板样式写入插件配置，并重载插件使其生效">应用配置</button>
-              <div class="footer-style-pack" role="group" aria-label="样式包">
-                <button class="btn btn-ghost" id="btn-export-style" type="button" disabled title="把当前面板样式（主题 + 分类规则 + 版式）导出成一个 JSON 文件">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M12 20v-9" />
-                    <path d="m8 15 4-4 4 4" />
-                    <path d="M4 8V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3" />
-                  </svg>
-                  导出样式
-                </button>
-                <button class="btn btn-ghost" id="btn-import-style" type="button" disabled title="读取一个样式包 JSON，把主题、分类规则与版式回填到面板（不会直接保存）">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M12 4v9" />
-                    <path d="m8 9 4 4 4-4" />
-                    <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
-                  </svg>
-                  导入样式
-                </button>
-                <input type="file" id="style-pack-file" accept="application/json,.json" hidden />
-              </div>
             </div>
           </div>
         </aside>

@@ -406,8 +406,7 @@ def _category_signature(category: dict[str, Any]) -> str:
                 {
                     "name": str(rule.get("name") or ""),
                     "keywords": sorted(
-                        str(keyword).lower()
-                        for keyword in rule.get("keywords") or []
+                        str(keyword).lower() for keyword in rule.get("keywords") or []
                     ),
                     "enabled": bool(rule.get("enabled", True)),
                     "color": str(rule.get("color") or "").lower(),
@@ -687,8 +686,10 @@ class PreviewService:
             return active
         names = {item["name"] for item in custom_presets}
         # 「自定义」与旧配置里的自定义条目名都落到第一张自定义卡
-        return active if active in names and active != DefaultCFG.CUSTOM_PRESET_KEY else (
-            custom_presets[0]["name"]
+        return (
+            active
+            if active in names and active != DefaultCFG.CUSTOM_PRESET_KEY
+            else (custom_presets[0]["name"])
         )
 
     def _selectable_fonts(self) -> list[str]:
@@ -905,9 +906,7 @@ class PreviewService:
                 groups.append({"id": group_id, "label": label, "colors": items})
         return groups
 
-    def _build_category_options(
-        self, plugins: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def _build_category_options(self, plugins: list[dict[str, Any]]) -> dict[str, Any]:
         """分类编辑器数据：当前规则、标准模板、主题色槽与高频热词"""
         category = self.base_config.category
         slots = self.base_config.appearance.get_category_slots()
@@ -915,9 +914,7 @@ class PreviewService:
         # 内置项的描述会把「帮助」「机器人」这类词拱到最前面
         ignored = self.base_config.effective_ignored_plugins
         visible = [
-            plugin
-            for plugin in plugins
-            if str(plugin.get("name") or "") not in ignored
+            plugin for plugin in plugins if str(plugin.get("name") or "") not in ignored
         ]
         texts = [_plugin_match_text(plugin) for plugin in visible]
         return {
@@ -1267,9 +1264,7 @@ class PreviewService:
             warnings.append(f"面板共 {total_pages} 页，预览只返回前 {max_pages} 页")
             images = images[:max_pages]
 
-        entry = self._cache.put(
-            cache_key, images, total_pages, render_ms=render_ms
-        )
+        entry = self._cache.put(cache_key, images, total_pages, render_ms=render_ms)
         return self._build_response(
             entry,
             cached=False,
@@ -1769,9 +1764,7 @@ class PreviewService:
             choices = dict(self.renderer.list_background_choices())
             picked = choices.get(style.background)
             if picked is None:
-                warnings.append(
-                    f"背景图「{style.background}」不存在，已保留原背景设置"
-                )
+                warnings.append(f"背景图「{style.background}」不存在，已保留原背景设置")
             else:
                 background_path = str(picked)
                 changed.append("背景图")

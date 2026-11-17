@@ -1867,20 +1867,39 @@ textarea:focus {
   flex: 1 1 120px;
 }
 
-/* 样式包（导出 / 导入）单独一行：它们改的是「整包外观」，与应用配置不是同一层动作，
-   排在一起容易被误点，所以给一条分隔线 */
-.footer-style-pack {
+/* 样式包分组：导出 / 导入改的是「整包外观」，与应用配置不是同一层动作，
+   因此单独占一个侧栏分组，不和底部的应用/恢复挤在一起 */
+.style-pack-actions {
   display: flex;
-  flex: 1 1 100%;
+  flex-wrap: wrap;
   gap: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
 }
 
-.footer-style-pack .btn {
+.style-pack-actions .btn {
   flex: 1 1 96px;
-  gap: 4px;
-  padding-inline: 6px;
+  gap: 5px;
+}
+
+/* 名字只影响导出的文件名与备注，占位提示里说明清楚，避免被当成配置项 */
+.style-pack-name {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.style-pack-name::placeholder {
+  color: var(--muted-2);
+}
+
+.style-pack-name:focus {
+  border-color: var(--accent);
+  outline: none;
 }
 
 /* 图标按钮 / 文字按钮 */

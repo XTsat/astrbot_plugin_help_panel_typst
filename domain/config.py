@@ -105,9 +105,7 @@ def _parse_name_list(value: Any) -> set[str]:
         value = [value]
     if not isinstance(value, list):
         return set()
-    return {
-        name.strip() for name in value if isinstance(name, str) and name.strip()
-    }
+    return {name.strip() for name in value if isinstance(name, str) and name.strip()}
 
 
 @dataclass
@@ -315,7 +313,9 @@ class CategoryConfig:
                 if not word:
                     continue
                 if ASCII_WORD_REGEX.fullmatch(word):
-                    tier = 2 if word in title_words else (1 if word in desc_words else 0)
+                    tier = (
+                        2 if word in title_words else (1 if word in desc_words else 0)
+                    )
                 else:
                     tier = 2 if word in title_text else (1 if word in desc_text else 0)
                 if not tier:
@@ -467,9 +467,7 @@ def _load_appearance(raw_config: AstrBotConfig) -> AppearanceConfig:
     raw_appearance = raw_config.get("appearance")
     if not isinstance(raw_appearance, dict):
         raw_appearance = {}
-    active_preset_name = raw_appearance.get(
-        "active_preset", DefaultCFG.DEFAULT_PRESET
-    )
+    active_preset_name = raw_appearance.get("active_preset", DefaultCFG.DEFAULT_PRESET)
     raw_font_order = raw_appearance.get("font_order", None)
 
     # 全局字体优先级 (旧配置迁移: 缺失时尝试从旧激活预设中提取)
@@ -513,9 +511,7 @@ def _load_appearance(raw_config: AstrBotConfig) -> AppearanceConfig:
             for color_key in DefaultCFG.DEFAULT_COLORS.keys():
                 if color_key in p_data:
                     raw_val = p_data[color_key]  # 防 None、数字类型传入
-                    p_colors[color_key] = (
-                        str(raw_val) if raw_val is not None else ""
-                    )
+                    p_colors[color_key] = str(raw_val) if raw_val is not None else ""
 
             # 「启用」开关: 只有真正的 Python True 才算启用 (防御异常值)
             p_enabled = p_data.get("enabled") is True
@@ -557,15 +553,9 @@ def _load_category(raw_config: AstrBotConfig) -> CategoryConfig:
 
     # 兜底分类颜色: slot_0~slot_9 主题色槽 (随主题) / #RRGGBB 固定色; 留空取 DefaultCFG 默认槽位
     raw_fallback_color = str(raw_category.get("fallback_color", "") or "").strip()
-    fallback_color = (
-        raw_fallback_color or DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
-    )
+    fallback_color = raw_fallback_color or DefaultCFG.DEFAULT_CATEGORY_FALLBACK_COLOR
     is_fallback_slot = bool(re.fullmatch(r"slot_[0-9]", fallback_color))
-    if (
-        fallback_color
-        and not is_fallback_slot
-        and not _is_valid_hex(fallback_color)
-    ):
+    if fallback_color and not is_fallback_slot and not _is_valid_hex(fallback_color):
         logger.warning(
             f"[HelpTypst] 兜底分类颜色配置异常: '{fallback_color}' "
             f"不是有效的十六进制颜色或色槽编号 (slot_0~slot_9), 已回退为默认色槽"

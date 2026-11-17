@@ -154,15 +154,23 @@ def build_style_pack(
     应用之前先备份/分享调好的效果。
     """
     style = service.parse_style_for_export(payload.get("style"))
-    return {
+    pack: dict[str, Any] = {
         "kind": _KIND,
         "schema_version": _SCHEMA_VERSION,
-        "name": _coerce_text(name, InternalCFG.STYLE_EXPORT_NAME_MAX),
-        "note": _coerce_text(note, 500),
         "exported_at": _now_iso(),
-        "source_version": _coerce_text(source_version, 32),
-        **_style_sections(style),
     }
+    # 名字与备注只有用户填了才写: 空串留在文件里只会让 JSON 多两行噪音
+    pack_name = _coerce_text(name, InternalCFG.STYLE_EXPORT_NAME_MAX)
+    if pack_name:
+        pack["name"] = pack_name
+    pack_note = _coerce_text(note, 500)
+    if pack_note:
+        pack["note"] = pack_note
+    version = _coerce_text(source_version, 32)
+    if version:
+        pack["source_version"] = version
+    pack.update(_style_sections(style))
+    return pack
 
 
 def dump_style_pack(pack: dict[str, Any]) -> str:

@@ -119,7 +119,9 @@ def execute_render_task(task: RenderTask) -> list[str]:
             sys_inputs["logo_image"] = ""
 
         # 单页高度上限 (pt): 由切片高度与清晰度换算, 模板据此决定是否分页 (0 = 不分页)
-        sys_inputs["max_page_height"] = f"{task.split_height * 72.0 / max(1.0, float(task.ppi)):.2f}"
+        sys_inputs["max_page_height"] = (
+            f"{task.split_height * 72.0 / max(1.0, float(task.ppi)):.2f}"
+        )
 
         # 3. 执行 Typst 编译: {p} 由 Typst 替换为页码, 长图在模板内按分类边界分页
         src_path = Path(task.output_png_path)
@@ -135,9 +137,8 @@ def execute_render_task(task: RenderTask) -> list[str]:
 
         # 4. 调用图片处理
         # 计算文件名 stem
-        final_stem = (
-            task.output_stem
-            or (f"temp_{task.req_id}" if task.is_temp else src_path.stem)
+        final_stem = task.output_stem or (
+            f"temp_{task.req_id}" if task.is_temp else src_path.stem
         )
 
         pages = _collect_page_pngs(src_path)

@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import random
 import re
@@ -408,7 +407,9 @@ class TypstRenderer:
                     font_paths_str = [str(p) for p in self.font_dirs]
 
                     # 头部背景图: 使用批次开始时已解析的背景图 (确保 random 只选一次)
-                    bg_image_path: str | None = str(bg_image) if bg_image is not None else None
+                    bg_image_path: str | None = (
+                        str(bg_image) if bg_image is not None else None
+                    )
                     # 插件根目录: root 必须覆盖它, 否则模板里的 ../resources 徽标读不到
                     plugin_root = str(self.template_path.parent.parent)
                     root_paths = [
@@ -469,7 +470,9 @@ class TypstRenderer:
                     if final_images and final_images[0].startswith("ERROR:"):
                         detail = final_images[0][len("ERROR:") :].strip()
                         logger.error(f"[HelpTypst] Typst 编译失败: {detail}")
-                        raise RuntimeError("Typst 编译失败，请检查模板与字体配置（详见日志）")
+                        raise RuntimeError(
+                            "Typst 编译失败，请检查模板与字体配置（详见日志）"
+                        )
 
                     if not final_images:
                         return None, "渲染未生成图片文件"
