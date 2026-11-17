@@ -92,16 +92,43 @@ def _plain_text(event: AstrMessageEvent) -> str:
     return join_plain_parts(parts)
 
 
-class QuoteOrderFilter(CustomFilter):
-    """只放行「引用消息 + 只带一个编号」的回复
+def _is_image_component(comp: Any) -> bool:
+    """判断消息段是不是图片
 
-    这类消息没有唤醒词也没有指令名, 靠指令过滤器根本进不来; 同时又不能放宽到
-    「所有引用回复」——群里正常引用聊天会被插件截胡。因此判断严格限定为:
-    引用了某条消息, 且本次消息去掉引用段后只剩一个 1~4 位数字。
+    用类名判断而不是 isinstance: 不同适配器/版本可能给出各自的 Image 子类,
+    而这里只关心「它是不是一张图」, 不关心是哪个类。
+    """
+    if isinstance(comp, Image):
+        return True
+    return type(comp).__name__.lower() == "image"
+
+
+class QuoteOrderFilter(CustomFilter):
+    """只放行「引用机器人发的面板图 + 只带一个编号」的回复
+
+    这类消息没有唤醒词也没有指令名, 靠指令过滤器根本进不来; 但条件必须收紧到
+    「引用的是机器人自己的消息」——只判断「有引用段」会把群里正常的引用对话、
+    引用别人图片都截胡。
+
+    三个条件缺一不可:
+    1. 有引用段, 且被引用者就是本机器人 (sender_id == self_id)
+    2. 被引用的是图片消息 (面板图); 适配器没取回被引用内容时退回只靠条件 1
+    3. 本次消息去掉引用段后只剩一个 1~4 位数字
     """
 
     def filter(self, event: AstrMessageEvent, cfg: Any) -> bool:
-        if not any(isinstance(comp, Reply) for comp in event.get_messages()):
+        reply = next(
+            (c for c in event.get_messages() if isinstance(c, Reply)),
+            None,
+        )
+        if reply is None:
+            return False
+        if str(reply.sender_id or "") != str(event.get_self_id() or ""):
+            return False
+        # 被引用内容取得到时必须确认是图片: 引用机器人发的文字提示再回数字不该触发。
+        # 部分平台只给 id、取不回 chain, 这时不能因为拿不到内容就一律拒绝。
+        chain = getattr(reply, "chain", None) or []
+        if chain and not any(_is_image_component(c) for c in chain):
             return False
         # 整条消息必须就是一个编号: 夹在句子里的数字属于正常聊天, 不能截胡
         return parse_order_token(_plain_text(event)) is not None
