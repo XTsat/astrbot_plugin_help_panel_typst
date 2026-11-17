@@ -30,7 +30,6 @@ from .utils import (
     TypstLayout,
     find_quoted_order,
     join_plain_parts,
-    panel_of_quoted_command,
     parse_order_token,
     parse_query,
     sync_plugin_options,
@@ -1184,14 +1183,12 @@ class HelpTypst(Star):
         quoted_order = self._resolve_quoted_order(event, _plain_text(event))
         if not quoted_order:
             return
-        # 编号属于被引用的那张面板: 引用 /helpss 的图要打开详细面板, 快照也要按该面板查。
-        # 面板图是纯图片, 被引用消息里通常没有文字, 所以先看本会话刚发过哪张;
-        # 只有用户引用的是「指令文本消息」时, 被引用文字里才带得出指令名。
-        mode = (
-            self._last_panel_mode(event)
-            or panel_of_quoted_command(self._quoted_text(event), self.prefixes)
-            or "command"
-        )
+        # 必须「本会话近期真的发过面板」才响应: 发图时拿不到自己消息的 id, 无法比对
+        # 被引用的到底是哪一张图, 只能靠这张会话级的记录兜底 —— 没有记录时, 引用机器人
+        # 发的任意图片 (别的插件的图表、表情包) 再回数字, 都会被当成面板编号解析。
+        mode = self._last_panel_mode(event)
+        if mode is None:
+            return
         if mode not in InternalCFG.PLUGIN_ORDER_MODES:
             # 事件/过滤器面板的编号是事件分组, 不是插件: 回数字没有插件可打开。
             # 明确回一句而不是静默放行, 否则私聊里这条消息会掉进 LLM 被当成闲聊

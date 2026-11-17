@@ -378,7 +378,7 @@ async def cmd_scan_fonts(self, event: AstrMessageEvent) -> ...:
 
 - 参数用 `GreedyStr` 接收剩余文本，统一交给 `utils/query.parse_query()` 判意图（`s <关键词>` 搜索 / `<数字>` 编号详情 / 其它一律当作插件名详情，`@` 前缀可选）；编号详情按全局 `order` 精确命中，引用场景先查编号快照。`_dispatch_query` 会把 `event` / `filter` 面板的裸文本改判为搜索 —— 那两张面板没有单个插件详情视图。
 - 本插件**只注册一个事件处理器**：`on_quote_reply` + `QuoteOrderFilter`，用于「引用面板图 + 只回一个数字」的快捷详情。过滤器必须保持严格：**引用的是机器人自己的图片消息** + 本次消息只含一个 1~4 位数字，三者缺一不可（见 `QuoteOrderFilter` 的 docstring）。只判断「有引用段」会截胡引用别人消息、引用别人图片、引用机器人文字提示等各种正常对话。除此之外不监听其它事件；新增监听器需在此处与命令清单同步说明。
-- 面板图是**纯图片**（`chain_result` 只带 `Image`），被引用消息里没有文字可反推是哪张面板，所以 `_panel_memo` 按 `unified_msg_origin` 记住「本会话最近发出的面板模式」（TTL `PANEL_MEMO_TTL`、上限 `PANEL_MEMO_MAX_SESSIONS`）。判断顺序：会话记忆 → 被引用指令文本 → 默认 `command`。不要把它改成「解析被引用文本」，那条路只有用户引用指令文本消息时才通。
+- 面板图是**纯图片**（`chain_result` 只带 `Image`），且发图时拿不到自己消息的 id（`send()` 返回 `None`），因此**无法比对被引用的到底是哪一张图**。`_panel_memo` 按 `unified_msg_origin` 记住「本会话最近发出的面板模式」（TTL `PANEL_MEMO_TTL`、上限 `PANEL_MEMO_MAX_SESSIONS`），`on_quote_reply` **必须有这条记录才响应**，否则引用机器人发的任意图片（别的插件的图表、表情包）再回数字都会被当成面板编号解析。不要加「没有记录就默认 command」的兜底。
 
 ### 6.2 README 命令表格式
 

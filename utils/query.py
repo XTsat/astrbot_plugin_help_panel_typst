@@ -105,22 +105,6 @@ def parse_order_token(text: str | None) -> str | None:
     return str(int(token))
 
 
-def panel_of_quoted_command(text: str | None, prefixes: list[str]) -> str | None:
-    """被引用的消息是哪张面板: 返回静态模式名, 判断不出返回 None
-
-    面板图发出时是图片, 被引用消息的文本只有触发它的指令。按指令名反推面板,
-    引用 /helpss 的图回数字才会打开详细面板而不是普通面板。
-    """
-    if not text:
-        return None
-    snippet = text.strip()[: InternalCFG.QUOTE_TEXT_MAX_LEN]
-    for prefix in [*prefixes, ""] or [""]:
-        for word, mode in InternalCFG.QUOTE_PANEL_COMMANDS.items():
-            if snippet == f"{prefix}{word}" or snippet.startswith(f"{prefix}{word} "):
-                return mode
-    return None
-
-
 def find_quoted_order(text: str | None) -> str | None:
     """从被引用消息的纯文本里找编号
 
