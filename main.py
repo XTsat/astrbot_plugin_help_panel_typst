@@ -1109,6 +1109,13 @@ class HelpTypst(Star):
         self, event: AstrMessageEvent, mode: str, query: Query
     ) -> AsyncGenerator[MessageEventResult, None]:
         """指令入口: 按意图分发 (编号按当前面板解析, 不查快照)"""
+        if (
+            query.intent is QueryIntent.DETAIL_NAME
+            and mode not in InternalCFG.PLUGIN_ORDER_MODES
+        ):
+            # 事件 / 过滤器面板没有「单个插件详情」这种视图, 裸文本按关键词搜更合理:
+            # /events 天气 应当是搜天气, 而不是去找一个叫「天气」的事件分组
+            query = Query(QueryIntent.SEARCH, query.value)
         async for r in self._handle_request(event, mode, query):
             yield r
 

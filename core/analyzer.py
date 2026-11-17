@@ -248,11 +248,30 @@ class BaseAnalyzer:
             logger.error(f"[HelpTypst] 按编号 {order} 分析失败: {e}", exc_info=True)
             return []
 
-    def get_plugin_by_name(self, name: str) -> list[PluginMetadata]:
-        """按插件名精确定位单个插件 (与编号一样是「稳定引用」, 不受重排影响)
+    @staticmethod
+    def normalize_plugin_name(name: str) -> str:
+        """插件名的宽松写法归一
 
-        匹配口径从窄到宽: 插件 ID 精确 → 展示名精确 → 名称/展示名大小写不敏感。
-        都未命中时返回空列表, 由调用方决定是否回落到关键词搜索。
+        插件 ID 有的带 `astrbot_plugin_` 前缀、有的不带, 用户记不住哪种; 大小写、
+        中划线、空格在不同仓库里也混着用。这里统一成「小写 + 下划线 + 去前缀」,
+        只用于**比较**, 绝不用于补全后再查 —— 补全会给本就不带前缀的插件
+        拼出一个根本不存在的名字。
+        """
+        text = (name or "").strip().lower().replace("-", "_").replace(" ", "_")
+        prefix = InternalCFG.PLUGIN_ID_PREFIX
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+        return text
+
+    def get_plugin_by_name(self, name: str) -> list[PluginMetadata]:
+        """按插件名定位单个插件 (与编号一样是「稳定引用」, 不受重排影响)
+
+        匹配口径从窄到宽, 每一档都必须**唯一命中**才返回:
+        插件 ID 精确 → 展示名精确 → 归一化后相等 (大小写 / 中划线 / 有无
+        `astrbot_plugin_` 前缀都不敏感) → 归一化后唯一前缀。
+
+        有歧义时返回空列表: 猜错比查不到更糟 —— 用户会看到一个完全无关的插件详情。
+        都未命中同样返回空列表, 由调用方决定如何提示。
         """
         target = (name or "").strip()
         if not target:
@@ -262,18 +281,39 @@ class BaseAnalyzer:
         except Exception as e:
             logger.error(f"[HelpTypst] 按插件名 {name} 分析失败: {e}", exc_info=True)
             return []
+        if not plugins:
+            return []
+
         lowered = target.lower()
-        for predicate in (
+        normalized = self.normalize_plugin_name(target)
+
+        # 前两档是字面量匹配, 撞上同名也只能算歧义, 统一走 _unique
+        for key in (
             lambda p: p.name == target,
             lambda p: (p.display_name or "") == target,
-            lambda p: (
-                p.name.lower() == lowered or (p.display_name or "").lower() == lowered
-            ),
+            lambda p: p.name.lower() == lowered,
+            lambda p: (p.display_name or "").lower() == lowered,
+            lambda p: self.normalize_plugin_name(p.name) == normalized,
+            lambda p: self.normalize_plugin_name(p.display_name or "") == normalized,
         ):
-            for p in plugins:
-                if predicate(p):
-                    return [p]
+            hit = self._unique([p for p in plugins if key(p)])
+            if hit:
+                return hit
+
+        # 最后一档: 唯一前缀。用户少打几个字也能命中, 但必须只有一解
+        if len(normalized) >= InternalCFG.PLUGIN_NAME_MIN_PREFIX:
+            candidates = [
+                p
+                for p in plugins
+                if self.normalize_plugin_name(p.name).startswith(normalized)
+            ]
+            return self._unique(candidates)
         return []
+
+    @staticmethod
+    def _unique(plugins: list[PluginMetadata]) -> list[PluginMetadata]:
+        """恰好一个才算命中; 0 个或歧义都返回空列表"""
+        return plugins if len(plugins) == 1 else []
 
     def _is_container_match(self, plugin: PluginMetadata, query: str) -> bool:
         """容器匹配: 可见标题 (display_name, 无则回落 name) + 描述

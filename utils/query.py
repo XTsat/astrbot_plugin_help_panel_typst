@@ -58,9 +58,12 @@ def parse_query(raw: str | None) -> Query:
     """解析指令参数
 
     - `s <关键词>` → 搜索
-    - `@<插件名>`  → 按插件名看详情 (稳定引用, 不受编号重排影响)
+    - `@<插件名>` / `<插件名>` → 按插件名看详情 (稳定引用, 不受编号重排影响)
     - `<数字>`     → 按当前编号看详情
-    - 空/其它      → 全量面板
+    - 空           → 全量面板
+
+    `@` 只是可选的显式标记: 用户顺手打 `@` 时不至于被当成插件名的一部分, 不打也照样按
+    名字查 —— 打了一半的名字被静默忽略、直接弹回全量面板, 比查不到更让人困惑。
     """
     text = (raw or "").strip()
     if not text:
@@ -78,7 +81,7 @@ def parse_query(raw: str | None) -> Query:
     if _ORDER_RE.match(digits):
         return Query(QueryIntent.DETAIL_ORDER, str(int(digits)))
 
-    return FULL_QUERY
+    return Query(QueryIntent.DETAIL_NAME, text)
 
 
 def join_plain_parts(parts: list[str]) -> str:

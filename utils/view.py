@@ -39,7 +39,11 @@ class HelpHint:
         两回事, 提示要能直接指出是哪个编号/名字不存在。
         """
         if detail:
-            return f"未找到插件 {detail}，可能已被卸载或屏蔽。发 /helps 重新查看编号。"
+            return (
+                f"未找到插件 {detail}，可能已被卸载或屏蔽。"
+                "插件名可以带或不带 astrbot_plugin_ 前缀；"
+                "发 /helps 可查看完整列表。"
+            )
         target = "事件监听器" if mode == "event" else "插件或指令"
         if query:
             return f"未找到包含 '{query}' 的{target}。"

@@ -423,6 +423,11 @@ class InternalCFG:
     QUOTE_ORDER_MAX_DIGITS: int = 4
     # 插件名稳定查询前缀: /helps @插件名
     PLUGIN_REF_PREFIX: str = "@"
+    # 插件 ID 常见前缀: 有的插件叫 astrbot_plugin_xxx, 有的直接叫 xxx。
+    # 用户记不住哪种, 所以按名字查时两边都归一化后再比, 而不是硬给输入补前缀。
+    PLUGIN_ID_PREFIX: str = "astrbot_plugin_"
+    # 前缀匹配的最短长度: 太短（如 "a"）会命中一堆插件, 属于猜而不是查
+    PLUGIN_NAME_MIN_PREFIX: int = 3
     # 编号能定位到「单个插件」的面板: 只有这两张的编号是插件编号
     # (事件/过滤器面板的编号是事件分组, 引用它们回数字没有插件可打开)
     PLUGIN_ORDER_MODES: tuple[str, ...] = ("command", "command_detail")
