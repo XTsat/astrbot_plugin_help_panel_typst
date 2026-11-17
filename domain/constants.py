@@ -433,8 +433,8 @@ class InternalCFG:
     PLUGIN_ORDER_MODES: tuple[str, ...] = ("command", "command_detail")
     # 会话 → 最近一次发出的面板: 面板图是纯图片, 被引用消息里没有文字可反推面板,
     # 只能靠「这个会话刚发过哪张图」判断。上限与 TTL 防止长期运行无限增长。
+    # TTL 由配置 quote_reply_ttl(分钟) 驱动, 这里只保留会话数上限。
     PANEL_MEMO_MAX_SESSIONS: int = 128
-    PANEL_MEMO_TTL: float = 3600.0
 
     # 分类 (指令模式 /helps) 相关
     # 兜底分类名: 配置缺失/异常时的最终保底 (正常运行时使用 DefaultCFG.DEFAULT_CATEGORY_FALLBACK,
@@ -514,6 +514,10 @@ class DefaultCFG:
     # 1.1 开关与路径的兜底值: 与 _conf_schema.json 同名项的 default 保持一致,
     # 配置面板读取失败或缺项时不会落到另一套默认值上
     ENABLE_WAITING_MESSAGE: bool = False
+    # 引用回复保留时间 (分钟): 面板图发出后, 这段时间内引用它回数字仍可解析。
+    # 0 表示不限制。与 _conf_schema.json 的 quote_reply_ttl 默认值保持一致
+    QUOTE_REPLY_TTL: int = 10
+    MAX_QUOTE_REPLY_TTL: int = 1440
     CUSTOM_FONT_PATH: str = ""
     HEADER_BACKGROUND: str = ""
     BACKGROUND_DIR: str = ""

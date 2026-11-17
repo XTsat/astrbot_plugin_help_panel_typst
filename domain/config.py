@@ -665,6 +665,8 @@ class TypstPluginConfig:
     """插件全局配置聚合根"""
 
     enable_waiting_message: bool
+    # 引用回复保留时间 (分钟): 0 = 不限制
+    quote_reply_ttl: int
     # 面板多选命中的已安装插件（配置面板的勾选项）
     ignored_plugins: set[str]
     # 用户手填的自定义屏蔽名（未安装/旧名），与 ignored_plugins 取并集后生效
@@ -695,6 +697,12 @@ class TypstPluginConfig:
         子配置的解析各自成函数 (见下方 _load_*): 每个函数只读同一份 raw_config,
         互不依赖, 拆分只为让「读一层配置」与「拼装聚合根」分开看。
         """
+        quote_reply_ttl = _as_int(
+            raw_config.get("quote_reply_ttl"),
+            DefaultCFG.QUOTE_REPLY_TTL,
+            0,
+            DefaultCFG.MAX_QUOTE_REPLY_TTL,
+        )
         enable_wait = _as_bool(
             raw_config.get("enable_waiting_message"),
             DefaultCFG.ENABLE_WAITING_MESSAGE,
@@ -725,6 +733,7 @@ class TypstPluginConfig:
 
         return cls(
             enable_waiting_message=enable_wait,
+            quote_reply_ttl=quote_reply_ttl,
             ignored_plugins=ignored_set,
             ignored_plugins_custom=ignored_custom_set,
             custom_font_path=custom_font_path,

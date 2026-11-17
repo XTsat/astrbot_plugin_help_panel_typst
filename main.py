@@ -537,6 +537,20 @@ class HelpTypst(Star):
 
     # ---- 会话面板记忆 ----
 
+    def _panel_memo_ttl(self) -> float:
+        """面板记忆的有效期 (秒); 0 表示不限制
+
+        由配置 quote_reply_ttl(分钟) 驱动: 调小可减少「引用别的插件的图回数字」
+        被误判, 调大则允许引用更久以前的面板图。
+        """
+        minutes = self.plugin_config.quote_reply_ttl
+        return float(minutes) * 60.0 if minutes > 0 else 0.0
+
+    def _is_panel_memo_expired(self, ts: float, now: float) -> bool:
+        """这条记录是否已过期 (TTL 为 0 时永不过期)"""
+        ttl = self._panel_memo_ttl()
+        return ttl > 0 and now - ts > ttl
+
     def _remember_panel(self, event: AstrMessageEvent, mode: str) -> None:
         """记下本会话刚发出的面板
 
@@ -549,7 +563,7 @@ class HelpTypst(Star):
         if len(self._panel_memo) <= InternalCFG.PANEL_MEMO_MAX_SESSIONS:
             return
         for k, (_, ts) in list(self._panel_memo.items()):
-            if now - ts > InternalCFG.PANEL_MEMO_TTL:
+            if self._is_panel_memo_expired(ts, now):
                 self._panel_memo.pop(k, None)
         # 仍然超量: 按时间从旧到新丢, 保留最近的那批
         if len(self._panel_memo) > InternalCFG.PANEL_MEMO_MAX_SESSIONS:
@@ -565,7 +579,7 @@ class HelpTypst(Star):
         if not entry:
             return None
         mode, ts = entry
-        if time.monotonic() - ts > InternalCFG.PANEL_MEMO_TTL:
+        if self._is_panel_memo_expired(ts, time.monotonic()):
             self._panel_memo.pop(event.unified_msg_origin, None)
             return None
         return mode

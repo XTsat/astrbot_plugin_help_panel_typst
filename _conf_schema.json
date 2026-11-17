@@ -5,6 +5,17 @@
     "default": false,
     "hint": "开启后，生成图片时会发送'正在搜索/渲染...'，并在完成后撤回"
   },
+  "quote_reply_ttl": {
+    "description": "引用回复保留时间 (分钟)",
+    "type": "int",
+    "slider": {
+      "min": 0,
+      "max": 1440,
+      "step": 1
+    },
+    "default": 10,
+    "hint": "引用面板图回一个数字即可看插件详情；这里控制「刚发过的面板」在多长时间内仍可这样引用。设 0 表示不限制。调小可减少误判（引用别的插件的图也回数字时），但引用较旧的面板图就失效了"
+  },
   "ignored_plugins": {
     "description": "屏蔽插件",
     "type": "list",
