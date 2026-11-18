@@ -124,6 +124,8 @@ class RenderingConfig:
     prewarm_enabled: bool
     # 插件条目变化检测间隔 (分钟)
     prewarm_interval: int
+    # 编译子进程改用 spawn 启动 (兜底: 规避 fork 继承父进程线程状态导致的崩溃)
+    compile_use_spawn: bool
 
 
 @dataclass
@@ -456,6 +458,10 @@ def _load_rendering(raw_config: AstrBotConfig) -> RenderingConfig:
             DefaultCFG.PREWARM_INTERVAL,
             DefaultCFG.MIN_PREWARM_INTERVAL,
             DefaultCFG.MAX_PREWARM_INTERVAL,
+        ),
+        compile_use_spawn=_as_bool(
+            raw_render.get("compile_use_spawn"),
+            DefaultCFG.COMPILE_USE_SPAWN,
         ),
     )
     return render_cfg

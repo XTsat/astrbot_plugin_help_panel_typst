@@ -329,6 +329,7 @@ class HelpTypst(Star):
 4. **静态产物是「临时 stem + 原子替换」**：编译先写 `temp_<uuid>.png/.webp`，成功后 `os.replace` 成 `cache_menu_*`；不要再改回「编译前先删旧文件」，那会删掉在途请求正在发送的图片。
 5. `rendering.timeout_compile` 与 `rendering.max_concurrent_tasks` 已接入渲染路径（编译外层全局信号量 + `wait_for` 超时）；不要绕过信号量直接调用 `execute_render_task`。
 6. **预热只读不写第二套缓存**：`core/prewarm.py` 一律经 `renderer.render(data_pipeline, mode)` 走正常静态路径（同样的 hash/快照校验、同样的原子替换）；`prewarm_enabled` / `prewarm_interval` 只控制何时触发，**不改变出图**，因此不要加入 `CACHE_SENSITIVE_CONFIGS`。
+7. **进程池启动方式可切**：`_compile_once` 统一经 `TypstRenderer._new_process_pool()` 建池，不要直接 `ProcessPoolExecutor(max_workers=1)`。默认 fork（快）；`rendering.compile_use_spawn` 打开后走 spawn，用于规避「主进程加载了自带线程池的原生库（onnxruntime / OpenBLAS 等）→ fork 出的 worker 在 libc 内 segfault → BrokenProcessPool」这一类宿主环境崩溃。两条路径的产物必须一致，改动编译参数时都要测。该开关**不影响出图内容**，不要加入 `CACHE_SENSITIVE_CONFIGS`。
 
 ### 5.5 字体与背景图
 

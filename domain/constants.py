@@ -539,6 +539,11 @@ class DefaultCFG:
     PREWARM_INTERVAL: int = 5
     MIN_PREWARM_INTERVAL: int = 1
     MAX_PREWARM_INTERVAL: int = 120
+    # 编译子进程启动方式: fork 更快但会继承父进程的线程/锁状态, 若 AstrBot 主进程
+    # 加载过 onnxruntime / OpenBLAS 这类自带线程池的原生库, fork 出的 worker 可能在
+    # libc 内部 segfault (表现为 BrokenProcessPool)。开启后改用 spawn 重新初始化解释器,
+    # 代价是每次编译多几十毫秒启动开销
+    COMPILE_USE_SPAWN: bool = False
 
     # 1.2 配置值收敛区间 (防御手工改坏的配置; 与设置面板 slider 范围对齐)
     MIN_PPI: float = 72.0

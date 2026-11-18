@@ -1,4 +1,5 @@
 import asyncio
+import multiprocessing
 import os
 import random
 import re
@@ -621,6 +622,20 @@ class TypstRenderer:
             except OSError as e:
                 logger.warning(f"[HelpTypst] 清理临时产物失败 {path}: {e}")
 
+    def _new_process_pool(self) -> ProcessPoolExecutor:
+        """按配置创建编译进程池
+
+        默认沿用 fork (启动快); 开启 `compile_use_spawn` 后改用 spawn, 让 worker
+        重新初始化解释器, 不再继承父进程的线程与锁状态 —— 主进程若加载过自带线程池的
+        原生库 (onnxruntime / OpenBLAS 等), fork 出的 worker 可能在 libc 内部崩溃,
+        spawn 是这种情况下唯一可靠的兜底。
+        """
+        if self.cfg.rendering.compile_use_spawn:
+            return ProcessPoolExecutor(
+                max_workers=1, mp_context=multiprocessing.get_context("spawn")
+            )
+        return ProcessPoolExecutor(max_workers=1)
+
     async def _compile_once(self, task: RenderTask, artifact_stem: str) -> list[str]:
         """占一个并发令牌执行一次编译, 并在异常路径决定令牌何时归还
 
@@ -639,7 +654,7 @@ class TypstRenderer:
             logger.warning("[HelpTypst] 等待编译并发令牌超时, 已放弃本次渲染")
             raise
         try:
-            pool = ProcessPoolExecutor(max_workers=1)
+            pool = self._new_process_pool()
         except BaseException:
             self._compile_semaphore.release()
             raise
